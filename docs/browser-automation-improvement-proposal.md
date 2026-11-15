@@ -204,6 +204,13 @@ cannot provide its revision, and the preliminary read cannot count as completed
 extraction. Stale or failed reads stop without replaying an earlier write. This
 repairs ADR-0164's fresh-step contract; it activates no new deployed recipe.
 
+The next W6 repair connects reviewed workflows to ADR-0324 follow-up steering.
+Held owner input retires the recipe before another tool proposal and returns
+planning to the ordinary loop in the same run. Verified progress is retained;
+pending approvals and sent effects finish their existing handling first.
+Unresolved effects remain report-only and are never replayed. This is construction
+within existing authority, not broader workflow or live-site acceptance.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

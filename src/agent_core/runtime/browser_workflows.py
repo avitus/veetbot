@@ -118,6 +118,9 @@ class BrowserWorkflowRunner:
 
     async def __call__(self, context: RunContext) -> RunOutcome | None:
         state = context.checkpoint.working_state.get("browser_workflow")
+        if isinstance(state, dict) and state.get("status") == "steered":
+            # The general loop owns this turn now, including subsequent approval resumes.
+            return None
         if not self._catalog.recipes and state is None:
             return None
         async with context.uow_factory() as uow:
@@ -248,7 +251,9 @@ class BrowserWorkflowRunner:
             # An interrupted write is reconciled below. Only pre-action reads can restart.
             if state["phase"] not in {"action", "verify"}:
                 state.update(phase="start", call_id=None)
-        while state.get("next_step", state["completed_steps"]) < len(recipe.steps):
+        while state["status"] == "running" and state.get(
+            "next_step", state["completed_steps"]
+        ) < len(recipe.steps):
             context.token.raise_if_cancelled()
             if (
                 context.clock.now() >= datetime.fromisoformat(state["expires_at"])
@@ -438,8 +443,30 @@ class BrowserWorkflowRunner:
                 await self._queue(context, state, "read", "browser.observe", args)
             else:
                 await self._queue(context, state, "before_extract", "browser.observe", {})
-        await self._stop(context, state, "verified")
+        if state["status"] == "running":
+            await self._stop(context, state, "verified")
         return None
+
+    async def _yield_to_follow_up(
+        self, context: RunContext, state: dict[str, Any], *, verified: bool = False
+    ) -> bool:
+        if context.checkpoint.pending_tool_calls or (
+            not verified
+            and (
+                state["phase"] in {"action", "verify", "feed_scroll"}
+                or state.get("feed", {}).get("uncertain_scroll", False)
+            )
+        ):
+            return False
+        async with context.uow_factory() as uow:
+            pending = await uow.pending_inputs.list_for_run(context.run.id, context.principal)
+        if not pending:
+            return False
+        # Retire durably before the ordinary loop consumes the inbox. A crash on
+        # either side cannot restart the old recipe or lose the held instruction.
+        state["status"] = "steered"
+        await checkpoint(context, "browser_workflow_progress")
+        return True
 
     async def _read_target_window(
         self, context: RunContext, state: dict[str, Any], arguments: dict[str, str]
@@ -483,6 +510,8 @@ class BrowserWorkflowRunner:
             or context.run.step_count >= context.run.limits.max_steps - 1
         ):
             await self._stop(context, state, "bounded_stop")
+            return
+        if await self._yield_to_follow_up(context, state):
             return
         available = set(context.context_plan.tool_names) | set(
             context.context_plan.deferred_tool_names
@@ -563,6 +592,8 @@ class BrowserWorkflowRunner:
         await checkpoint(context, "browser_workflow_progress")
 
     async def _stop(self, context: RunContext, state: dict[str, Any], status: str) -> None:
+        if status == "verified" and await self._yield_to_follow_up(context, state, verified=True):
+            return
         state["status"] = status
         context.checkpoint.working_state["browser_workflow_report_only"] = True
         await checkpoint(context, "browser_workflow_progress")

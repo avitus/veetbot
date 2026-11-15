@@ -168,3 +168,59 @@ tests and 170 browser contracts. Final browser verification passed all 519 cases
 in 451.21 seconds with no skips or ASGI pending-request teardown diagnostic.
 This records construction coverage, not broader W6 live-site acceptance or
 production availability.
+
+## Follow-ups steer reviewed workflows — 2026-11-14
+
+The ADR-0324 inbox was read by the general model loop only, after the reviewed
+workflow runner had completed. A follow-up could therefore wait while the old
+recipe proposed another action. The runner now checks the existing scoped inbox
+before a new tool proposal and before a verified stop, persists `status: steered`,
+and returns to the ordinary loop without entering report-only mode. That loop
+reads the held input and applies the existing single-request consent invalidation.
+Verified progress, prior call/result pairs and extracted feed evidence survive.
+
+The retirement checkpoint precedes consumption. A restart or later model-action
+approval resume cannot reselect the old recipe, even after its definition or
+profile binding changes. This adds no second inbox consumer, event or authority.
+Budgets and tools remain pinned to the original run. The steering setting and
+existing owner-only admission rules are unchanged.
+
+A pending approved call still finishes through normal resume. An already sent
+action or feed scroll retains its read-only reconciliation before handoff.
+Unverified and uncertain outcomes preserve report-only handling, with unread
+follow-ups settled by ADR-0324's terminal rules. No follow-up resolves an approval,
+interrupts an in-flight call, abandons an effect or replays one. Bounded stops
+and cancellation keep their existing precedence.
+
+This repairs the interaction between decisions 4/5 and ADR-0324. No new ADR,
+public schema, dependency, deployed recipe, milestone gate or engineering-plan
+deviation is introduced. Broader live-site acceptance remains separate.
+
+Construction evidence in the local Linux ARM64 sandbox:
+
+- Red: `make test-static
+  PYTEST_ARGS=tests/unit/test_browser_workflow_steering.py` failed because the
+  old recipe requested an action approval after a follow-up had been queued.
+  The regression now passes with no action proposal and one follow-up read in
+  the original run.
+- The final focused workflow/steering suite passed 79 cases, including nine
+  new cases. They cover handoff after navigation and target observation,
+  call/result pairing, retained progress, approval waits, response loss,
+  unverified effects, restart fencing and the reviewed feed's uncertain-scroll
+  boundary. An earlier 91-case workflow regression run also passed.
+- `make test-browser-cases
+  CASES=tests/unit/test_browser_workflow_steering_real_chromium.py` passed four
+  cases. Server counters record zero effects for a pre-action follow-up, one
+  after ordinary approval, and one after a lost response. Missing completion
+  evidence remains unverified and cannot consume the follow-up in that
+  report-only run or resend the effect.
+
+Broader construction checks passed 1,517 browser/steering static tests and 173
+contracts, including the pending-input repository contract, plus lint, type
+checking, citation reconciliation and strict documentation checks. Reading lane A
+matches the diff-derived minimum. The existing steering activation setting is
+unchanged; no production or broader W6 acceptance is claimed.
+
+The full browser partition passed all 405 cases with no skips in 450.43 seconds,
+using two workers and the established 64 MiB process stack. No ASGI pending-request
+teardown diagnostic was emitted. This is local construction evidence.

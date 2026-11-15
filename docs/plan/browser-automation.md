@@ -2201,6 +2201,22 @@ then a verified or explicitly unverified stop. Final reporting cannot issue more
 tools. The workflow cap is 64 calls and reserves one ordinary run step for the
 report. These are ceilings, not additional budget allowances.
 
+With ADR-0324 follow-ups, the runner checks for held owner input before proposing
+another tool call and before a verified stop. It checkpoints `status: steered`
+and returns to the ordinary run loop, which consumes the inbox, ends single-request
+consent and plans with the new instruction. Completed steps and bounded feed
+evidence remain in working state. A retired recipe cannot restart on a later
+approval resume, even if its catalog or profile binding changed. The handoff does
+not reset budgets or tools, create a second run, or resolve an approval.
+
+Pending approved calls finish through their existing pipeline. An action or feed
+scroll already dispatched retains its read-only reconciliation before handoff;
+uncertain or unverified outcomes keep the report-only stop, leaving unread
+follow-ups to ADR-0324's terminal settlement. No tool call is abandoned or replayed,
+and a follow-up never appears between a call and its result. The retirement
+checkpoint precedes inbox consumption so a restart cannot resume the old recipe
+after consuming the new direction.
+
 An extraction step first queues its own ordinary `browser.observe` and persists
 the `before_extract` phase. Only that successful, uninterrupted, same-origin
 result supplies the extraction revision; conversation history cannot substitute
