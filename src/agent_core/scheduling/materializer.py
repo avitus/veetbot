@@ -42,6 +42,7 @@ from agent_core.domain.schedules import (
 )
 from agent_core.domain.sessions import (
     SESSION_BROWSER_PROFILE_METADATA_KEY,
+    SESSION_COCKPIT_ENTRY_REFRESH_METADATA_KEY,
     SESSION_COCKPIT_REFRESH_METADATA_KEY,
     SESSION_SCHEDULE_ID_METADATA_KEY,
     SESSION_SCHEDULE_MCP_SERVERS_METADATA_KEY,
@@ -496,6 +497,7 @@ class ScheduleMaterializer:
                 now,
                 trigger=OccurrenceTrigger.MANUAL,
                 manual_request_key=key,
+                metadata={SESSION_COCKPIT_ENTRY_REFRESH_METADATA_KEY: True},
             )
             await self._append_occurrence_event(uow, occurrence, schedule, schedule.state, now)
             self._write_probe("process_event")

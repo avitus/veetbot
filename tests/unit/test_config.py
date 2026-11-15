@@ -1194,13 +1194,13 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_226_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_228_versioned_knobs_are_present_and_non_null() -> None:
     """Keep the declared configuration inventory exact and fully populated."""
 
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 226
+    assert len(qualified_paths) == 228
     assert {
         "tools/limits.yaml:mcp.warmup_connect_timeout_seconds",
         "tools/limits.yaml:mcp.warmup_retry_seconds",
@@ -1454,6 +1454,15 @@ def test_owner_call_permission_defaults_on_and_can_be_disabled() -> None:
     assert disabled.call_owner_requests_enabled is False
     with pytest.raises(ConfigurationError, match="AGENT_CALL_OWNER_REQUESTS_ENABLED"):
         load_settings(_hosted(AGENT_CALL_OWNER_REQUESTS_ENABLED="yes"))
+
+
+def test_call_result_follow_up_defaults_on_and_can_be_disabled() -> None:
+    """ADR-0325: the kill switch leaves call results to the push alone."""
+    assert load_settings(_hosted()).call_result_follow_up_enabled is True
+    disabled = load_settings(_hosted(AGENT_CALL_RESULT_FOLLOW_UP_ENABLED="0"))
+    assert disabled.call_result_follow_up_enabled is False
+    with pytest.raises(ConfigurationError, match="AGENT_CALL_RESULT_FOLLOW_UP_ENABLED"):
+        load_settings(_hosted(AGENT_CALL_RESULT_FOLLOW_UP_ENABLED="yes"))
 
 
 def test_task_grant_scopes_parse_and_refuse() -> None:

@@ -1,6 +1,7 @@
 # ADR-0303: Every Mac mail list scrolls
 
-- Status: Accepted (chosen by the repository owner, 2026-11-06)
+- Status: Accepted (chosen by the repository owner, 2026-11-06). Amended by
+  ADR-0326: touch lists scroll in 100-row pages too.
 - Date: 2026-11-06
 - Related: ADR-0231, ADR-0234; Milestone 26
 - Amends: ADR-0231's five-row Inbox pagination, on macOS only

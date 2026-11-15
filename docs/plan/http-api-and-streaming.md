@@ -893,6 +893,8 @@ An assistant item carries a `file` block for each file its run exported
 block whose artifact is expired or gone, as after `artifact.delete` (ADR-0277).
 The event keeps the reference. A reply left with no block still counts toward the
 page and moves the cursor, so a page can hold fewer items than its limit.
+The `calling`-authored `user.message.created` event that seeds a call report
+(ADR-0325) is context-only and produces no transcript item.
 The scheduler-authored `user.message.created` event that seeds a scheduled run
 is context-only and does not produce a transcript item; its complete
 instruction remains available through the authorized schedule point read. Tool
@@ -1047,14 +1049,16 @@ explicit input delivery can have it.
 ### Follow-ups to a working run (ADR-0324)
 
 With `AGENT_RUN_STEERING_ENABLED` set, the third row of the table splits.
-The run is steerable when it is a top-level interactive run and the caller
-is its principal.
+The run is steerable when it is a top-level interactive run, the caller is
+its principal, and the principal's own message seeded it. A run the platform
+seeded, such as the call report (ADR-0325), is not steerable: it holds only
+the scopes its note needs.
 
 | Active run | Result |
 | --- | --- |
 | steerable; `QUEUED`, `RUNNING`, `WAITING_FOR_APPROVAL` | held as a follow-up, `202` |
 | steerable, eight follow-ups already pending | `conflict`, `409`, `pending_input_limit` |
-| child, scheduled or delegated run, or another principal | `conflict`, `409`, `active_run_exists` |
+| child, scheduled, delegated or platform-seeded run, or another principal | `conflict`, `409`, `active_run_exists` |
 
 A follow-up is text. An `image` or `file` block is `malformed_request`, and
 the client keeps staged attachments for the next initiating message. The

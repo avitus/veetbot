@@ -242,6 +242,10 @@ page summarizes and does not claim a milestone complete.
   (ADR-0213); `AGENT_CALL_OWNER_REQUESTS_ENABLED=0` restores the card, and a
   scheduled call carries calling authority only when its schedule was
   created with `place_call`.
+- A finished call is reported in the conversation that placed it by an
+  unattended run that holds only the call-reading scope (ADR-0325). Its
+  report is untrusted call content, so a later call from that conversation
+  needs the card. `AGENT_CALL_RESULT_FOLLOW_UP_ENABLED=0` turns it off.
 
 ## Production delivery controls
 

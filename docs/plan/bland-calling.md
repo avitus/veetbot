@@ -227,6 +227,36 @@ dispatch is the prompt-based form above.
 The agent has no post-call setting: outbound results arrive through the
 per-call callback and inbound results through the number's callback.
 
+### Result in the conversation (ADR-0325)
+
+A call the owner asks for in Chat is reported in that conversation. Each
+dispatch is marked `follow_up: wanted` at creation; one without the marker is
+never reported. The maintenance pass reads marked dispatches every pass, using
+only the closed status and whether content has arrived. Once the status is
+final it queues one run in the placing conversation and records `queued` on
+the dispatch in the same transaction.
+
+The run holds exactly `mcp.bland_read.use`, so it reads the call through
+`get_call` and cannot place one. Its seed is a `user.message.created` event
+with actor type `calling`: the time the call was placed, the closed outcome, a
+reference to the call, a request to report, and a statement that the record is
+untrusted. The reference is the call identifier spelled in the letters `g` to
+`v`; the governed `get_call` accepts it in place of the identifier. The seed
+carries no call content and no digit run the owner-request check could read as
+a number. Like the scheduler's seed it is context only, so
+conversation reads and the event stream omit it.
+
+The pass reports only a call placed by the owner's own message in an open,
+top-level chat. It skips scheduled conversations, call plans and chats bound
+to a website profile. It waits while the conversation has an active run, and
+up to three minutes for a missing summary. Thirty minutes after the call ended
+it records `expired` and the push is the only notice.
+`AGENT_CALL_RESULT_FOLLOW_UP_ENABLED=0` turns the report off.
+
+The report run takes no follow-ups (ADR-0324). A message sent while it works
+is refused with `active_run_exists`, as before steering, because the run
+holds no scope to act on the owner's next request.
+
 The server's stderr is not a private channel: the API or worker process that
 spawns the child passes on its own stderr, so anything the child logs lands in
 that service's journal. The package therefore holds HTTP transport logging at

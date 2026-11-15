@@ -336,6 +336,7 @@ from agent_core.application.browser_task_grants import (
     sweep_expired_task_grants,
 )
 from agent_core.application.call_authorization import OwnerCallAuthorizer
+from agent_core.application.call_follow_ups import CallResultFollowUps
 from agent_core.application.call_plans import CallPlanSweep
 from agent_core.application.call_worker import CallWorker
 from agent_core.application.calling import CallService
@@ -1190,6 +1191,7 @@ class Composition:
     attachment_resolver: AttachmentResolver | None = None
     people_repair: PeopleDirectoryRepair | None = None
     call_plans: CallPlanSweep | None = None
+    call_follow_ups: CallResultFollowUps | None = None
     # The Cockpit builder and its own sandbox manager, only behind the flag (M35).
     cockpit_builder: WidgetBuilder | None = None
     cockpit_sandbox: SandboxManager | None = None
@@ -5920,6 +5922,18 @@ async def _compose(
             and settings.schedule_worker_enabled
             else None
         )
+        call_follow_ups = (
+            CallResultFollowUps(
+                uow_factory=uow_factory,
+                dispatcher=dispatcher,
+                clock=clock,
+                ids=ids,
+                principal=principal,
+                seed_checkpoint=checkpoint_seeder,
+            )
+            if settings.call_enabled and settings.call_result_follow_up_enabled
+            else None
+        )
 
         async def sweep_device_invocations() -> int:
             async with uow_factory() as uow:
@@ -6432,6 +6446,9 @@ async def _compose(
                     sweep_call_plans=(
                         call_plan_sweep.run_once if call_plan_sweep is not None else None
                     ),
+                    sweep_call_follow_ups=(
+                        call_follow_ups.run_once if call_follow_ups is not None else None
+                    ),
                     **({} if cockpit_maintenance is None else cockpit_maintenance.sweeps()),
                     sweep_folder_proposals=(
                         folder_proposal_pass.run_once if folder_proposal_pass is not None else None
@@ -6510,6 +6527,7 @@ async def _compose(
                 judgment_provider=judgment_provider,
                 people_repair=people_repair,
                 call_plans=call_plan_sweep,
+                call_follow_ups=call_follow_ups,
             ),
             list(effective_providers.values()),
         )

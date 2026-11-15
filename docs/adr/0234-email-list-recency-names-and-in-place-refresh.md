@@ -1,6 +1,7 @@
 # ADR-0234: Email list in recency order, named correspondents and refresh in place
 
-- Status: Accepted — owner requested on 2026-10-21
+- Status: Accepted — owner requested on 2026-10-21. Amended by ADR-0326:
+  Inbox and its collections select rows by latest activity, not rank.
 - Date: 2026-10-21
 - Related: ADR-0092, ADR-0095, ADR-0231
 - Detailed design: `docs/plan/email-experience.md`

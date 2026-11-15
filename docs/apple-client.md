@@ -940,7 +940,9 @@ for the whole thread; its
 the draft. Elsewhere a "Teach Veetbot" card on `paperDeep` below the
 conversation opens into the same scoped
 feedback (thread, person, kind of content; Important / Less important; reply
-need) and reports what was applied with Undo. Topic feedback uses selectable
+need). Importance and reply need are two separate choices: each row marks the
+choice made, both can be chosen for one thread, and each reports what was
+applied with its own Undo. Topic feedback uses selectable
 chips and still requires an explicit topic. The thread menu offers Mark handled
 and Mark not handled separately from Archive in Gmail. The reply opens with "Your reply"
 in the display face and its save state at the trailing edge. From, To and the
@@ -1016,7 +1018,9 @@ Save on an attachment keeps a copy in the email's chat (ADR-0296), where it arri
 a reply and appears in Artifacts. The control then reads "Saved to chat" until the
 connection resets; a file over 32 MB says so instead, and a failure offers Retry.
 Feedback distinguishes people, topics, thread importance and reply need, reports
-the applied scope and judgment, and supports Undo. Changing the target clears
+the applied scope and judgment, and supports Undo. An importance judgment and a
+reply-need judgment stand side by side; neither replaces the other's
+acknowledgment or Undo. Changing the target clears
 the previous person or topic value; person feedback requires an explicit choice.
 Learning controls expose pause/resume, scoped resets and explicit source
 exclusion. Draft edits autosave

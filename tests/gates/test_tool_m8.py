@@ -50,6 +50,7 @@ from agent_core.ports.mcp import MCPClientFactory
 from agent_core.tools.executor import PIPELINE_STEP_SEQUENCE
 from agent_core.tools.registry import StaticToolRegistry
 from scripts.architecture_checks import architecture_errors
+from tests.architecture_scan import repository_architecture_errors
 from tests.contract.support import tool_context
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -711,7 +712,7 @@ async def test_mcp_disconnect() -> None:
 
 
 def test_mcp_sdk_confined(tmp_path: Path) -> None:
-    errors = architecture_errors(ROOT)
+    errors = repository_architecture_errors()
     assert not [error for error in errors if "MCP SDK" in error]
     violating = tmp_path / "src" / "agent_core" / "runtime" / "violation.py"
     violating.parent.mkdir(parents=True)

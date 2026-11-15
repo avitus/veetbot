@@ -19,6 +19,7 @@ from agent_core.domain.calls import (
     CallRecord,
     ProviderCall,
     call_identifier,
+    call_identifier_from,
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.mcp import MCPCallResult
@@ -38,6 +39,8 @@ _HEX = frozenset("0123456789abcdef")
 # Neither the proxy nor the listener keeps an access log, so each delivery leaves
 # one fixed, content-free outcome at a level the unconfigured service still emits.
 logger = logging.getLogger(__name__)
+
+CALL_FOLLOW_UP_WANTED = "wanted"
 
 
 def _rejected(reason: str) -> bool:
@@ -98,7 +101,9 @@ class CallService:
                 if name == "list_calls":
                     return result(await self.list_calls(context.principal, **arguments))
                 if name == "get_call":
-                    return result(await self.get_call(context.principal, **arguments))
+                    # ADR-0325: a platform note names its call by a lettered reference.
+                    named = {**arguments, "call_id": call_identifier_from(arguments.get("call_id"))}
+                    return result(await self.get_call(context.principal, **named))
             except (ValueError, TypeError, NotFoundError):
                 return failure("bland.call_not_found")
             return failure("bland.tool_unavailable")
@@ -148,6 +153,9 @@ class CallService:
                     ).hexdigest(),
                     "run_id": str(context.run_id),
                     "session_id": str(context.session_id),
+                    # ADR-0325: only a call dispatched with this marker is reported in
+                    # its conversation, so no earlier call is reported after a deploy.
+                    "follow_up": CALL_FOLLOW_UP_WANTED,
                 },
             )
         # Keep the executor watermark and reservation durable before network I/O.

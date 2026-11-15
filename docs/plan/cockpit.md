@@ -653,8 +653,10 @@ one run, now, of each active, recurring, feed-keeping schedule:
 - **Checks.** Authority, scopes, the pinned agent and tenant admission are
   checked as for Run-now. A failed check reports `refused` with its reason
   for that schedule, and the others still start.
-- **Notifications.** A completed refresh run sends no report notification. A
-  failed one notifies as any scheduled run does.
+- **Notifications.** A refresh run sends no report notification, whatever its
+  outcome (ADR-0320). Its session carries the reserved marker
+  `cockpit_entry_refresh: true`, and a failed job run is reported on its tile
+  ([a failed run](#a-failed-run-shows-on-its-tile-adr-0320)).
 
 Platform feeds are not re-projected, because the projector already publishes
 their changes every thirty seconds. The answer is `202` with one
@@ -1508,6 +1510,20 @@ existing cadence, admission, failure pause and notification paths remain in
 use. Feed grants select quiet-on-success reports. Disabling jobs fails typed
 runs explicitly without falling through to an agent run. See [the operator
 guide](../jobs.md) for activation and examples.
+
+### A failed run shows on its tile (ADR-0320)
+
+One `job.http.request` waits ten seconds at most for name resolution, its
+credential, the connection and the whole response. Past that it fails as
+`job.service_unavailable`, retryable, so a stalled host is an error the program
+can handle instead of the end of its run.
+
+When a run that is not a trial ends as failed, each feed its grant may publish
+receives one snapshot that repeats the feed's last value, observation time and
+expected interval, with the error "The last refresh did not finish." The kit
+renders it as the tile's `error` freshness, and the next successful publish
+clears it. The reason is logged, never stored in the feed. A feed with no value
+yet stays pending. Failing to record the mark never hides the run's failure.
 
 ### One approval for widget installation (ADR-0270)
 

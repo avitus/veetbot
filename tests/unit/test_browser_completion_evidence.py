@@ -1,5 +1,6 @@
 """Positive completion evidence must never cause an action to be repeated."""
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -243,6 +244,38 @@ async def test_one_stale_verification_read_is_reconciled_without_repeating_the_a
     assert result.ok and result.structured is not None
     assert result.structured["condition"]["status"] == "satisfied"
     assert len(provider.actions) == 1 and provider.captures == 2
+
+
+async def test_an_unmet_check_starts_no_read_a_slow_earlier_read_shows_cannot_finish() -> None:
+    """One quick read does not show the next will be quick: the slowest read decides."""
+
+    class Provider(EvidenceProvider):
+        text = "Pending"
+        # The third read would outlast the bound; the first already took longer than is left.
+        seconds = (0.15, 0.01, 5.0)
+        captures = 0
+
+        async def observe(self) -> BrowserObservation:
+            self.captures += 1
+            await asyncio.sleep(self.seconds[self.captures - 1])
+            return await super().observe()
+
+    provider = Provider()
+    result = await BrowserActTool(provider).execute(
+        {
+            "kind": "click",
+            "expected_revision": "revision-1",
+            "ref": "element-1",
+            "postcondition": {
+                "evidence": {"kind": "text", "text": "Saved successfully"},
+                "timeout_ms": 1000,
+            },
+        },
+        tool_context(),
+    )
+    assert result.ok and result.structured is not None, result.failure
+    assert result.structured["condition"]["status"] == "not_observed"
+    assert len(provider.actions) == 1 and provider.captures <= 2
 
 
 @pytest.mark.parametrize(

@@ -25,7 +25,8 @@ outputs:
 ---
 name: integration
 discover: >-
-  make -s test-integration PYTEST_ARGS="--collect-only -q"
+  make -s test-integration
+  PYTEST_ARGS="--collect-only -q tests/integration tests/native tests/resilience tests/security"
   | sed -nE 's#^(tests/[^:[:space:]]+\.py)::.*#\1#p' | sort -u
 run: >-
   make test-integration

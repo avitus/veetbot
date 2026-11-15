@@ -540,16 +540,14 @@ public struct EmailModeView: View {
 
     @ViewBuilder private var inboxList: some View {
         #if os(macOS)
-        if model.scrollsMailList {
-            scrollingList
-        } else {
-            pagedList
-        }
+        scrollingList
         #else
         pagedList
         #endif
     }
 
+    /// Touch keeps the List rows and fetches the next page as its end scrolls into view;
+    /// a failed page offers the press that retries it (ADR-0326).
     private var pagedList: some View {
         List {
             inboxNotices
@@ -557,13 +555,22 @@ public struct EmailModeView: View {
                 inboxRow(thread)
                     .modifier(EmailRowChrome(selected: thread.id == model.selectedThreadID))
             }
-            if model.hasMore {
+            if model.hasMore && model.pagingFailed {
                 Button(model.listView == "priority" ? "More important" : "More mail") {
                     Task { await model.loadMore() }
                 }
                 .buttonStyle(QuietCapsuleButtonStyle())
                 .disabled(model.isLoading).padding(.vertical, 8)
                 .emailHideSeparator()
+            } else if model.hasMore {
+                ProgressView()
+                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+                    // Re-runs once a read in flight ends, so a skipped fetch is not lost. The fetch
+                    // runs in its own task: it flips this identity itself, and a fetch owned by the
+                    // view task would be cancelled by its own start and never apply its page.
+                    .task(id: model.isLoading || model.isReadingList) { Task { await model.loadMore() } }
+                    .accessibilityIdentifier("email.list.loading-more")
+                    .emailHideSeparator()
             }
         }
         .animation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.15), value: model.items.map(\.id))
@@ -596,7 +603,7 @@ public struct EmailModeView: View {
             } action: { _, nearEnd in nearListEnd = nearEnd }
             .onChange(of: nearListEnd && model.hasMore && !model.isLoading && !model.isReadingList && !model.pagingFailed,
                       initial: true) { _, shouldLoad in
-                if shouldLoad { Task { if model.scrollsMailList { await model.loadMore() } } }
+                if shouldLoad { Task { await model.loadMore() } }
             }
             .onReceive(model.restoreScrollAnchor) { id in
                 // Apply the new row order before positioning the conversation back at the top.
@@ -619,7 +626,7 @@ public struct EmailModeView: View {
                 Text(error).veetType(.ui).foregroundColor(AppTheme.inkSoft)
                 Button("Try again") {
                     Task {
-                        await model.reload(preserveOrder: model.scrollsMailList)
+                        await model.reload(preserveOrder: true)
                         await model.refresh()
                     }
                 }
@@ -2041,15 +2048,20 @@ struct EmailTeachCard: View {
                     .veetType(.meta).foregroundColor(AppTheme.inkFaint)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let message = model.feedbackMessage {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "checkmark").veetType(.meta, weight: .semibold)
-                    Text(message).veetType(.meta)
-                    if model.feedbackID != nil {
-                        Button("Undo") { Task { await model.undoFeedback() } }
+            // Importance and reply need each keep their own line and their own Undo.
+            ForEach(EmailFeedbackKind.allCases, id: \.self) { kind in
+                if let given = model.feedbackGiven[kind] {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: "checkmark").veetType(.meta, weight: .semibold)
+                        Text(given.message).veetType(.meta)
+                        Button("Undo") { Task { await model.undoFeedback(kind) } }
                             .buttonStyle(.plain).veetType(.meta, weight: .medium).foregroundColor(AppTheme.tealText)
-                    }
-                }.foregroundColor(AppTheme.inkSoft)
+                            .accessibilityIdentifier("email.feedback-undo.\(kind.rawValue)")
+                    }.foregroundColor(AppTheme.inkSoft)
+                }
+            }
+            if model.feedbackGiven.isEmpty, let message = model.feedbackMessage {
+                Label(message, systemImage: "checkmark").veetType(.meta).foregroundColor(AppTheme.inkSoft)
             }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -2095,34 +2107,43 @@ struct EmailTeachCard: View {
             }
             TextField("Explain what matters (optional)", text: $explanation, prompt: .a2Prompt("Explain what matters (optional)")).focused(explanationFocused)
                 .textFieldStyle(.plain).a2Field()
+            Text("Is it important?").veetType(.meta).foregroundColor(AppTheme.inkSoft)
             HStack(spacing: 8) {
-                Button("Important") {
-                    Task {
-                        await model.giveFeedback(
-                            target: target, judgment: "important", explanation: explanation, targetValue: targetValue)
-                    }
-                }
-                .accessibilityIdentifier("email.feedback-important")
-                Button("Less important") {
-                    Task {
-                        await model.giveFeedback(
-                            target: target, judgment: "less_important", explanation: explanation,
-                            targetValue: targetValue)
-                    }
-                }
-                .accessibilityIdentifier("email.feedback-less-important")
-            }.buttonStyle(SecondaryCapsuleButtonStyle())
+                choice("Important", judgment: "important", identifier: "email.feedback-important")
+                choice("Less important", judgment: "less_important", identifier: "email.feedback-less-important")
+            }
                 .disabled(target == .person && targetValue.isEmpty)
                 .disabled(target == .topic && !(model.thread?.feedbackTopics ?? []).contains(targetValue))
             HairlineDivider()
             Text("Does this thread need a reply?").veetType(.meta).foregroundColor(AppTheme.inkSoft)
             HStack(spacing: 8) {
-                Button("Needs reply") { Task { await model.giveFeedback(target: .thread, judgment: "needs_reply") } }
-                Button("No reply needed") {
-                    Task { await model.giveFeedback(target: .thread, judgment: "no_reply_needed") }
-                }
-            }.buttonStyle(QuietCapsuleButtonStyle())
+                choice("Needs reply", judgment: "needs_reply", identifier: "email.feedback-needs-reply")
+                choice("No reply needed", judgment: "no_reply_needed", identifier: "email.feedback-no-reply")
+            }
         }.veetType(.ui).disabled(model.isPerformingAction).padding(.top, 4)
+    }
+
+    /// One choice in a row. The two rows are separate judgments, so a choice in one never clears
+    /// the other; a row marks the choice already given for the scope now showing.
+    private func choice(_ title: String, judgment: String, identifier: String) -> some View {
+        let kind = EmailFeedbackKind(judgment: judgment)
+        let scope = kind == .replyNeed ? EmailFeedbackTarget.thread : target
+        let value = kind == .replyNeed || target == .thread ? "" : targetValue
+        let given = model.feedbackGiven[kind]
+        let chosen = given?.judgment == judgment && given?.target == scope && given?.targetValue == value
+        return Button(title) {
+            Task {
+                if kind == .replyNeed {
+                    await model.giveFeedback(target: .thread, judgment: judgment)
+                } else {
+                    await model.giveFeedback(
+                        target: target, judgment: judgment, explanation: explanation, targetValue: targetValue)
+                }
+            }
+        }
+        .buttonStyle(FilterPillButtonStyle(selected: chosen))
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+        .accessibilityIdentifier(identifier)
     }
 
 }

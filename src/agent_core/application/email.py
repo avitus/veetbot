@@ -486,7 +486,17 @@ class EmailExperienceService:
             if view in collections and not collections[view]:
                 continue
             eligible.append(thread)
-        eligible.sort(key=lambda item: (-item.priority, -item.updated_at.timestamp(), str(item.id)))
+        if view in {"priority", "other", "all"}:
+            # The rank selects Important, Other mail and search results (ADR-0234).
+            eligible.sort(
+                key=lambda item: (-item.priority, -item.updated_at.timestamp(), str(item.id))
+            )
+        else:
+            # Inbox and its collections page by latest activity, so a page is
+            # never Important's top-ranked conversations again (ADR-0326).
+            eligible.sort(
+                key=lambda item: (-item.updated_at.timestamp(), -item.priority, str(item.id))
+            )
         start = int(cursor or "0")
         page = eligible[start : start + limit]
         return {

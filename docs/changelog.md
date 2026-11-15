@@ -4,6 +4,22 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-14 — Chat tells you how a call went (ADR-0325)
+
+- After a call you ask for in Chat ends, Chat adds a message to the same
+  conversation saying whether the person answered, it reached voicemail, nobody
+  picked up or the call failed, and what was said.
+- The message usually follows the end of the call by a minute or two. The
+  "New call result" notification still arrives as before.
+
+## 2026-11-13 — A failed widget refresh shows on its tile (ADR-0320)
+
+- Opening Cockpit no longer sends a "Run failed" notification when a widget's
+  refresh fails. The tile shows that its last refresh did not finish and keeps
+  its last value. A failed scheduled refresh still notifies.
+- One web request from a widget's job waits ten seconds at most, so a stalled
+  source is an error the job can report instead of the end of its run.
+
 ## 2026-11-09 — HTML email stays readable
 
 - HTML-only messages with retained HTML no longer display stylesheet code above

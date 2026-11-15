@@ -284,6 +284,7 @@ class MaintenanceWorker:
         sweep_conversation_titles: Callable[[], Awaitable[int]] | None = None,
         sweep_browser_continuations: Callable[[], Awaitable[int]] | None = None,
         sweep_call_plans: Callable[[], Awaitable[int]] | None = None,
+        sweep_call_follow_ups: Callable[[], Awaitable[int]] | None = None,
         sweep_cockpit_outbox: Callable[[], Awaitable[int]] | None = None,
         sweep_cockpit_import: Callable[[], Awaitable[int]] | None = None,
         sweep_cockpit_events: Callable[[], Awaitable[int]] | None = None,
@@ -326,6 +327,7 @@ class MaintenanceWorker:
         self._sweep_conversation_titles = sweep_conversation_titles
         self._sweep_browser_continuations = sweep_browser_continuations
         self._sweep_call_plans = sweep_call_plans
+        self._sweep_call_follow_ups = sweep_call_follow_ups
         self._sweep_cockpit_outbox = sweep_cockpit_outbox
         self._sweep_cockpit_import = sweep_cockpit_import
         self._sweep_cockpit_events = sweep_cockpit_events
@@ -464,6 +466,12 @@ class MaintenanceWorker:
                 await self._sweep_call_plans()
             except Exception:
                 logger.exception("call plan sweep failed")
+        # Every pass: the owner is waiting to hear how the call went (ADR-0325).
+        if self._sweep_call_follow_ups is not None:
+            try:
+                await self._sweep_call_follow_ups()
+            except Exception:
+                logger.exception("call follow-up sweep failed")
         # Every pass: an accepted widget waits for its commit, and entries back off themselves.
         if self._sweep_cockpit_outbox is not None:
             try:

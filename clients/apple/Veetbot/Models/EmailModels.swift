@@ -341,6 +341,24 @@ public enum EmailFeedbackTarget: String, CaseIterable, Sendable {
     }
 }
 
+/// The two separate judgments the owner can give on a thread.
+public enum EmailFeedbackKind: String, CaseIterable, Sendable {
+    case importance, replyNeed
+
+    public init(judgment: String) {
+        self = judgment == "needs_reply" || judgment == "no_reply_needed" ? .replyNeed : .importance
+    }
+}
+
+/// One judgment the owner gave on the open thread: what to mark as chosen, what to say, what to undo.
+public struct EmailFeedbackGiven: Equatable, Sendable {
+    public let id: UUID
+    public let judgment: String
+    public let target: EmailFeedbackTarget
+    public let targetValue: String
+    public let message: String
+}
+
 public struct EmailLearningState: Codable, Sendable {
     public let paused: Bool
     public let profileRevision: Int

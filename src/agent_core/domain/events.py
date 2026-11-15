@@ -34,6 +34,13 @@ TOOL_CALL_DENIED_PAYLOAD_VERSION = 2
 CONVERSATION_MESSAGE_EVENTS = frozenset({"user.message.created", "assistant.message.completed"})
 SCHEDULE_INSTRUCTION_EVENT_TYPE = "user.message.created"
 SCHEDULE_INSTRUCTION_ACTOR_TYPE = "scheduler"
+# ADR-0325: the platform's note that a call placed from this conversation ended.
+CALL_RESULT_SEED_ACTOR_TYPE = "calling"
+# Seeds the platform wrote for a run's context. They are not the owner's
+# message, so conversation reads and the event stream leave them out.
+CONTEXT_ONLY_SEED_ACTOR_TYPES = frozenset(
+    {SCHEDULE_INSTRUCTION_ACTOR_TYPE, CALL_RESULT_SEED_ACTOR_TYPE}
+)
 
 
 def advances_session_activity(event: NewEvent) -> bool:
@@ -112,6 +119,15 @@ def is_schedule_instruction_event(event: EventEnvelope) -> bool:
     return (
         event.event_type == SCHEDULE_INSTRUCTION_EVENT_TYPE
         and event.actor_type == SCHEDULE_INSTRUCTION_ACTOR_TYPE
+    )
+
+
+def is_context_only_seed_event(event: EventEnvelope) -> bool:
+    """Return whether an event is a platform-written seed no conversation read shows."""
+
+    return (
+        event.event_type == SCHEDULE_INSTRUCTION_EVENT_TYPE
+        and event.actor_type in CONTEXT_ONLY_SEED_ACTOR_TYPES
     )
 
 

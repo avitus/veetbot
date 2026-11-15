@@ -3799,6 +3799,70 @@ import SwiftUI
         #expect(model.feedbackID == nil)
     }
 
+    /// Importance and reply need are separate judgments: giving one keeps the other chosen,
+    /// each with its own Undo.
+    @Test func testImportanceAndReplyNeedAreHeldTogether() async throws {
+        let requests = EmailRequestRecorder()
+        let importanceID = UUID(), replyID = UUID()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("/feedback") {
+                let judgment = (try? Self.archiveRequestBody(request))?["judgment"] as? String
+                let id = judgment == "important" ? importanceID : replyID
+                return (200, "{\"feedback_id\":\"\(id)\",\"thread\":\(self.threadJSON())}")
+            }
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON()) }
+            return (200, self.threadJSON())
+        }
+        await model.openThread(threadID)
+        await model.giveFeedback(target: .thread, judgment: "important")
+        await model.giveFeedback(target: .thread, judgment: "needs_reply")
+        #expect(model.feedbackGiven[.importance]?.judgment == "important")
+        #expect(model.feedbackGiven[.importance]?.message == "Marked this thread as important.")
+        #expect(model.feedbackGiven[.importance]?.id == importanceID)
+        #expect(model.feedbackGiven[.replyNeed]?.judgment == "needs_reply")
+        #expect(model.feedbackGiven[.replyNeed]?.message == "This thread needs a reply.")
+        #expect(model.feedbackGiven[.replyNeed]?.id == replyID)
+
+        await model.undoFeedback(.importance)
+        let undone = requests.snapshot.filter { $0.httpMethod == "DELETE" }.map { $0.url!.lastPathComponent.lowercased() }
+        #expect(undone == [importanceID.uuidString.lowercased()])
+        #expect(model.feedbackGiven[.importance] == nil)
+        #expect(model.feedbackGiven[.replyNeed]?.id == replyID)
+
+        model.clearSelection()
+        #expect(model.feedbackGiven.isEmpty)
+    }
+
+    /// A judgment answered after the owner opened another thread must not appear on that thread.
+    @Test func testFeedbackAnsweredAfterAnotherThreadOpensStaysOffThatThread() async throws {
+        let other = UUID()
+        let gate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            if request.url!.path.hasSuffix("/feedback") {
+                return (200, "{\"feedback_id\":\"\(self.threadID)\",\"thread\":\(self.threadJSON())}", gate)
+            }
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.url!.path.hasSuffix("threads") { return (200, self.pageJSON(), nil) }
+            if request.url!.path.hasSuffix(other.uuidString) {
+                return (200, self.threadJSON().replacingOccurrences(of: self.threadID.uuidString, with: other.uuidString), nil)
+            }
+            return (200, self.threadJSON(), nil)
+        }
+        defer { gate.release(); model.resetConnection() }
+        await model.openThread(threadID)
+        let pending = Task { await model.giveFeedback(target: .thread, judgment: "important") }
+        try await waitForEmailTestCondition { gate.isWaiting }
+        await model.openThread(other)
+        gate.release()
+        await pending.value
+        #expect(model.selectedThreadID == other)
+        #expect(model.feedbackGiven.isEmpty, "Another thread must not show this judgment or its Undo")
+        #expect(model.feedbackMessage == nil)
+        #expect(model.feedbackID == nil)
+    }
+
     /// Foreground arrivals appear immediately without reordering surviving rows or disturbing edits.
     @Test func testRefreshInsertsNewThreadsWithoutChangingSelection() async throws {
         let requests = EmailRequestRecorder()

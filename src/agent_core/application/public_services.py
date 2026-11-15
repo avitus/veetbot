@@ -108,7 +108,7 @@ from agent_core.domain.events import (
     NewEvent,
     ProcessEvent,
     conversation_items,
-    is_schedule_instruction_event,
+    is_context_only_seed_event,
 )
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
 from agent_core.domain.memory import (
@@ -1030,6 +1030,13 @@ class PublicRunService:
             or (browser_profile_id is not None and str(browser_profile_id) != bound_profile)
         ):
             return None
+        seed = await uow.events.latest_before(
+            session.id, active.seed_event_sequence + 1, "user.message.created", principal
+        )
+        if seed is not None and seed.run_id == active.id and is_context_only_seed_event(seed):
+            # A run the platform seeded holds its own narrow scopes (ADR-0325's call
+            # report reads one call); the owner's request must not be handed to it.
+            return None
         if not text_only:
             raise AttachmentValidationError(
                 "A follow-up to a working run is text only; send files with the next message."
@@ -1613,7 +1620,7 @@ class PublicRunService:
                 current, events = await self._events_after(principal, run_id, watermark)
                 for event in events:
                     watermark = max(watermark, event.sequence)
-                    if is_schedule_instruction_event(event):
+                    if is_context_only_seed_event(event):
                         continue
                     if event.event_type == "assistant.message.completed":
                         answer_delivered = True

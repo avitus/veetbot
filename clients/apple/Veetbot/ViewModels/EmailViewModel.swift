@@ -118,6 +118,9 @@ public final class EmailViewModel: ObservableObject {
     private let toasts: ToastCenter
     @Published public private(set) var styleExampleMessage: String?
     @Published public private(set) var feedbackID: UUID?
+    /// The owner's standing choices on the open thread. Importance and reply need are separate
+    /// judgments, so each keeps its own acknowledgment and its own Undo.
+    @Published public private(set) var feedbackGiven: [EmailFeedbackKind: EmailFeedbackGiven] = [:]
     @Published public private(set) var hasMore = false
     @Published public private(set) var selectedAccountID: String?
     @Published public private(set) var listView = "priority"
@@ -141,15 +144,8 @@ public final class EmailViewModel: ObservableObject {
     /// The visible Mac row, independent of the conversation open in the reader.
     var scrollAnchor: UUID?
     let restoreScrollAnchor = PassthroughSubject<UUID, Never>()
-    /// Every Mac list loads 100 rows a page and scrolls; touch pages by five (ADR-0303).
-    var scrollsMailList: Bool {
-        #if os(macOS)
-        true
-        #else
-        false
-        #endif
-    }
-    private var pageSize: Int { scrollsMailList ? 100 : 5 }
+    /// Every list on every device loads 100 rows a page and scrolls (ADR-0303, ADR-0326).
+    private let pageSize = 100
 
     /// Do not search later pages for a row already confirmed absent from the current list.
     private var eligibleScrollAnchor: UUID? {
@@ -480,6 +476,7 @@ public final class EmailViewModel: ObservableObject {
         feedbackMessage = nil
         styleExampleMessage = nil
         feedbackID = nil
+        feedbackGiven = [:]
         learning = nil
         revisions = []
         refreshKey = nil
@@ -708,6 +705,7 @@ public final class EmailViewModel: ObservableObject {
             hasMore = false
             nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             hasMore = nextCursor != nil
+            pagingFailed = false
             cacheMailList()
         } catch {
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
@@ -921,6 +919,7 @@ public final class EmailViewModel: ObservableObject {
         feedbackMessage = nil
         styleExampleMessage = nil
         feedbackID = nil
+        feedbackGiven = [:]
     }
 
     /// Refreshes a thread without overwriting local edits or clearing unrelated action failures.
@@ -1223,27 +1222,41 @@ public final class EmailViewModel: ObservableObject {
             let result = try await api.emailFeedback(thread: thread, target: target, judgment: judgment,
                                                     explanation: explanation, targetValue: targetValue, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return }
-            feedbackID = result.feedbackID
             cachedMailLists = [:]
-            switch judgment {
-            case "needs_reply": feedbackMessage = "This thread needs a reply."
-            case "no_reply_needed": feedbackMessage = "This thread needs no reply."
-            default:
-                let scope = target == .topic ? (targetValue ?? target.title.lowercased()) : target.title.lowercased()
-                feedbackMessage = "Marked \(scope) as \(judgment.replacingOccurrences(of: "_", with: " "))."
+            // The owner may have opened another thread while this was in flight: the
+            // acknowledgment and its Undo belong to the thread that was judged.
+            if selectedThreadID == thread.id {
+                feedbackID = result.feedbackID
+                let message: String
+                switch judgment {
+                case "needs_reply": message = "This thread needs a reply."
+                case "no_reply_needed": message = "This thread needs no reply."
+                default:
+                    let scope = target == .topic ? (targetValue ?? target.title.lowercased()) : target.title.lowercased()
+                    message = "Marked \(scope) as \(judgment.replacingOccurrences(of: "_", with: " "))."
+                }
+                feedbackMessage = message
+                // A later judgment of the same kind replaces its own row only; the other kind stays.
+                feedbackGiven[EmailFeedbackKind(judgment: judgment)] = EmailFeedbackGiven(
+                    id: result.feedbackID, judgment: judgment, target: target, targetValue: targetValue ?? "",
+                    message: message)
             }
             await reload(preserveOrder: true)
             if selectedThreadID == thread.id { await openThread(thread.id, refreshOnly: true) }
         } catch { if generation == connection { report(error, draft: true) } }
     }
 
-    public func undoFeedback() async {
-        guard let feedbackID, let api = makeAPIClient() else { return }
+    /// Undo one kind of judgment and leave the other standing. Without a kind, undo the latest.
+    public func undoFeedback(_ kind: EmailFeedbackKind? = nil) async {
+        let kind = kind ?? feedbackGiven.first { $0.value.id == feedbackID }?.key
+        guard let id = kind.flatMap({ feedbackGiven[$0]?.id }) ?? feedbackID, let api = makeAPIClient() else { return }
         let connection = generation
+        let selection = selectedThreadID
         do {
-            _ = try await api.undoEmailFeedback(feedbackID, idempotencyKey: UUID().uuidString)
+            _ = try await api.undoEmailFeedback(id, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return }
-            self.feedbackID = nil
+            if feedbackID == id { feedbackID = nil }
+            if selectedThreadID == selection, let kind, feedbackGiven[kind]?.id == id { feedbackGiven[kind] = nil }
             cachedMailLists = [:]
             feedbackMessage = "Feedback undone."
             await reload(preserveOrder: true)

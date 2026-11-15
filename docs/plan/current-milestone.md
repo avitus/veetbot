@@ -4,6 +4,12 @@ title: Current Milestone
 
 # Current milestone
 
+- **Chat reports a finished call — ADR-0325:** On 2026-11-14 the owner found that
+  Chat never said how a call went and asked for the fix. Bland's post-call
+  callbacks already delivered every result; nothing wrote it to the conversation.
+  [The decision](../adr/0325-chat-reports-a-finished-call.md) queues one read-only
+  run in the placing conversation. Implemented with offline tests; production
+  and a live call remain pending. No milestone or gate moves.
 - **Steering a working chat — ADR-0324:** On 2026-11-13 the owner asked to steer
   a working chat with a follow-up, settled the draft's open questions and accepted
   [the decision](../adr/0324-follow-ups-steer-a-running-run.md), authorizing its
