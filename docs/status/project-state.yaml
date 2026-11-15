@@ -1,3 +1,6 @@
+# ADR-0327: Owner-authorized W3/W6 continuation adds region-scoped workflow
+# targets through existing focused reads and the four-window discovery bound.
+# Ordinary approval and non-replay rules remain; no milestone or gate moves.
 # ADR-0164 follow-up: Owner-authorized W4/W6 continuation preserves positive
 # failure evidence in reviewed workflows without replay or later actions.
 # Missing/conflicting evidence stays unverified; no milestone or gate moves.

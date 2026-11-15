@@ -36,10 +36,13 @@ def _intent(value: str) -> str:
 
 
 def _definition(recipe: BrowserWorkflowRecipe) -> str:
-    # Omitted optional branching must not change legacy recipe/checkpoint identity.
+    # Omitted optional fields must not change legacy recipe/checkpoint identity.
     excluded = {
         "steps": {
-            index: {"branches"} for index, step in enumerate(recipe.steps) if step.branches is None
+            index: {
+                field for field in ("branches", "target_region") if getattr(step, field) is None
+            }
+            for index, step in enumerate(recipe.steps)
         }
     }
     return hashlib.sha256(recipe.model_dump_json(exclude=excluded).encode()).hexdigest()
@@ -348,7 +351,32 @@ class BrowserWorkflowRunner:
                         },
                     )
                     continue
+                if state["phase"] == "before_region":
+                    assert step.target_region is not None
+                    regions = [
+                        region
+                        for region in observed.regions
+                        if region.kind == step.target_region.region_kind
+                        and not region.text_truncated
+                        and " ".join(region.text.split())
+                        == " ".join(step.target_region.text.split())
+                    ]
+                    if len(regions) != 1:
+                        await self._stop(
+                            context, state, "ambiguous_region" if regions else "region_not_observed"
+                        )
+                        return None
+                    if not await self._read_target_window(
+                        context,
+                        state,
+                        {"region_ref": regions[0].ref, "expected_revision": observed.revision},
+                    ):
+                        return None
+                    continue
                 if state["phase"] == "before_action":
+                    if step.target_region is not None and observed.focus is None:
+                        await self._stop(context, state, "unverified")
+                        return None
                     targets = [
                         element
                         for element in observed.elements
@@ -440,7 +468,12 @@ class BrowserWorkflowRunner:
             if step.kind == "navigate":
                 await self._queue(context, state, "read", "browser.navigate", {"url": step.url})
             elif step.kind == "act":
-                if not await self._read_target_window(context, state, {}):
+                if not await self._read_target_window(
+                    context,
+                    state,
+                    {},
+                    phase="before_region" if step.target_region is not None else "before_action",
+                ):
                     return None
             elif step.kind == "observe":
                 args = (
@@ -477,7 +510,12 @@ class BrowserWorkflowRunner:
         return True
 
     async def _read_target_window(
-        self, context: RunContext, state: dict[str, Any], arguments: dict[str, str]
+        self,
+        context: RunContext,
+        state: dict[str, Any],
+        arguments: dict[str, str],
+        *,
+        phase: str = "before_action",
     ) -> bool:
         step_index = state.get("next_step", state["completed_steps"])
         search = state.get("target_search")
@@ -499,7 +537,7 @@ class BrowserWorkflowRunner:
             return False
         search["windows"] += 1
         # _queue persists this allowance with the pending read before dispatch.
-        await self._queue(context, state, "before_action", "browser.observe", arguments)
+        await self._queue(context, state, phase, "browser.observe", arguments)
         return bool(state["status"] == "running")
 
     async def _queue(

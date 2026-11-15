@@ -218,6 +218,13 @@ outcome can advance to another action or replay a sent effect; an already
 observed failure avoids an unnecessary verification read. ADR-0164 records the
 construction evidence; broader live-site acceptance remains separate.
 
+The next W3/W6 slice adds reviewed region constraints to action target discovery.
+A unique complete semantic-region match selects an ordinary revision-bound
+focused read before matching the action control. The same four-window allowance,
+approval checks and non-replay rules apply; missing focus never falls back to
+global controls. ADR-0327 records the construction contract and evidence.
+No deployed recipe or broader live-site acceptance changes.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

@@ -2275,6 +2275,20 @@ Once dispatch begins, uncertainty only follows existing read-only reconciliation
 it cannot restart target discovery or resend the action. Public tools, live
 policy/grant checks, approvals and the deployed recipe catalog are unchanged.
 
+[ADR-0327](../adr/0327-region-scoped-browser-workflow-targets.md) lets a reviewed
+action declare `target_region` with the existing closed region-evidence shape
+(`kind: region`, `region_kind`, complete normalized `text`). A fresh observation
+must contain exactly one matching non-truncated region; missing or duplicate
+matches stop as `region_not_observed` or `ambiguous_region`. The runner then
+queues ordinary `browser.observe(region_ref, expected_revision)` from that
+result. Focus metadata must survive the focused result and its control
+continuations; no global target fallback is allowed. The initial region read,
+focus read and control expansion share the same four-window per-action budget,
+persisted across resumption and generation changes. Once a target is found,
+ordinary approval, fresh revision checks and read-only reconciliation apply.
+The optional field is limited to action steps, changes definition identity when
+present, and preserves legacy digests when omitted. No deployed recipe changes.
+
 The shipped catalog includes the reviewed X home-feed briefing below; private
 account definitions remain deployment-owned. Engineering-owned definitions
 require site-specific fixtures and review before activation. Users do not author
