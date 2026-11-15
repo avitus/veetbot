@@ -211,6 +211,13 @@ pending approvals and sent effects finish their existing handling first.
 Unresolved effects remain report-only and are never replayed. This is construction
 within existing authority, not broader workflow or live-site acceptance.
 
+The next W4/W6 repair preserves positive declared failure evidence as
+`observed_failure` in unbranched reviewed waits, action results and read-only
+reconciliation. Missing or conflicting evidence stays `unverified`. Neither
+outcome can advance to another action or replay a sent effect; an already
+observed failure avoids an unnecessary verification read. ADR-0164 records the
+construction evidence; broader live-site acceptance remains separate.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

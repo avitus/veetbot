@@ -224,3 +224,50 @@ unchanged; no production or broader W6 acceptance is claimed.
 The full browser partition passed all 405 cases with no skips in 450.43 seconds,
 using two workers and the established 64 MiB process stack. No ASGI pending-request
 teardown diagnostic was emitted. This is local construction evidence.
+
+## Preserve observed workflow failure — 2026-11-14
+
+Decisions 1 and 4 distinguish positive failure evidence from an inconclusive
+outcome. Unbranched reviewed steps previously flattened both into `unverified`,
+and an action's positive failure result triggered an unnecessary reconciliation
+read. The runner now retains `observed_failure` for a successful, uninterrupted,
+same-origin result whose condition reports the recipe's declared failure evidence.
+This applies to observe steps, action responses and read-only reconciliation
+after response loss. The failed step does not advance, and final reporting uses
+the existing tool evidence without another action or approval.
+
+Missing, conflicting and undeclared failure evidence remain unverified. Existing
+explicit observe branches retain ADR-0314's routing; action outcomes cannot
+branch. Failure evidence does not prove that a dispatched effect was unsent and
+does not change the effect ledger. Both terminal outcomes remain report-only,
+including when an owner follow-up is held. No schema, recipe, permission,
+dependency, milestone gate or engineering-plan requirement changes; this repairs
+the existing decision and requires no new ADR.
+
+Construction evidence in the local Linux ARM64 sandbox:
+
+- Red: `make test-static
+  PYTEST_ARGS=tests/unit/test_browser_workflow_failure.py` failed three cases
+  because ordinary observation, action response and lost-response reconciliation
+  reported `unverified` instead of positively observed failure. Nine negative
+  controls already passed.
+- The focused workflow suite passed all 74 cases, including twelve new cases.
+  Missing/conflicting evidence and undeclared failure markers cannot establish
+  failure; no failed step reaches a later action. A direct positive failure
+  avoids the additional reconciliation read.
+- `make test-browser-cases
+  CASES=tests/unit/test_browser_workflow_failure_real_chromium.py` passed six
+  cases. Visible failure survives both an ordinary action response and response
+  loss. Conflicting success/failure markers and hidden failure text remain
+  unverified. Every fixture records exactly one approved server effect, no
+  later action, and a tool-free final report; the visible failure evidence
+  reaches the final model request.
+
+Broader construction checks passed 1,529 browser/steering static tests and 173
+contracts, plus lint, type checking, citation reconciliation and strict
+documentation checks. Reading lane A matches the diff-derived minimum. No
+production or broader W4/W6 live-site acceptance is claimed.
+
+The full browser partition passed all 411 cases with no skips in 457.78 seconds,
+using two workers and the established 64 MiB process stack. No ASGI pending-request
+teardown diagnostic was emitted. This is local construction evidence.

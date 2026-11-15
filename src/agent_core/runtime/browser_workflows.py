@@ -308,9 +308,10 @@ class BrowserWorkflowRunner:
                     if (
                         observed is None
                         or observed.condition is None
-                        or observed.condition.status != "satisfied"
+                        or observed.condition.status not in {"satisfied", "failed"}
                     ):
-                        # Once dispatched, missing/failed/uncertain evidence leads only to a read.
+                        # Missing or inconclusive evidence leads only to a read.
+                        # Positive success/failure evidence needs no reconciliation.
                         assert step.postcondition is not None
                         await self._queue(
                             context,
@@ -411,7 +412,14 @@ class BrowserWorkflowRunner:
                     await checkpoint(context, "browser_workflow_progress")
                     continue
                 if observed.condition is not None and observed.condition.status != "satisfied":
-                    await self._stop(context, state, "unverified")
+                    terminal_status = (
+                        "observed_failure"
+                        if observed.condition.status == "failed"
+                        and step.postcondition is not None
+                        and step.postcondition.failure_evidence is not None
+                        else "unverified"
+                    )
+                    await self._stop(context, state, terminal_status)
                     return None
                 if step.postcondition is not None and observed.condition is None:
                     await self._stop(context, state, "unverified")

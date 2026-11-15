@@ -2201,6 +2201,15 @@ then a verified or explicitly unverified stop. Final reporting cannot issue more
 tools. The workflow cap is 64 calls and reserves one ordinary run step for the
 report. These are ceilings, not additional budget allowances.
 
+A successful, uninterrupted same-origin result with a declared positive failure
+condition ends an unbranched observe/action step as `observed_failure`, including
+read-only reconciliation after response loss. An action response already carrying
+that evidence needs no further reconciliation read. Missing, conflicting or
+undeclared failure evidence remains `unverified`. Neither outcome advances the
+failed step, runs later actions, clears a sent effect or permits replay; both
+retain tool-free reporting from the existing evidence. Explicit observe branches
+retain their separate forward-only routing contract below.
+
 With ADR-0324 follow-ups, the runner checks for held owner input before proposing
 another tool call and before a verified stop. It checkpoints `status: steered`
 and returns to the ordinary run loop, which consumes the inbox, ends single-request

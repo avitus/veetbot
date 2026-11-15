@@ -1,3 +1,6 @@
+# ADR-0164 follow-up: Owner-authorized W4/W6 continuation preserves positive
+# failure evidence in reviewed workflows without replay or later actions.
+# Missing/conflicting evidence stays unverified; no milestone or gate moves.
 # ADR-0164/0324 follow-up: Owner-authorized W6 continuation connects reviewed
 # workflows to held owner input at safe tool boundaries. Sent effects keep
 # verification and uncertain outcomes stay report-only. No gate or milestone moves.
