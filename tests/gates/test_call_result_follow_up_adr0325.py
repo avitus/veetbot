@@ -19,6 +19,7 @@ from agent_core.domain.errors import ConflictError
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
 from agent_core.domain.runs import Run, RunStatus
 from agent_core.domain.views import TextContentBlock
+from agent_core.ports.dispatch import RunDispatcher
 from tests.contract.test_bland_client_contract import CALL_ID, RECIPIENT
 from tests.gates.test_call_lifecycle import arguments
 from tests.gates.test_owner_requested_calls import (
@@ -332,30 +333,53 @@ async def test_a_follow_up_is_never_steered_into_the_read_only_report_run() -> N
     assert finished.final_message == REPORT
 
 
-class _FailingDispatcher(_HeldDispatcher):
+class _FailsFirstDispatcher(_HeldDispatcher):
+    """Refuse the first report and start the rest."""
+
+    def __init__(self, inner: RunDispatcher) -> None:
+        self.inner = inner
+        self.attempted: list[UUID] = []
+
     async def dispatch(self, run_id: UUID) -> None:
-        raise RuntimeError("dispatch unavailable")
+        self.attempted.append(run_id)
+        if len(self.attempted) == 1:
+            raise RuntimeError("dispatch unavailable")
+        await self.inner.dispatch(run_id)
 
 
 async def test_a_dispatch_failure_does_not_end_the_pass() -> None:
     """One report that cannot start must not hold back the other calls in the pass."""
     factory = await call_factory(read_tools=True)
+    script = FakeModelScript(
+        turns=[*turns(report=False), *turns(report=False), *turns()[2:], *turns()[2:]]
+    )
     async with build(
         settings=call_settings(),
-        script=FakeModelScript(turns=turns()),
+        script=script,
         fixed_clock_at=NOW,
         sequential_ids=True,
         mcp_client_factory=factory,
     ) as app:
         assert app.call_follow_ups is not None
-        call_run = await place(app)
-        await settle(app, call_run, "completed")
-        dispatcher = app.call_follow_ups._dispatcher
-        app.call_follow_ups._dispatcher = _FailingDispatcher()
+        # One call is active at a time, so the first ends before the second is placed.
+        first_call = await place(app)
+        await settle(app, first_call, "completed")
+        second_call = await place(app)
+        await settle(app, second_call, "completed")
+        assert first_call.session_id != second_call.session_id
+        real = app.call_follow_ups._dispatcher
+        failing = _FailsFirstDispatcher(real)
+        app.call_follow_ups._dispatcher = failing
 
-        assert await app.call_follow_ups.run_once() == 0
-        [_, report] = await session_runs(app, call_run.session_id)
-        await dispatcher.dispatch(report.id)
-        finished = await asyncio.wait_for(app.runs.wait_terminal(report.id), timeout=5)
+        assert await app.call_follow_ups.run_once() == 1
+        refused, started = failing.attempted
+        reported = await asyncio.wait_for(app.runs.wait_terminal(started), timeout=5)
+        await real.dispatch(refused)
+        late = await asyncio.wait_for(app.runs.wait_terminal(refused), timeout=5)
 
-    assert finished.final_message == REPORT
+    assert reported.final_message == REPORT
+    assert late.final_message == REPORT
+    assert {reported.session_id, late.session_id} == {
+        first_call.session_id,
+        second_call.session_id,
+    }
