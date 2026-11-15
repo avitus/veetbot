@@ -378,3 +378,4 @@ implementation without one.
 - [ADR-0325: Chat reports a finished call in the conversation that placed it (Accepted)](0325-chat-reports-a-finished-call.md)
 - [ADR-0326: Every mail list scrolls, collections page newest first, and catch-up continues above the share (Accepted)](0326-every-list-scrolls-and-catch-up-continues.md)
 - [ADR-0327: Region-scoped targets in reviewed browser workflows (Accepted)](0327-region-scoped-browser-workflow-targets.md)
+- [ADR-0328: Check pinned capabilities before selecting a browser workflow (Accepted)](0328-browser-workflow-capability-preflight.md)

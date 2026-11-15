@@ -1,3 +1,7 @@
+# ADR-0328: Owner-authorized W6 continuation checks pinned tool capabilities
+# before recipe selection performs any browser work. Unsupported recipes use
+# ordinary planning; current authorization and non-replay rules remain unchanged.
+# No deployed recipe, milestone or gate moves.
 # ADR-0327: Owner-authorized W3/W6 continuation adds region-scoped workflow
 # targets through existing focused reads and the four-window discovery bound.
 # Ordinary approval and non-replay rules remain; no milestone or gate moves.

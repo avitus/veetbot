@@ -2201,6 +2201,20 @@ then a verified or explicitly unverified stop. Final reporting cannot issue more
 tools. The workflow cap is 64 calls and reserves one ordinary run step for the
 report. These are ceilings, not additional budget allowances.
 
+[ADR-0328](../adr/0328-browser-workflow-capability-preflight.md) checks the single
+unambiguous intent/origin match against the run's pinned advertised and deferred
+tools before creating workflow state or making a call. Every required name and
+argument shape must be supported, including literal extraction fields/limits,
+region focus and read-only action reconciliation. The existing local argument
+validator checks non-executed reference/revision placeholders and reviewed values;
+it does not call a provider or decide authorization. All declared branch steps
+are checked. Feed collection uses the same capability check for its article
+extraction and bounded scroll shapes. An incompatible recipe returns to ordinary
+planning with no partial execution or report-only restriction. Capability
+differences never disambiguate matching intents. Started workflows retain their
+existing resume and binding rules, and actual calls still revalidate current
+policy, schemas, budgets, revisions and approvals.
+
 A successful, uninterrupted same-origin result with a declared positive failure
 condition ends an unbranched observe/action step as `observed_failure`, including
 read-only reconciliation after response loss. An action response already carrying

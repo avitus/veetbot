@@ -225,6 +225,13 @@ approval checks and non-replay rules apply; missing focus never falls back to
 global controls. ADR-0327 records the construction contract and evidence.
 No deployed recipe or broader live-site acceptance changes.
 
+The next W6 slice checks reviewed recipes against pinned tool capabilities before
+selection starts any browser work. Unsupported tools or argument modes return to
+ordinary planning; ambiguous intents remain ambiguous. ADR-0328 covers deferred
+tools, legacy schemas, region focus, extraction, branches and feed collection.
+Normal dispatch checks and uncertain-effect handling remain in force. No deployed
+recipe or broader live-site acceptance changes.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

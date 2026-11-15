@@ -16,12 +16,17 @@ from agent_core.domain.browser import (
     browser_origin,
 )
 from agent_core.domain.browser_workflows import BrowserWorkflowCatalog, BrowserWorkflowRecipe
-from agent_core.domain.errors import ConflictError, NotFoundError, UserInputRequiredError
+from agent_core.domain.errors import (
+    ConflictError,
+    NotFoundError,
+    ToolValidationError,
+    UserInputRequiredError,
+)
 from agent_core.domain.messages import TextPart, ToolCallItem, ToolResultItem, UserMessage
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import BudgetScope, RunOutcome, Step
 from agent_core.domain.sessions import SESSION_BROWSER_PROFILE_METADATA_KEY
-from agent_core.domain.tools import ToolOutcome
+from agent_core.domain.tools import ToolOutcome, ToolSpec
 from agent_core.runtime.loop import (
     RunContext,
     apply_tool_evidence,
@@ -29,6 +34,7 @@ from agent_core.runtime.loop import (
     recover_browser_failure,
     with_event_sequences,
 )
+from agent_core.tools.validation import validate_and_normalize
 
 
 def _intent(value: str) -> str:
@@ -55,6 +61,108 @@ def _condition(condition: BrowserCondition) -> dict[str, Any]:
             for field in evidence.get("fields", []):
                 field.pop("required", None)
     return value
+
+
+def _supports_recipe(
+    recipe: BrowserWorkflowRecipe, available: set[str], specs: tuple[ToolSpec, ...]
+) -> bool:
+    """Check pinned argument shapes only; placeholders never reach a provider."""
+    schemas = {spec.name: spec.input_schema for spec in specs}
+    placeholder = "0" * 32
+    calls: list[tuple[str, dict[str, Any]]] = []
+    for step in recipe.steps:
+        if step.kind == "navigate":
+            calls.append(("browser.navigate", {"url": step.url}))
+            continue
+        if step.kind == "observe":
+            calls.append(
+                (
+                    "browser.observe",
+                    {}
+                    if step.postcondition is None
+                    else {"wait_for": _condition(step.postcondition)},
+                )
+            )
+            continue
+        calls.append(("browser.observe", {}))
+        if step.kind == "act":
+            assert step.postcondition is not None
+            if step.target_region is not None:
+                calls.append(
+                    (
+                        "browser.observe",
+                        {"region_ref": placeholder, "expected_revision": placeholder},
+                    )
+                )
+            calls.extend(
+                [
+                    (
+                        "browser.act",
+                        {
+                            "kind": step.action,
+                            "expected_revision": placeholder,
+                            "ref": placeholder,
+                            **step.action_values(),
+                            "postcondition": _condition(step.postcondition),
+                        },
+                    ),
+                    ("browser.observe", {"wait_for": _condition(step.postcondition)}),
+                ]
+            )
+        elif step.kind == "extract":
+            calls.append(
+                (
+                    "browser.observe",
+                    {
+                        "extract": {
+                            "expected_revision": placeholder,
+                            "kind": step.collection_kind,
+                            "index": step.index,
+                            "fields": [field.model_dump() for field in step.fields],
+                            "row_limit": step.row_limit,
+                        }
+                    },
+                )
+            )
+        elif step.kind == "collect_feed":
+            from agent_core.runtime.browser_feed import FIELDS, HOME
+
+            calls.extend(
+                [
+                    (
+                        "browser.observe",
+                        {
+                            "extract": {
+                                "expected_revision": placeholder,
+                                "kind": "articles",
+                                "fields": FIELDS,
+                                "row_limit": 3,
+                            }
+                        },
+                    ),
+                    (
+                        "browser.act",
+                        {
+                            "kind": "scroll",
+                            "expected_revision": placeholder,
+                            "ref": placeholder,
+                            "delta_y": 1557,
+                            "postcondition": {
+                                "evidence": {"kind": "location", "url": HOME},
+                                "timeout_ms": 0,
+                            },
+                        },
+                    ),
+                ]
+            )
+    for name, arguments in calls:
+        if name not in available or name not in schemas:
+            return False
+        try:
+            validate_and_normalize(arguments, schemas[name])
+        except ToolValidationError:
+            return False
+    return True
 
 
 def _observation(result: ToolResultItem | None) -> BrowserObservation | None:
@@ -165,23 +273,17 @@ class BrowserWorkflowRunner:
                     text in {_intent(intent) for intent in recipe.intents}
                     or digest in recipe.intent_sha256
                 )
-                and (
-                    not any(step.kind == "collect_feed" for step in recipe.steps)
-                    or any(
-                        spec.name == "browser.observe"
-                        and "articles"
-                        in spec.input_schema.get("properties", {})
-                        .get("extract", {})
-                        .get("properties", {})
-                        .get("kind", {})
-                        .get("enum", [])
-                        for spec in context.context_plan.pinned_tool_specs
-                    )
-                )
             ]
             if len(candidates) != 1 or profile.status is not BrowserProfileStatus.READY:
                 return None
             recipe = candidates[0]
+            if not _supports_recipe(
+                recipe,
+                set(context.context_plan.tool_names)
+                | set(context.context_plan.deferred_tool_names),
+                context.context_plan.pinned_tool_specs,
+            ):
+                return None
             state = {
                 "id": recipe.id,
                 "definition": _definition(recipe),
