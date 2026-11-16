@@ -62,7 +62,8 @@ collection and the default on each switch into Email; this supersedes
 ADR-0231's Inbox default. On every device every list, Inbox, Needs you, Handled,
 Important, Other mail and search results alike, loads up to 100 threads per
 page and scrolls (ADR-0303, ADR-0326). Account badges and an account filter identify the source
-of each conversation.
+of each conversation. Inbox omits threads whose effective priority is below 0.1;
+Needs you still lists low-ranked reply requests (owner-requested, ADR-0329).
 
 Each row shows the correspondent, subject, a concise statement of what needs
 attention, and a state such as Needs reply, Draft ready, or For your attention.

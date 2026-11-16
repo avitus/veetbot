@@ -107,6 +107,9 @@ from agent_core.ports.skills import SkillCatalog
 
 logger = logging.getLogger(__name__)
 
+# Inbox omits conversations ranked below this; Needs you still lists them (ADR-0329).
+INBOX_RELEVANCE_FLOOR = 0.1
+
 
 async def records(store: EmailStore, principal: Principal, kind: str) -> AsyncIterator[EmailRecord]:
     after: str | None = None
@@ -475,7 +478,7 @@ class EmailExperienceService:
                 and thread.suspected_spam
                 and not thread.spam_cleared
                 and not thread.in_spam,
-                "inbox": thread.in_inbox,
+                "inbox": thread.in_inbox and thread.priority >= INBOX_RELEVANCE_FLOOR,
                 "needs_you": thread.in_inbox and thread.needs_reply and not handled,
                 "handled": thread.in_inbox and handled,
             }

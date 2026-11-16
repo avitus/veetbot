@@ -467,4 +467,5 @@ nav:
       - "ADR-0326: Every mail list scrolls and catch-up continues": adr/0326-every-list-scrolls-and-catch-up-continues.md
       - "ADR-0327: Region-scoped browser workflow targets": adr/0327-region-scoped-browser-workflow-targets.md
       - "ADR-0328: Browser workflow capability preflight": adr/0328-browser-workflow-capability-preflight.md
+      - "ADR-0329: Inbox relevance floor": adr/0329-inbox-relevance-floor.md
   - Changelog: changelog.md

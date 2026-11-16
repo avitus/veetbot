@@ -4,6 +4,7 @@
 - Date: 2026-10-20
 - Amended 2026-11-10: the owner requested Important as the initial collection
   and on each switch into Email, superseding the Inbox default below.
+- Amended 2026-11-16 by ADR-0329: Inbox omits threads ranked below 0.1.
 - Related: ADR-0092, ADR-0095
 - Detailed design: `docs/plan/email-experience.md`
 
