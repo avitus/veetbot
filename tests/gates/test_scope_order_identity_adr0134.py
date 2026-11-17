@@ -107,9 +107,15 @@ def test_the_production_plan_has_one_identity_under_every_hash_seed() -> None:
 
     identities = {tuple(result["identity"]) for result in observed.values()}
     assert all(result["status"] == "COMPLETED" for result in observed.values()), observed
-    # The roster still carries the sets this guards: email.feedback and email.unsubscribe.
+    # All multi-scope tools participate, including the offline artifact build.
     assert all(
-        result["scopes"] == [["email.read", "email.write"]] * 2 for result in observed.values()
+        result["scopes"]
+        == [
+            ["artifact.write", "sandbox.execute", "workspace.write"],
+            ["email.read", "email.write"],
+            ["email.read", "email.write"],
+        ]
+        for result in observed.values()
     ), observed
     assert len(identities) == 1, observed
     [(prefix_sha256, _schema_sha256)] = identities

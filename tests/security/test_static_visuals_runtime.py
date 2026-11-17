@@ -28,13 +28,72 @@ from agent_core.domain.errors import NotFoundError
 from agent_core.domain.execution import ExecutionCommand, ResourceLimits
 from agent_core.execution.manager import SandboxManager
 from agent_core.execution.visuals import MEDIA_TYPES
+from agent_core.tools.artifact_build import ArtifactBuildTool
 from agent_core.tools.artifact_export import ArtifactExportTool
+from agent_core.tools.artifact_read_guide import ArtifactReadGuideTool
 from tests.contract.support import tool_context
 from tests.gates.test_artifact_m6 import _settings
 from tests.unit.test_static_visuals import CHART, DIAGRAM
 
 pytestmark = [pytest.mark.integration, pytest.mark.sandbox]
 RUN_ID = UUID(int=243)
+
+
+async def test_one_offline_build_renders_and_delivers_the_bundled_example(
+    visual_sandbox: SandboxManager,
+    tmp_path: Path,
+) -> None:
+    guide = await ArtifactReadGuideTool().execute({"section": "build"}, tool_context())
+    assert guide.structured is not None
+    package = json.loads(guide.structured["text"].split("```json\n", 1)[1].split("```", 1)[0])
+    async with build(settings=_settings(tmp_path), sequential_ids=True) as composition:
+        writer = ArtifactWriterFactory(
+            composition.uow_factory,
+            FilesystemArtifactStore(composition.settings.artifact_root),
+            composition.clock,
+            RandomIdFactory(),
+        ).for_run(
+            tenant_id=composition.principal.tenant_id,
+            principal_id=composition.principal.principal_id,
+            session_id=UUID(int=244),
+            run_id=RUN_ID,
+            origin=ArtifactOrigin.SANDBOX_EXPORT,
+        )
+        context = replace(
+            tool_context(),
+            principal=composition.principal,
+            tenant_id=composition.principal.tenant_id,
+            run_id=RUN_ID,
+            session_id=UUID(int=244),
+            artifacts=writer,
+            timeout_seconds=120,
+            maximum_output_bytes=32768,
+        )
+        result = await ArtifactBuildTool(lambda: visual_sandbox).execute(package, context)
+        assert result.ok, result.failure
+        assert len(result.artifacts) == 3
+        for ref in result.artifacts:
+            artifact_id = UUID(ref["artifact_id"])
+            opened = await composition.services.artifacts.open_content(
+                composition.principal, artifact_id
+            )
+            data = b"".join([chunk async for chunk in await opened.open()])
+            if ref["media_type"] == "image/png":
+                assert data.startswith(b"\x89PNG\r\n\x1a\n")
+                assert all(value > 0 for value in struct.unpack(">II", data[16:24]))
+            elif ref["media_type"] == "text/csv":
+                assert list(csv.reader(io.StringIO(data.decode()))) == [
+                    ["Label", "Count"],
+                    ["A", "2"],
+                    ["B", "3"],
+                ]
+            else:
+                assert json.loads(data) == json.loads(package["files"]["spec.json"])
+            with pytest.raises(NotFoundError):
+                await composition.services.artifacts.open_content(
+                    composition.principal.model_copy(update={"tenant_id": "other-tenant"}),
+                    artifact_id,
+                )
 
 
 @pytest.fixture

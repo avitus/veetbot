@@ -468,4 +468,5 @@ nav:
       - "ADR-0327: Region-scoped browser workflow targets": adr/0327-region-scoped-browser-workflow-targets.md
       - "ADR-0328: Browser workflow capability preflight": adr/0328-browser-workflow-capability-preflight.md
       - "ADR-0329: Inbox relevance floor": adr/0329-inbox-relevance-floor.md
+      - "ADR-0330 — One offline artifact build": adr/0330-one-offline-artifact-build.md
   - Changelog: changelog.md

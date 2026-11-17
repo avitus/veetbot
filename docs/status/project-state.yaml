@@ -204,6 +204,9 @@
 # entries and 500 tokens free. The owner accepted ADR-0253 the same day.
 # Implemented with gate tests; delivery is pending. No milestone, gate or
 # policy profile moves.
+# ADR-0330: On 2026-11-16 the owner authorized a complete offline artifact
+# build under one ordinary approval, approval-free bundled-guide reads, and
+# verified delivery to dev. No milestone or gate moves; production is pending.
 schema_version: 1
 
 project:

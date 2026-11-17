@@ -1075,6 +1075,31 @@ viewer previews PNG and downloads all formats; it need not execute SVG or HTML.
 Labels, units, sources and missing data must be explained using observed inputs;
 image-generation tools are not used to produce numerical charts or exact diagrams.
 
+### One offline artifact build (ADR-0330)
+
+For model-authored offline files, `artifact.build` replaces separate input writes,
+commands and exports. Its arguments contain a `files` mapping of relative paths
+to UTF-8 text, a `command` argument vector, an explicit `outputs` list of relative
+paths, bare filenames and media types, and optional `timeout_seconds` (120 by
+default, at most 240). At most 32 input files total 1 MiB; at most 16 outputs are
+each bounded to 32 MiB. The command runs at the workspace root.
+
+The ordinary pipeline validates and binds the complete package to one invocation
+and, when required, one approval. After authorization, a fresh sandbox stages
+the inputs, executes once and attaches the named outputs before destruction.
+Its egress is always denied, parent environment passthrough is empty, and no tool
+bridge is offered. The enclosing 300-second tool deadline and existing sandbox
+limits still apply. Nonzero exits, kills and timeouts attach nothing. Export
+failure reports any already attached files. Uncertain execution is not replayed;
+a changed package is a new invocation subject to ordinary approval.
+
+`artifact.read_guide` reads the fixed packaged visualization guide's `build`,
+`charts` or `diagrams` section without a command, a sandbox, or a path argument.
+It has no side effects and requires no approval after outside content. The same
+source is copied into the sandbox image. Default Chat defers both tools through
+`tool.call`; existing session catalogs remain pinned. This changes no general
+sandbox approval rule, workspace lifetime or compiled policy profile.
+
 ## Artifacts
 
 Section 18.4 fixes four rules: store outside the source tree, use

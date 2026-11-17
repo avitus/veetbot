@@ -67,7 +67,14 @@ DEFERRED_INDEX_NAMED_HEADING = (
 # artifact.delete, which the default agent instructions advertise instead, and
 # ADR-0281 adds the debugging and code tools the same way.
 UNINDEXED_DEFERRED_TOOLS = frozenset(
-    {CAPTURE_READER_TOOL_NAME, ARTIFACT_DELETE_TOOL_NAME, RUN_INSPECT_TOOL_NAME, *CODE_TOOL_NAMES}
+    {
+        CAPTURE_READER_TOOL_NAME,
+        ARTIFACT_DELETE_TOOL_NAME,
+        RUN_INSPECT_TOOL_NAME,
+        *CODE_TOOL_NAMES,
+        "artifact.build",
+        "artifact.read_guide",
+    }
 )
 
 

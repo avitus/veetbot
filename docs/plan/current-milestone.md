@@ -4,6 +4,12 @@ title: Current Milestone
 
 # Current milestone
 
+- **One offline artifact build — ADR-0330:** On 2026-11-16 the owner authorized
+  one complete offline build invocation and approval-free bundled-guide reads.
+  [The decision](../adr/0330-one-offline-artifact-build.md) keeps inputs, rendering
+  and attachments within one sandbox lifetime. Delivery to `dev` is authorized;
+  production delivery and owner acceptance remain pending. No milestone moves.
+
 - **Chat reports a finished call — ADR-0325:** On 2026-11-14 the owner found that
   Chat never said how a call went and asked for the fix. Bland's post-call
   callbacks already delivered every result; nothing wrote it to the conversation.

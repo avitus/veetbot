@@ -242,6 +242,12 @@ async def test_production_roster_defines_reads_first_and_defers_the_rest(tmp_pat
     assert len(discovered) == 24  # Two more on the Gmail read server (ADR-0296).
     assert len(plan.tool_names) == 30
     assert "tool.call" in defined
+    assert {"artifact.build", "artifact.read_guide"} <= deferred
+    assert all(
+        is_unindexed_deferred(spec)
+        for spec in plan.deferred_tool_specs
+        if spec.name in {"artifact.build", "artifact.read_guide"}
+    )
     # The six management tools are deferred by the default agent's configuration.
     assert deferred >= MANAGEMENT_TOOLS | {"memory.learn", "workspace.write_text"}
     # A JSON field read waits in the index beside web.fetch's definition (ADR-0258).

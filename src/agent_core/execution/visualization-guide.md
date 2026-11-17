@@ -1,31 +1,67 @@
-# Static charts and diagrams
+# Offline artifacts, charts and diagrams
 
-Use the installed renderer for numerical charts and exact diagrams. Rendering
-runs offline in this disposable workspace; it does not attach files. Use
-`artifact.export` on the successful result's files before the run ends or pauses.
-Never use `image.generate` to invent data points, labels or diagram connections.
+Use `artifact.read_guide` through `tool.call` to read the `build`, `charts` or
+`diagrams` section. These fixed instructions need no approval or shell command.
+Use observed or owner-supplied data, label sources and units, and explain missing
+values and transformations. Never invent chart data with `image.generate`.
 
-1. Obtain the actual data from the owner or an authorized tool. State its source
-   and units. Explain transformations; do not invent values or silently fill gaps.
-2. Write a JSON specification with `workspace.write_text`.
-3. Call `sandbox.run_command` with an argument vector:
-   `["python", "-m", "agent_core.execution.visuals", "spec.json"]`.
-4. Check both the process exit code and the JSON result. A success lists `files`,
-   each with `path`, `filename`, `media_type` and `size_bytes`. Export each file
-   using `artifact.export` with that path, filename and media type. The PNG is the
-   preview; chart CSV includes the underlying data with text safety encoding;
-   diagram DOT is editable.
-   JSON preserves the complete specification. Only claim attachments after export
-   succeeds. If an export fails, explain which file is missing.
+Use `artifact.build` through `tool.call` for one complete offline build. Supply
+all UTF-8 input files, an argv command and explicit outputs together. The one
+ordinary approval, when required, covers that exact package. Its fresh sandbox
+has no network, credentials or tool bridge. Files are attached before cleanup;
+never write inputs in a separate call or rely on a previous workspace.
 
-The default output is PNG plus CSV (charts) or DOT (diagrams), and JSON source.
-Add `"formats": ["svg", "pdf"]` for optional vector downloads. There is no need
-to list PNG; it is always included. The Apple viewer previews PNG; SVG and PDF
-are downloads. Each successful render uses a fresh directory and prints its
-paths, so always use the returned paths rather than guessing filenames.
-The input filename is relative to the command's working directory. Output paths
-are always relative to `/workspace`, including when the command runs in a
-subdirectory; pass them directly to `artifact.export`.
+Example package:
+
+```json
+{
+  "files": {
+    "spec.json": "{\"type\": \"bar\", \"title\": \"Example counts\", \"columns\": [\"Label\", \"Count\"], \"rows\": [[\"A\", 2], [\"B\", 3]], \"x\": \"Label\", \"y\": [\"Count\"], \"y_label\": \"Count\", \"source\": \"Illustrative input\"}",
+    "render.py": "import json, shutil\nfrom pathlib import Path\nfrom agent_core.execution.visuals import render\nfor item in render(json.load(open('spec.json')), Path('/workspace')):\n    shutil.copyfile(item['path'], item['filename'])\n"
+  },
+  "command": [
+    "python",
+    "render.py"
+  ],
+  "outputs": [
+    {
+      "path": "chart.png",
+      "filename": "chart.png",
+      "media_type": "image/png"
+    },
+    {
+      "path": "chart.csv",
+      "filename": "chart.csv",
+      "media_type": "text/csv"
+    },
+    {
+      "path": "source.json",
+      "filename": "source.json",
+      "media_type": "application/json"
+    }
+  ]
+}
+```
+
+The command runs from `/workspace`; every package path is relative to that root.
+Inputs are at most 32 files and 1 MiB total. Request at most 16 outputs, each at
+most 32 MiB. Command timeout defaults to 120 seconds, at most 240. A nonzero exit,
+timeout or kill attaches nothing. An export failure lists any already attached
+files. Do not claim completion unless `complete` is true. A changed package is a
+new build and may require approval again; never repeat an uncertain build.
+
+For standard charts and diagrams, put a JSON spec and a small Python wrapper in
+`files`. The wrapper can call `agent_core.execution.visuals.render(spec,
+Path('/workspace'))`, then copy the returned paths to the explicit output paths
+in the package. The helper emits PNG, CSV (charts) or DOT (diagrams), and JSON
+source; add `"formats": ["svg", "pdf"]` to request vector files. Include those
+files in `outputs`. Read the `charts` or `diagrams` section for the spec format.
+For custom infographics, Matplotlib and Graphviz are installed. Include the
+underlying CSV/source and PNG preview, with explicit labels and units.
+
+The lower-level command `python -m agent_core.execution.visuals SPEC.json` is
+still available. It prints its output paths but does not attach them itself.
+The build tool attaches only the explicitly requested outputs.
 
 CSV text fields are quoted. Headers and text cells beginning with `=`, `+`, `-`,
 or `@` (including full-width forms or after leading whitespace), or a line break,
