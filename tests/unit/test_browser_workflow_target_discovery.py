@@ -19,6 +19,7 @@ from agent_core.domain.browser import (
 )
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn, TextPart, ToolResultItem
 from agent_core.domain.runs import RunStatus
+from agent_core.tools.validation import validate_and_normalize
 from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
 from tests.unit.test_browser_tools import FakeBrowserProvider
 from tests.unit.test_browser_workflows import CATALOG
@@ -201,7 +202,9 @@ async def test_target_allowance_survives_fresh_reads_and_tracks_the_branch_curso
     from agent_core.runtime.browser_workflows import BrowserWorkflowRunner
     from agent_core.runtime.loop import RunContext
 
-    runner = BrowserWorkflowRunner(BrowserWorkflowCatalog(), policy_version="test")
+    runner = BrowserWorkflowRunner(
+        BrowserWorkflowCatalog(), policy_version="test", validate_arguments=validate_and_normalize
+    )
     runner._queue = AsyncMock()  # type: ignore[method-assign]
     runner._stop = AsyncMock()  # type: ignore[method-assign]
     state: dict[str, Any] = {
@@ -236,7 +239,9 @@ async def test_malformed_search_state_cannot_reset_the_allowance(search: Any) ->
     from agent_core.runtime.browser_workflows import BrowserWorkflowRunner
     from agent_core.runtime.loop import RunContext
 
-    runner = BrowserWorkflowRunner(BrowserWorkflowCatalog(), policy_version="test")
+    runner = BrowserWorkflowRunner(
+        BrowserWorkflowCatalog(), policy_version="test", validate_arguments=validate_and_normalize
+    )
     with pytest.raises(ConflictError, match="target search is malformed"):
         await runner._read_target_window(
             cast(RunContext, SimpleNamespace()),

@@ -2031,6 +2031,13 @@ worst-case delay is the longest step. A resumed run needs no special case: the
 executor adopts committed history after the checkpoint (ADR-0166), and a row
 whose derivation key already exists is deleted without a second event.
 
+Reviewed browser workflows hand back to this loop before proposing another tool
+when owner input is held, after checkpointing their retirement. Already dispatched
+effects retain their bounded verification; an unresolved effect still stops
+report-only and leaves unread follow-ups for terminal settlement. The handoff
+reuses this inbox reader and its consent invalidation, rather than consuming
+messages in a separate workflow path. See [browser automation](browser-automation.md).
+
 **Reading a follow-up ends single-request consent.** In the same unit of work
 the loop ends the run's request grant (ADR-0302) and clears a pending specific
 Follow consent (ADR-0172). Task grants, the pinned roster, limits, the

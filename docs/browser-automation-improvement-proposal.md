@@ -204,6 +204,34 @@ cannot provide its revision, and the preliminary read cannot count as completed
 extraction. Stale or failed reads stop without replaying an earlier write. This
 repairs ADR-0164's fresh-step contract; it activates no new deployed recipe.
 
+The next W6 repair connects reviewed workflows to ADR-0324 follow-up steering.
+Held owner input retires the recipe before another tool proposal and returns
+planning to the ordinary loop in the same run. Verified progress is retained;
+pending approvals and sent effects finish their existing handling first.
+Unresolved effects remain report-only and are never replayed. This is construction
+within existing authority, not broader workflow or live-site acceptance.
+
+The next W4/W6 repair preserves positive declared failure evidence as
+`observed_failure` in unbranched reviewed waits, action results and read-only
+reconciliation. Missing or conflicting evidence stays `unverified`. Neither
+outcome can advance to another action or replay a sent effect; an already
+observed failure avoids an unnecessary verification read. ADR-0164 records the
+construction evidence; broader live-site acceptance remains separate.
+
+The next W3/W6 slice adds reviewed region constraints to action target discovery.
+A unique complete semantic-region match selects an ordinary revision-bound
+focused read before matching the action control. The same four-window allowance,
+approval checks and non-replay rules apply; missing focus never falls back to
+global controls. ADR-0327 records the construction contract and evidence.
+No deployed recipe or broader live-site acceptance changes.
+
+The next W6 slice checks reviewed recipes against pinned tool capabilities before
+selection starts any browser work. Unsupported tools or argument modes return to
+ordinary planning; ambiguous intents remain ambiguous. ADR-0328 covers deferred
+tools, legacy schemas, region focus, extraction, branches and feed collection.
+Normal dispatch checks and uncertain-effect handling remain in force. No deployed
+recipe or broader live-site acceptance changes.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

@@ -80,10 +80,9 @@ class SandboxRunCommandTool:
         name="sandbox.run_command",
         version="1.0.0",
         description=(
-            "Run argv in an isolated workspace; network is off by default. The workspace is "
-            "discarded at run end/pause: export files with artifact.export. Large output is "
-            "truncated and saved as an artifact. For charts/diagrams, read "
-            "/opt/agent/visualization-guide.md via this tool."
+            "Run argv in an isolated workspace; network is off by default. Pauses/end discard "
+            "files: export with artifact.export. Large output is truncated into an artifact. "
+            "For offline files use artifact.build; instructions: artifact.read_guide."
         ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,

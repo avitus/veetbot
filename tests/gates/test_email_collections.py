@@ -313,3 +313,19 @@ async def test_forgetting_a_summary_waits_for_a_list_in_flight() -> None:
             await forgetting
         owner = (principal.tenant_id, principal.principal_id)
         assert cache._kept[owner] == {}
+
+
+async def test_inbox_omits_threads_ranked_below_its_relevance_floor() -> None:
+    """Hide low-ranked noise from Inbox while Needs you keeps every reply request (ADR-0329)."""
+    async with email_client() as (composition, client):
+        low, _ = await seed_mail(composition, priority=0.09)
+        floor, _ = await seed_mail(composition, priority=0.1)
+        high, _ = await seed_mail(composition)
+        response = await client.get("/v1/email/threads", params={"view": "inbox"})
+        assert response.status_code == 200
+        data = response.json()
+        assert {row["id"] for row in data["items"]} == {str(floor.id), str(high.id)}
+        assert data["collection_counts"]["inbox"] == 2
+        assert data["collection_counts"]["needs_you"] == 3
+        response = await client.get("/v1/email/threads", params={"view": "needs_you"})
+        assert str(low.id) in {row["id"] for row in response.json()["items"]}

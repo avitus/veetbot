@@ -123,6 +123,9 @@ class ArtifactExportTool:
         output_trust=TrustLevel.INTERNAL_TOOL,
     )
 
+    def __init__(self, *, max_artifact_bytes: int = _MAX_ARTIFACT_BYTES) -> None:
+        self._max_artifact_bytes = max_artifact_bytes
+
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         path = str(arguments.get("path") or "")
         content = arguments.get("content")
@@ -165,7 +168,7 @@ class ArtifactExportTool:
         workspace = cast(WorkspaceHandle, context.workspace)
         writer = cast(ArtifactWriter, context.artifacts)
         try:
-            stream = workspace.stream(path, _MAX_ARTIFACT_BYTES)
+            stream = workspace.stream(path, self._max_artifact_bytes)
             try:
                 ref = await writer.create(
                     stream,

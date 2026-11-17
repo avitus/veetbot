@@ -1263,6 +1263,8 @@ async def test_production_tool_roster_stays_within_the_context_cap() -> None:
     # no index entry (ADRs 0261 and 0277).
     assert len(plan.tool_specs) == 24
     assert set(plan.deferred_tool_names) == {
+        "artifact.build",
+        "artifact.read_guide",
         "artifact.read_capture",
         "artifact.delete",
         "memory.learn",

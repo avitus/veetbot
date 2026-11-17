@@ -12,6 +12,7 @@ from agent_core.domain.browser import (
     browser_origin,
     normalize_browser_origin,
 )
+from agent_core.domain.browser_evidence import BrowserRegionEvidence
 from agent_core.domain.browser_extraction import BrowserExtractionField
 
 
@@ -36,6 +37,7 @@ class BrowserWorkflowStep(BaseModel):
     key: str | None = None
     delta_y: int | None = None
     postcondition: BrowserCondition | None = None
+    target_region: BrowserRegionEvidence | None = None
     collection_kind: Literal["table", "list", "form"] | None = None
     index: int = Field(default=0, ge=0, le=15)
     fields: list[BrowserExtractionField] = Field(default_factory=list, max_length=8)
@@ -47,7 +49,17 @@ class BrowserWorkflowStep(BaseModel):
         permitted = {
             "navigate": {"kind", "url"},
             "observe": {"kind", "postcondition", "branches"},
-            "act": {"kind", "role", "name", "action", "value", "key", "delta_y", "postcondition"},
+            "act": {
+                "kind",
+                "role",
+                "name",
+                "action",
+                "value",
+                "key",
+                "delta_y",
+                "postcondition",
+                "target_region",
+            },
             "extract": {"kind", "collection_kind", "index", "fields", "row_limit"},
             "collect_feed": {"kind", "role", "name"},
         }[self.kind]

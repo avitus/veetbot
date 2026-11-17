@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -16,12 +17,17 @@ from agent_core.domain.browser import (
     browser_origin,
 )
 from agent_core.domain.browser_workflows import BrowserWorkflowCatalog, BrowserWorkflowRecipe
-from agent_core.domain.errors import ConflictError, NotFoundError, UserInputRequiredError
+from agent_core.domain.errors import (
+    ConflictError,
+    NotFoundError,
+    ToolValidationError,
+    UserInputRequiredError,
+)
 from agent_core.domain.messages import TextPart, ToolCallItem, ToolResultItem, UserMessage
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import BudgetScope, RunOutcome, Step
 from agent_core.domain.sessions import SESSION_BROWSER_PROFILE_METADATA_KEY
-from agent_core.domain.tools import ToolOutcome
+from agent_core.domain.tools import ToolOutcome, ToolSpec
 from agent_core.runtime.loop import (
     RunContext,
     apply_tool_evidence,
@@ -30,16 +36,21 @@ from agent_core.runtime.loop import (
     with_event_sequences,
 )
 
+type ArgumentValidator = Callable[[dict[str, Any], dict[str, Any]], object]
+
 
 def _intent(value: str) -> str:
     return " ".join(value.casefold().split()).rstrip(".!?")
 
 
 def _definition(recipe: BrowserWorkflowRecipe) -> str:
-    # Omitted optional branching must not change legacy recipe/checkpoint identity.
+    # Omitted optional fields must not change legacy recipe/checkpoint identity.
     excluded = {
         "steps": {
-            index: {"branches"} for index, step in enumerate(recipe.steps) if step.branches is None
+            index: {
+                field for field in ("branches", "target_region") if getattr(step, field) is None
+            }
+            for index, step in enumerate(recipe.steps)
         }
     }
     return hashlib.sha256(recipe.model_dump_json(exclude=excluded).encode()).hexdigest()
@@ -52,6 +63,112 @@ def _condition(condition: BrowserCondition) -> dict[str, Any]:
             for field in evidence.get("fields", []):
                 field.pop("required", None)
     return value
+
+
+def _supports_recipe(
+    recipe: BrowserWorkflowRecipe,
+    available: set[str],
+    specs: tuple[ToolSpec, ...],
+    *,
+    validate_arguments: ArgumentValidator,
+) -> bool:
+    """Check pinned argument shapes only; placeholders never reach a provider."""
+    schemas = {spec.name: spec.input_schema for spec in specs}
+    placeholder = "0" * 32
+    calls: list[tuple[str, dict[str, Any]]] = []
+    for step in recipe.steps:
+        if step.kind == "navigate":
+            calls.append(("browser.navigate", {"url": step.url}))
+            continue
+        if step.kind == "observe":
+            calls.append(
+                (
+                    "browser.observe",
+                    {}
+                    if step.postcondition is None
+                    else {"wait_for": _condition(step.postcondition)},
+                )
+            )
+            continue
+        calls.append(("browser.observe", {}))
+        if step.kind == "act":
+            assert step.postcondition is not None
+            if step.target_region is not None:
+                calls.append(
+                    (
+                        "browser.observe",
+                        {"region_ref": placeholder, "expected_revision": placeholder},
+                    )
+                )
+            calls.extend(
+                [
+                    (
+                        "browser.act",
+                        {
+                            "kind": step.action,
+                            "expected_revision": placeholder,
+                            "ref": placeholder,
+                            **step.action_values(),
+                            "postcondition": _condition(step.postcondition),
+                        },
+                    ),
+                    ("browser.observe", {"wait_for": _condition(step.postcondition)}),
+                ]
+            )
+        elif step.kind == "extract":
+            calls.append(
+                (
+                    "browser.observe",
+                    {
+                        "extract": {
+                            "expected_revision": placeholder,
+                            "kind": step.collection_kind,
+                            "index": step.index,
+                            "fields": [field.model_dump() for field in step.fields],
+                            "row_limit": step.row_limit,
+                        }
+                    },
+                )
+            )
+        elif step.kind == "collect_feed":
+            from agent_core.runtime.browser_feed import FIELDS, HOME
+
+            calls.extend(
+                [
+                    (
+                        "browser.observe",
+                        {
+                            "extract": {
+                                "expected_revision": placeholder,
+                                "kind": "articles",
+                                "fields": FIELDS,
+                                "row_limit": 3,
+                            }
+                        },
+                    ),
+                    (
+                        "browser.act",
+                        {
+                            "kind": "scroll",
+                            "expected_revision": placeholder,
+                            "ref": placeholder,
+                            "delta_y": 1557,
+                            "postcondition": {
+                                "evidence": {"kind": "location", "url": HOME},
+                                "timeout_ms": 0,
+                            },
+                        },
+                    ),
+                ]
+            )
+    for name, arguments in calls:
+        if name not in available or name not in schemas:
+            return False
+        try:
+            validate_arguments(arguments, schemas[name])
+        except ToolValidationError:
+            return False
+    return True
 
 
 def _observation(result: ToolResultItem | None) -> BrowserObservation | None:
@@ -112,12 +229,22 @@ def _control_continuation(
 
 
 class BrowserWorkflowRunner:
-    def __init__(self, catalog: BrowserWorkflowCatalog, *, policy_version: str) -> None:
+    def __init__(
+        self,
+        catalog: BrowserWorkflowCatalog,
+        *,
+        policy_version: str,
+        validate_arguments: ArgumentValidator,
+    ) -> None:
         self._catalog = catalog
         self._policy_version = policy_version
+        self._validate_arguments = validate_arguments
 
     async def __call__(self, context: RunContext) -> RunOutcome | None:
         state = context.checkpoint.working_state.get("browser_workflow")
+        if isinstance(state, dict) and state.get("status") == "steered":
+            # The general loop owns this turn now, including subsequent approval resumes.
+            return None
         if not self._catalog.recipes and state is None:
             return None
         async with context.uow_factory() as uow:
@@ -159,23 +286,18 @@ class BrowserWorkflowRunner:
                     text in {_intent(intent) for intent in recipe.intents}
                     or digest in recipe.intent_sha256
                 )
-                and (
-                    not any(step.kind == "collect_feed" for step in recipe.steps)
-                    or any(
-                        spec.name == "browser.observe"
-                        and "articles"
-                        in spec.input_schema.get("properties", {})
-                        .get("extract", {})
-                        .get("properties", {})
-                        .get("kind", {})
-                        .get("enum", [])
-                        for spec in context.context_plan.pinned_tool_specs
-                    )
-                )
             ]
             if len(candidates) != 1 or profile.status is not BrowserProfileStatus.READY:
                 return None
             recipe = candidates[0]
+            if not _supports_recipe(
+                recipe,
+                set(context.context_plan.tool_names)
+                | set(context.context_plan.deferred_tool_names),
+                context.context_plan.pinned_tool_specs,
+                validate_arguments=self._validate_arguments,
+            ):
+                return None
             state = {
                 "id": recipe.id,
                 "definition": _definition(recipe),
@@ -248,7 +370,9 @@ class BrowserWorkflowRunner:
             # An interrupted write is reconciled below. Only pre-action reads can restart.
             if state["phase"] not in {"action", "verify"}:
                 state.update(phase="start", call_id=None)
-        while state.get("next_step", state["completed_steps"]) < len(recipe.steps):
+        while state["status"] == "running" and state.get(
+            "next_step", state["completed_steps"]
+        ) < len(recipe.steps):
             context.token.raise_if_cancelled()
             if (
                 context.clock.now() >= datetime.fromisoformat(state["expires_at"])
@@ -303,9 +427,10 @@ class BrowserWorkflowRunner:
                     if (
                         observed is None
                         or observed.condition is None
-                        or observed.condition.status != "satisfied"
+                        or observed.condition.status not in {"satisfied", "failed"}
                     ):
-                        # Once dispatched, missing/failed/uncertain evidence leads only to a read.
+                        # Missing or inconclusive evidence leads only to a read.
+                        # Positive success/failure evidence needs no reconciliation.
                         assert step.postcondition is not None
                         await self._queue(
                             context,
@@ -342,7 +467,32 @@ class BrowserWorkflowRunner:
                         },
                     )
                     continue
+                if state["phase"] == "before_region":
+                    assert step.target_region is not None
+                    regions = [
+                        region
+                        for region in observed.regions
+                        if region.kind == step.target_region.region_kind
+                        and not region.text_truncated
+                        and " ".join(region.text.split())
+                        == " ".join(step.target_region.text.split())
+                    ]
+                    if len(regions) != 1:
+                        await self._stop(
+                            context, state, "ambiguous_region" if regions else "region_not_observed"
+                        )
+                        return None
+                    if not await self._read_target_window(
+                        context,
+                        state,
+                        {"region_ref": regions[0].ref, "expected_revision": observed.revision},
+                    ):
+                        return None
+                    continue
                 if state["phase"] == "before_action":
+                    if step.target_region is not None and observed.focus is None:
+                        await self._stop(context, state, "unverified")
+                        return None
                     targets = [
                         element
                         for element in observed.elements
@@ -406,7 +556,14 @@ class BrowserWorkflowRunner:
                     await checkpoint(context, "browser_workflow_progress")
                     continue
                 if observed.condition is not None and observed.condition.status != "satisfied":
-                    await self._stop(context, state, "unverified")
+                    terminal_status = (
+                        "observed_failure"
+                        if observed.condition.status == "failed"
+                        and step.postcondition is not None
+                        and step.postcondition.failure_evidence is not None
+                        else "unverified"
+                    )
+                    await self._stop(context, state, terminal_status)
                     return None
                 if step.postcondition is not None and observed.condition is None:
                     await self._stop(context, state, "unverified")
@@ -427,7 +584,12 @@ class BrowserWorkflowRunner:
             if step.kind == "navigate":
                 await self._queue(context, state, "read", "browser.navigate", {"url": step.url})
             elif step.kind == "act":
-                if not await self._read_target_window(context, state, {}):
+                if not await self._read_target_window(
+                    context,
+                    state,
+                    {},
+                    phase="before_region" if step.target_region is not None else "before_action",
+                ):
                     return None
             elif step.kind == "observe":
                 args = (
@@ -438,11 +600,38 @@ class BrowserWorkflowRunner:
                 await self._queue(context, state, "read", "browser.observe", args)
             else:
                 await self._queue(context, state, "before_extract", "browser.observe", {})
-        await self._stop(context, state, "verified")
+        if state["status"] == "running":
+            await self._stop(context, state, "verified")
         return None
 
+    async def _yield_to_follow_up(
+        self, context: RunContext, state: dict[str, Any], *, verified: bool = False
+    ) -> bool:
+        if context.checkpoint.pending_tool_calls or (
+            not verified
+            and (
+                state["phase"] in {"action", "verify", "feed_scroll"}
+                or state.get("feed", {}).get("uncertain_scroll", False)
+            )
+        ):
+            return False
+        async with context.uow_factory() as uow:
+            pending = await uow.pending_inputs.list_for_run(context.run.id, context.principal)
+        if not pending:
+            return False
+        # Retire durably before the ordinary loop consumes the inbox. A crash on
+        # either side cannot restart the old recipe or lose the held instruction.
+        state["status"] = "steered"
+        await checkpoint(context, "browser_workflow_progress")
+        return True
+
     async def _read_target_window(
-        self, context: RunContext, state: dict[str, Any], arguments: dict[str, str]
+        self,
+        context: RunContext,
+        state: dict[str, Any],
+        arguments: dict[str, str],
+        *,
+        phase: str = "before_action",
     ) -> bool:
         step_index = state.get("next_step", state["completed_steps"])
         search = state.get("target_search")
@@ -464,7 +653,7 @@ class BrowserWorkflowRunner:
             return False
         search["windows"] += 1
         # _queue persists this allowance with the pending read before dispatch.
-        await self._queue(context, state, "before_action", "browser.observe", arguments)
+        await self._queue(context, state, phase, "browser.observe", arguments)
         return bool(state["status"] == "running")
 
     async def _queue(
@@ -483,6 +672,8 @@ class BrowserWorkflowRunner:
             or context.run.step_count >= context.run.limits.max_steps - 1
         ):
             await self._stop(context, state, "bounded_stop")
+            return
+        if await self._yield_to_follow_up(context, state):
             return
         available = set(context.context_plan.tool_names) | set(
             context.context_plan.deferred_tool_names
@@ -563,6 +754,8 @@ class BrowserWorkflowRunner:
         await checkpoint(context, "browser_workflow_progress")
 
     async def _stop(self, context: RunContext, state: dict[str, Any], status: str) -> None:
+        if status == "verified" and await self._yield_to_follow_up(context, state, verified=True):
+            return
         state["status"] = status
         context.checkpoint.working_state["browser_workflow_report_only"] = True
         await checkpoint(context, "browser_workflow_progress")

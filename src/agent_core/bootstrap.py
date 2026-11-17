@@ -764,9 +764,11 @@ from agent_core.skills.package import SkillPackageValidator
 from agent_core.titles.generator import ConversationTitleGenerator
 from agent_core.titles.profiles import TitleProfiles
 from agent_core.titles.titling import ConversationTitlePass, request_title_after_run
+from agent_core.tools.artifact_build import ArtifactBuildTool
 from agent_core.tools.artifact_delete import ArtifactDeleteTool
 from agent_core.tools.artifact_export import ArtifactExportTool
 from agent_core.tools.artifact_read_capture import ArtifactReadCaptureTool
+from agent_core.tools.artifact_read_guide import ArtifactReadGuideTool
 from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.browser_act import (
     BrowserActApprovalPresenter,
@@ -1268,13 +1270,13 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "for those requests; use it only when arbitrary code execution is necessary. If no "
     "read-only tool can answer, explain the limitation or ask before proposing sandboxed "
     "code execution. To give the user a text or workspace file, call artifact.export with "
-    "the text as content or a workspace path. For data charts and exact diagrams, use "
-    "the offline sandbox renderer: python -m agent_core.execution.visuals SPEC.json. "
-    "Read /opt/agent/visualization-guide.md inside the sandbox for its JSON format. "
-    "Use observed data, label units and sources, and explain missing values or transformations. "
-    "Export its PNG preview, chart CSV or diagram DOT, and JSON source with artifact.export; "
-    "request SVG/PDF in the spec when wanted. Check the exit code and returned files before "
-    "exporting. Do not use image.generate for numerical charts or exact diagrams. "
+    "the text as content or a workspace path. For offline infographics, charts or diagrams, "
+    "call artifact.read_guide through tool.call, then artifact.build with all inputs, argv and "
+    "outputs. It renders and attaches in one operation; never split writes, rendering and "
+    "export across approvals, which discard the workspace. Use observed data, label units "
+    "and sources, and explain gaps or transformations. Include PNG, CSV/DOT and JSON source; "
+    "add SVG/PDF when requested. Check completion and report missing files. Never use "
+    "image.generate for numerical charts or exact diagrams. "
     "For other generated images or videos, use "
     "image.generate or video.generate when available. These tools attach the file to "
     "your reply automatically. Never say a file is attached unless its export or "
@@ -3730,6 +3732,19 @@ async def _compose(
         SandboxRunCommandTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
     )
     registry.register(ArtifactExportTool())
+    registry.register(ArtifactReadGuideTool())
+    registry.register(
+        ArtifactBuildTool(
+            partial(
+                SandboxManager,
+                job_environment,
+                limits=sandbox_limits,
+                egress=EgressPolicy(),
+                parent_environment={},
+                **job_image_options,
+            )
+        )
+    )
     if media_provider is not None:
         media_inputs = StoredMediaInputResolver(
             uow_factory=uow_factory, store=FilesystemArtifactStore(artifact_root), clock=clock
@@ -5534,6 +5549,7 @@ async def _compose(
 
         from agent_core.domain.browser_workflows import BrowserWorkflowCatalog
         from agent_core.runtime.browser_workflows import BrowserWorkflowRunner
+        from agent_core.tools.validation import validate_and_normalize
 
         workflow_catalog = BrowserWorkflowCatalog.model_validate(
             load_config_document(settings, "runtime/browser-workflows.yaml")
@@ -5551,6 +5567,7 @@ async def _compose(
         browser_workflows = BrowserWorkflowRunner(
             workflow_catalog,
             policy_version=ruleset.policy_version,
+            validate_arguments=validate_and_normalize,
         )
 
         from agent_core.domain.email_junk import (
@@ -7266,6 +7283,8 @@ async def build(
         ),
         "sandbox.run_command",
         "artifact.export",
+        "artifact.build",
+        "artifact.read_guide",
         ArtifactDeleteTool.spec.name,
         *(["image.generate", "video.generate"] if media_enabled else []),
         WORKING_STATE_TOOL_NAME,
@@ -7355,6 +7374,8 @@ async def build(
     default_deferred_tools = [
         name
         for name in (
+            "artifact.build",
+            "artifact.read_guide",
             "memory.learn",
             "workspace.write_text",
             # A JSON read is a narrower web.fetch, chosen once the model knows

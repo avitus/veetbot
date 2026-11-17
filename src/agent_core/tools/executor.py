@@ -312,6 +312,8 @@ def _effective_output_trust(result: ToolResult, tool: Tool) -> TrustLevel:
 
 
 def _writer_origin(tool: Tool, arguments: dict[str, Any]) -> ArtifactOrigin:
+    if tool.spec.name == "artifact.build":
+        return ArtifactOrigin.SANDBOX_EXPORT
     if tool.spec.name in {"image.generate", "video.generate"}:
         return ArtifactOrigin.MODEL_OUTPUT
     # artifact.export is intentionally an in-process capability over a sandbox

@@ -2201,6 +2201,46 @@ then a verified or explicitly unverified stop. Final reporting cannot issue more
 tools. The workflow cap is 64 calls and reserves one ordinary run step for the
 report. These are ceilings, not additional budget allowances.
 
+[ADR-0328](../adr/0328-browser-workflow-capability-preflight.md) checks the single
+unambiguous intent/origin match against the run's pinned advertised and deferred
+tools before creating workflow state or making a call. Every required name and
+argument shape must be supported, including literal extraction fields/limits,
+region focus and read-only action reconciliation. The existing local argument
+validator, injected by bootstrap into the workflow runner, checks non-executed
+reference/revision placeholders and reviewed values;
+it does not call a provider or decide authorization. All declared branch steps
+are checked. Feed collection uses the same capability check for its article
+extraction and bounded scroll shapes. An incompatible recipe returns to ordinary
+planning with no partial execution or report-only restriction. Capability
+differences never disambiguate matching intents. Started workflows retain their
+existing resume and binding rules, and actual calls still revalidate current
+policy, schemas, budgets, revisions and approvals.
+
+A successful, uninterrupted same-origin result with a declared positive failure
+condition ends an unbranched observe/action step as `observed_failure`, including
+read-only reconciliation after response loss. An action response already carrying
+that evidence needs no further reconciliation read. Missing, conflicting or
+undeclared failure evidence remains `unverified`. Neither outcome advances the
+failed step, runs later actions, clears a sent effect or permits replay; both
+retain tool-free reporting from the existing evidence. Explicit observe branches
+retain their separate forward-only routing contract below.
+
+With ADR-0324 follow-ups, the runner checks for held owner input before proposing
+another tool call and before a verified stop. It checkpoints `status: steered`
+and returns to the ordinary run loop, which consumes the inbox, ends single-request
+consent and plans with the new instruction. Completed steps and bounded feed
+evidence remain in working state. A retired recipe cannot restart on a later
+approval resume, even if its catalog or profile binding changed. The handoff does
+not reset budgets or tools, create a second run, or resolve an approval.
+
+Pending approved calls finish through their existing pipeline. An action or feed
+scroll already dispatched retains its read-only reconciliation before handoff;
+uncertain or unverified outcomes keep the report-only stop, leaving unread
+follow-ups to ADR-0324's terminal settlement. No tool call is abandoned or replayed,
+and a follow-up never appears between a call and its result. The retirement
+checkpoint precedes inbox consumption so a restart cannot resume the old recipe
+after consuming the new direction.
+
 An extraction step first queues its own ordinary `browser.observe` and persists
 the `before_extract` phase. Only that successful, uninterrupted, same-origin
 result supplies the extraction revision; conversation history cannot substitute
@@ -2249,6 +2289,20 @@ of whole-page absence. Failed discovery never selects an older window's target.
 Once dispatch begins, uncertainty only follows existing read-only reconciliation;
 it cannot restart target discovery or resend the action. Public tools, live
 policy/grant checks, approvals and the deployed recipe catalog are unchanged.
+
+[ADR-0327](../adr/0327-region-scoped-browser-workflow-targets.md) lets a reviewed
+action declare `target_region` with the existing closed region-evidence shape
+(`kind: region`, `region_kind`, complete normalized `text`). A fresh observation
+must contain exactly one matching non-truncated region; missing or duplicate
+matches stop as `region_not_observed` or `ambiguous_region`. The runner then
+queues ordinary `browser.observe(region_ref, expected_revision)` from that
+result. Focus metadata must survive the focused result and its control
+continuations; no global target fallback is allowed. The initial region read,
+focus read and control expansion share the same four-window per-action budget,
+persisted across resumption and generation changes. Once a target is found,
+ordinary approval, fresh revision checks and read-only reconciliation apply.
+The optional field is limited to action steps, changes definition identity when
+present, and preserves legacy digests when omitted. No deployed recipe changes.
 
 The shipped catalog includes the reviewed X home-feed briefing below; private
 account definitions remain deployment-owned. Engineering-owned definitions

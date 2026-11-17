@@ -1541,6 +1541,18 @@ resumes is testing the approval path and nothing else, because there
 is nothing else in the tool for the test to be accidentally
 exercising.
 
+## Offline artifact tools (ADR-0330)
+
+ADR-0330 adds two deferred artifact tools, designed in
+[sandbox-isolation.md](sandbox-isolation.md#one-offline-artifact-build-adr-0330).
+`artifact.build` is `CODE_EXECUTION`, `HIGH`, `NON_IDEMPOTENT`, serial and
+sandbox-targeted, requiring `sandbox.execute`, `workspace.write` and
+`artifact.write`. Its tool timeout is 300 seconds and its result ceiling 32 KiB;
+outputs remain `EXTERNAL_UNTRUSTED`. `artifact.read_guide` is `NONE`, `LOW`,
+`READ_ONLY`, in-process and serial, requires no scopes, and returns fixed
+`PLATFORM` instructions with a ten-second timeout and 16-KiB result ceiling.
+It accepts only a named guide section. Neither changes the default policy matrix.
+
 ## The two tools this document does not design
 
 Each has its classification above, which is what registration validation

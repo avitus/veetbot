@@ -1,3 +1,16 @@
+# ADR-0328: Owner-authorized W6 continuation checks pinned tool capabilities
+# before recipe selection performs any browser work. Unsupported recipes use
+# ordinary planning; current authorization and non-replay rules remain unchanged.
+# No deployed recipe, milestone or gate moves.
+# ADR-0327: Owner-authorized W3/W6 continuation adds region-scoped workflow
+# targets through existing focused reads and the four-window discovery bound.
+# Ordinary approval and non-replay rules remain; no milestone or gate moves.
+# ADR-0164 follow-up: Owner-authorized W4/W6 continuation preserves positive
+# failure evidence in reviewed workflows without replay or later actions.
+# Missing/conflicting evidence stays unverified; no milestone or gate moves.
+# ADR-0164/0324 follow-up: Owner-authorized W6 continuation connects reviewed
+# workflows to held owner input at safe tool boundaries. Sent effects keep
+# verification and uncertain outcomes stay report-only. No gate or milestone moves.
 # ADR-0324: On 2026-11-13 the owner asked to steer a working chat with a
 # follow-up, then accepted the decision and authorized its implementation. A
 # follow-up joins the active run through an inbox, default off. Server side
@@ -191,6 +204,9 @@
 # entries and 500 tokens free. The owner accepted ADR-0253 the same day.
 # Implemented with gate tests; delivery is pending. No milestone, gate or
 # policy profile moves.
+# ADR-0330: On 2026-11-16 the owner authorized a complete offline artifact
+# build under one ordinary approval, approval-free bundled-guide reads, and
+# verified delivery to dev. No milestone or gate moves; production is pending.
 schema_version: 1
 
 project:
