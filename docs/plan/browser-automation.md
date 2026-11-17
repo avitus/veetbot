@@ -2206,7 +2206,8 @@ unambiguous intent/origin match against the run's pinned advertised and deferred
 tools before creating workflow state or making a call. Every required name and
 argument shape must be supported, including literal extraction fields/limits,
 region focus and read-only action reconciliation. The existing local argument
-validator checks non-executed reference/revision placeholders and reviewed values;
+validator, injected by bootstrap into the workflow runner, checks non-executed
+reference/revision placeholders and reviewed values;
 it does not call a provider or decide authorization. All declared branch steps
 are checked. Feed collection uses the same capability check for its article
 extraction and bounded scroll shapes. An incompatible recipe returns to ordinary

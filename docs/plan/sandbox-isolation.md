@@ -1090,8 +1090,11 @@ the inputs, executes once and attaches the named outputs before destruction.
 Its egress is always denied, parent environment passthrough is empty, and no tool
 bridge is offered. The enclosing 300-second tool deadline and existing sandbox
 limits still apply. Nonzero exits, kills and timeouts attach nothing. Export
-failure reports any already attached files. Uncertain execution is not replayed;
-a changed package is a new invocation subject to ordinary approval.
+failure, including a storage exception, reports any already attached files;
+unexpected export exceptions return `tool.internal_error` without exposing storage
+diagnostics. Cancellation still propagates through sandbox cleanup. Uncertain
+execution is not replayed; a changed package is a new invocation subject to
+ordinary approval.
 
 `artifact.read_guide` reads the fixed packaged visualization guide's `build`,
 `charts` or `diagrams` section without a command, a sandbox, or a path argument.

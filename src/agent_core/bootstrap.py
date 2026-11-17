@@ -5549,6 +5549,7 @@ async def _compose(
 
         from agent_core.domain.browser_workflows import BrowserWorkflowCatalog
         from agent_core.runtime.browser_workflows import BrowserWorkflowRunner
+        from agent_core.tools.validation import validate_and_normalize
 
         workflow_catalog = BrowserWorkflowCatalog.model_validate(
             load_config_document(settings, "runtime/browser-workflows.yaml")
@@ -5566,6 +5567,7 @@ async def _compose(
         browser_workflows = BrowserWorkflowRunner(
             workflow_catalog,
             policy_version=ruleset.policy_version,
+            validate_arguments=validate_and_normalize,
         )
 
         from agent_core.domain.email_junk import (

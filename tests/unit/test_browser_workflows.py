@@ -18,6 +18,7 @@ from agent_core.domain.browser import (
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.domain.runs import RunStatus
 from agent_core.domain.views import TextContentBlock
+from agent_core.tools.validation import validate_and_normalize
 from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
 from tests.unit.test_browser_tools import FakeBrowserProvider
 from tests.unit.test_config import base_environment
@@ -223,7 +224,9 @@ async def test_reclaimed_workflow_does_not_charge_an_already_recorded_tool_twice
     monkeypatch.setattr(
         workflows, "with_event_sequences", AsyncMock(side_effect=lambda _context, results: results)
     )
-    runner = workflows.BrowserWorkflowRunner(BrowserWorkflowCatalog(), policy_version="v1")
+    runner = workflows.BrowserWorkflowRunner(
+        BrowserWorkflowCatalog(), policy_version="v1", validate_arguments=validate_and_normalize
+    )
     await runner._dispatch_pending(context, {"calls": 2})
     record.assert_not_awaited()
 

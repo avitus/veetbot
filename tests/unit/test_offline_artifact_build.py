@@ -1,5 +1,7 @@
 """One approved invocation survives the workspace loss at an approval pause."""
 
+import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from importlib.resources import files
 from typing import Any, cast
@@ -19,6 +21,7 @@ from agent_core.domain.execution import (
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn
 from agent_core.domain.policies import SideEffectClass, TrustLevel
 from agent_core.domain.runs import RunStatus
+from agent_core.domain.tools import ToolFailureKind
 from agent_core.execution.manager import SandboxManager
 from agent_core.tools.artifact_build import ArtifactBuildTool
 from agent_core.tools.artifact_read_guide import ArtifactReadGuideTool
@@ -203,6 +206,69 @@ async def test_cancellation_destroys_the_build_sandbox(monkeypatch: pytest.Monke
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+    assert not adapter.live_environment_ids()
+
+
+@pytest.mark.parametrize("error", [OSError, RuntimeError, asyncio.CancelledError])
+async def test_export_exception_preserves_completed_attachments_and_cancellation(
+    monkeypatch: pytest.MonkeyPatch, error: type[BaseException]
+) -> None:
+    from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+    from tests.contract.support import NOW
+
+    adapter = FakeExecutionEnvironment(FixedClock(NOW), SequenceIdFactory())
+    execute = adapter.execute
+
+    async def render(handle: EnvironmentHandle, command: ExecutionCommand) -> Any:
+        await adapter.workspace(handle).write("result.png", b"image")
+        await adapter.workspace(handle).write("second.txt", b"text")
+        return await execute(handle, command)
+
+    monkeypatch.setattr(adapter, "execute", render)
+    tool = ArtifactBuildTool(
+        lambda: SandboxManager(
+            adapter,
+            image_digest=fake_image_digest(),
+            limits=ResourceLimits(1000, 64 * 1024**2, 32, 64 * 1024**2, 100, 30),
+        )
+    )
+
+    class FailingWriter(_RecordingWriter):
+        async def create(
+            self,
+            stream: AsyncIterator[bytes],
+            filename: str,
+            media_type: str,
+            trust: TrustLevel,
+        ) -> StoredArtifactRef:
+            if self.calls:
+                raise error("Private storage diagnostics must not reach the model.")
+            return await super().create(stream, filename, media_type, trust)
+
+    writer = FailingWriter()
+    arguments = package()
+    arguments["outputs"].append(
+        {"path": "second.txt", "filename": "second.txt", "media_type": "text/plain"}
+    )
+    context = replace(tool_context(), artifacts=writer)
+    if error is asyncio.CancelledError:
+        with pytest.raises(asyncio.CancelledError):
+            await tool.execute(arguments, context)
+    else:
+        result = await tool.execute(arguments, context)
+        assert not result.ok
+        assert result.failure is not None
+        assert result.failure.kind is ToolFailureKind.INTERNAL
+        assert result.failure.reason_code == "tool.internal_error"
+        assert not result.failure.retryable
+        assert result.structured is not None
+        assert result.structured["complete"] is False
+        assert result.structured["attached"] == result.artifacts
+        assert len(result.artifacts) == 1
+        assert result.artifacts[0]["media_type"] == "image/png"
+        assert "Private storage diagnostics" not in result.model_dump_json()
+    assert len(writer.calls) == 1
+    assert len(adapter.commands) == 1
     assert not adapter.live_environment_ids()
 
 

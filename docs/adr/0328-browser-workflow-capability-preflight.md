@@ -70,3 +70,16 @@ The full `make test-browser BROWSER_TEST_WORKERS=1` partition passed all 419
 cases in 895.49 seconds, with no skips or warnings. One worker limited contention
 with other local sandbox work. This is construction evidence, not production or
 live-site acceptance.
+
+The PR 255 promotion repair passes the existing argument validator into the runner
+from bootstrap instead of importing `tools.validation` from runtime. This restores
+the Section 5 dependency boundary without changing capability or approval decisions.
+The existing `tests/gates/test_import_boundaries.py` gate first failed on that exact
+runtime-to-tools edge. The added injected-validator regression in
+`tests/unit/test_browser_workflow_capabilities.py` first failed because preflight
+did not accept a validator. Both failures were reproduced with
+`scripts/run_in_linux_container.sh uv run pytest -q` and their respective test paths.
+After the repair, the architecture and non-browser workflow selection passed all
+158 cases (35 browser cases deselected) in 74.99 seconds, and the real Chromium
+capability suite passed all three cases in 20.10 seconds. Repository lint and type
+checking passed. No boundary rule, public schema, milestone or gate changes.

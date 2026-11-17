@@ -1,18 +1,21 @@
 """Recipe selection must not start work that its pinned tools cannot express."""
 
 from copy import deepcopy
+from typing import Any
 
 import pytest
 
 import agent_core.bootstrap as bootstrap
 from agent_core.config import load_config_document, load_settings
 from agent_core.domain.browser_workflows import BrowserWorkflowRecipe
+from agent_core.domain.errors import ToolValidationError
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.domain.runs import RunStatus
 from agent_core.runtime.browser_workflows import _supports_recipe
 from agent_core.tools.browser_act import ShadowBrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import CompletionBrowserObserveTool, PagedBrowserObserveTool
+from agent_core.tools.validation import validate_and_normalize
 from tests.unit.test_browser_composition import PROFILE_ID, seed_browser_authority
 from tests.unit.test_browser_tools import FakeBrowserProvider
 from tests.unit.test_browser_workflows import CATALOG
@@ -20,6 +23,18 @@ from tests.unit.test_config import base_environment
 
 SPECS = (BrowserNavigateTool.spec, CompletionBrowserObserveTool.spec, ShadowBrowserActTool.spec)
 NAMES = {spec.name for spec in SPECS}
+
+
+def test_preflight_uses_injected_validator_without_executing_tools() -> None:
+    recipe = BrowserWorkflowRecipe.model_validate(CATALOG["recipes"][0])
+    checked: list[tuple[dict[str, Any], dict[str, Any]]] = []
+
+    def reject(arguments: dict[str, Any], schema: dict[str, Any]) -> object:
+        checked.append((arguments, schema))
+        raise ToolValidationError("unsupported pinned arguments")
+
+    assert not _supports_recipe(recipe, NAMES, SPECS, validate_arguments=reject)
+    assert checked == [({"url": recipe.steps[0].url}, SPECS[0].input_schema)]
 
 
 @pytest.mark.parametrize(
@@ -47,7 +62,7 @@ def test_preflight_validates_every_required_mode_against_pinned_schemas(mode: st
             "fields": [{"name": "total", "column": 0, "type": "number"}],
         }
     recipe = BrowserWorkflowRecipe.model_validate(catalog["recipes"][0])
-    assert _supports_recipe(recipe, NAMES, SPECS)
+    assert _supports_recipe(recipe, NAMES, SPECS, validate_arguments=validate_and_normalize)
     name, field = {
         "action": ("browser.act", "kind"),
         "focus": ("browser.observe", "region_ref"),
@@ -71,14 +86,23 @@ def test_preflight_validates_every_required_mode_against_pinned_schemas(mode: st
         else spec
         for spec in SPECS
     )
-    assert not _supports_recipe(recipe, NAMES, restricted)
+    assert not _supports_recipe(
+        recipe, NAMES, restricted, validate_arguments=validate_and_normalize
+    )
 
 
 def test_preflight_requires_both_advertisement_and_pinned_definition() -> None:
     recipe = BrowserWorkflowRecipe.model_validate(CATALOG["recipes"][0])
-    assert not _supports_recipe(recipe, NAMES - {"browser.act"}, SPECS)
-    assert not _supports_recipe(recipe, NAMES, SPECS[:2])
-    assert not _supports_recipe(recipe, NAMES, (SPECS[0], PagedBrowserObserveTool.spec, SPECS[2]))
+    assert not _supports_recipe(
+        recipe, NAMES - {"browser.act"}, SPECS, validate_arguments=validate_and_normalize
+    )
+    assert not _supports_recipe(recipe, NAMES, SPECS[:2], validate_arguments=validate_and_normalize)
+    assert not _supports_recipe(
+        recipe,
+        NAMES,
+        (SPECS[0], PagedBrowserObserveTool.spec, SPECS[2]),
+        validate_arguments=validate_and_normalize,
+    )
 
 
 @pytest.mark.parametrize("restriction", ["field_type", "row_limit"])
@@ -96,9 +120,12 @@ def test_extraction_checks_reviewed_literals_not_just_mode_presence(restriction:
         schema["$defs"]["f"]["properties"]["type"] = {"const": "string"}
     else:
         schema["properties"]["extract"]["properties"]["row_limit"]["maximum"] = 10
-    assert _supports_recipe(recipe, NAMES, SPECS)
+    assert _supports_recipe(recipe, NAMES, SPECS, validate_arguments=validate_and_normalize)
     assert not _supports_recipe(
-        recipe, NAMES, (SPECS[0], SPECS[1].model_copy(update={"input_schema": schema}), SPECS[2])
+        recipe,
+        NAMES,
+        (SPECS[0], SPECS[1].model_copy(update={"input_schema": schema}), SPECS[2]),
+        validate_arguments=validate_and_normalize,
     )
 
 
@@ -106,7 +133,10 @@ def test_navigate_only_recipe_does_not_require_unused_browser_tools() -> None:
     document = deepcopy(CATALOG["recipes"][0])
     document["steps"] = document["steps"][:1]
     assert _supports_recipe(
-        BrowserWorkflowRecipe.model_validate(document), {"browser.navigate"}, SPECS[:1]
+        BrowserWorkflowRecipe.model_validate(document),
+        {"browser.navigate"},
+        SPECS[:1],
+        validate_arguments=validate_and_normalize,
     )
 
 
@@ -120,7 +150,10 @@ def test_wait_only_step_does_not_require_a_plain_observation() -> None:
         update={"input_schema": {**deepcopy(SPECS[1].input_schema), "required": ["wait_for"]}}
     )
     assert _supports_recipe(
-        BrowserWorkflowRecipe.model_validate(document), NAMES, (SPECS[0], observe)
+        BrowserWorkflowRecipe.model_validate(document),
+        NAMES,
+        (SPECS[0], observe),
+        validate_arguments=validate_and_normalize,
     )
 
 

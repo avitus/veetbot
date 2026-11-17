@@ -77,8 +77,23 @@ corrected and verified above. The other three report the same pre-existing
 scan of an untouched archive of `dev` at `d34e01a5` and the changed checkout
 returned the identical single violation. This work neither changes that runtime
 nor relaxes its boundary checks; the repository-wide static gate is not green.
+The subsequent PR 255 promotion repair restores that dependency boundary by
+injecting the validator through bootstrap; its focused evidence is recorded in
+[ADR-0328](0328-browser-workflow-capability-preflight.md).
 
 Documentation checks include citation repair. Reading lane A (also the
 diff-derived minimum). No engineering plan requirement or policy profile is
 weakened, and no milestone gate is marked complete. Production release and a
 new chat remain necessary before the owner can use these tools.
+
+PR 255 review fixes also preserve completed attachments when a later export raises
+an unexpected storage exception. The result is an explicit, non-retryable
+`tool.internal_error` with no storage diagnostics; cancellation still propagates
+and destroys the sandbox. The regression command
+`scripts/run_in_linux_container.sh uv run pytest -q tests/unit/test_offline_artifact_build.py -k export_exception`
+first failed for `OSError` and `RuntimeError` escaping after the first export.
+The artifact-build/export selection now passes all 40 cases in 10.09 seconds,
+including cancellation during export. All 17 real Docker static-visual cases pass
+in 64.35 seconds; the bundled example explicitly requires PNG, CSV and JSON media
+types before validating their contents. Lint and type checking pass. This repairs
+the existing export-failure contract without changing approval or replay policy.

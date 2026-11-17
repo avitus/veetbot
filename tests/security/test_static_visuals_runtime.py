@@ -72,6 +72,11 @@ async def test_one_offline_build_renders_and_delivers_the_bundled_example(
         result = await ArtifactBuildTool(lambda: visual_sandbox).execute(package, context)
         assert result.ok, result.failure
         assert len(result.artifacts) == 3
+        assert {ref["media_type"] for ref in result.artifacts} == {
+            "image/png",
+            "text/csv",
+            "application/json",
+        }
         for ref in result.artifacts:
             artifact_id = UUID(ref["artifact_id"])
             opened = await composition.services.artifacts.open_content(

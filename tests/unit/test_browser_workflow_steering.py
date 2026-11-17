@@ -22,6 +22,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.runs import RunStatus
 from agent_core.domain.views import SubmitResult, TextContentBlock
 from agent_core.runtime.loop import checkpoint as runtime_checkpoint
+from agent_core.tools.validation import validate_and_normalize
 from tests.unit.test_browser_composition import GRANT_NOW, PROFILE_ID, seed_browser_authority
 from tests.unit.test_browser_tools import FakeBrowserProvider
 from tests.unit.test_browser_workflows import CATALOG
@@ -198,7 +199,11 @@ async def test_follow_up_waits_for_approval_and_effect_reconciliation(
 
 
 async def test_retired_recipe_cannot_restart_after_a_crash() -> None:
-    runner = workflows.BrowserWorkflowRunner(BrowserWorkflowCatalog(), policy_version="changed")
+    runner = workflows.BrowserWorkflowRunner(
+        BrowserWorkflowCatalog(),
+        policy_version="changed",
+        validate_arguments=validate_and_normalize,
+    )
     context: Any = SimpleNamespace(
         checkpoint=SimpleNamespace(working_state={"browser_workflow": {"status": "steered"}})
     )

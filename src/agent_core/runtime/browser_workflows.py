@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -34,7 +35,8 @@ from agent_core.runtime.loop import (
     recover_browser_failure,
     with_event_sequences,
 )
-from agent_core.tools.validation import validate_and_normalize
+
+type ArgumentValidator = Callable[[dict[str, Any], dict[str, Any]], object]
 
 
 def _intent(value: str) -> str:
@@ -64,7 +66,11 @@ def _condition(condition: BrowserCondition) -> dict[str, Any]:
 
 
 def _supports_recipe(
-    recipe: BrowserWorkflowRecipe, available: set[str], specs: tuple[ToolSpec, ...]
+    recipe: BrowserWorkflowRecipe,
+    available: set[str],
+    specs: tuple[ToolSpec, ...],
+    *,
+    validate_arguments: ArgumentValidator,
 ) -> bool:
     """Check pinned argument shapes only; placeholders never reach a provider."""
     schemas = {spec.name: spec.input_schema for spec in specs}
@@ -159,7 +165,7 @@ def _supports_recipe(
         if name not in available or name not in schemas:
             return False
         try:
-            validate_and_normalize(arguments, schemas[name])
+            validate_arguments(arguments, schemas[name])
         except ToolValidationError:
             return False
     return True
@@ -223,9 +229,16 @@ def _control_continuation(
 
 
 class BrowserWorkflowRunner:
-    def __init__(self, catalog: BrowserWorkflowCatalog, *, policy_version: str) -> None:
+    def __init__(
+        self,
+        catalog: BrowserWorkflowCatalog,
+        *,
+        policy_version: str,
+        validate_arguments: ArgumentValidator,
+    ) -> None:
         self._catalog = catalog
         self._policy_version = policy_version
+        self._validate_arguments = validate_arguments
 
     async def __call__(self, context: RunContext) -> RunOutcome | None:
         state = context.checkpoint.working_state.get("browser_workflow")
@@ -282,6 +295,7 @@ class BrowserWorkflowRunner:
                 set(context.context_plan.tool_names)
                 | set(context.context_plan.deferred_tool_names),
                 context.context_plan.pinned_tool_specs,
+                validate_arguments=self._validate_arguments,
             ):
                 return None
             state = {

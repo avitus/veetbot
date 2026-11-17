@@ -185,7 +185,17 @@ class ArtifactBuildTool:
                 )
             exporter = ArtifactExportTool(max_artifact_bytes=MAX_FILE_BYTES)
             for output in outputs:
-                exported = await exporter.execute(output, isolated_context)
+                try:
+                    exported = await exporter.execute(output, isolated_context)
+                except Exception:
+                    # Cancellation remains a BaseException and must propagate.
+                    # Never expose storage diagnostics or lose completed exports.
+                    return _failure(
+                        "An output could not be attached. Only the listed files were attached.",
+                        kind=ToolFailureKind.INTERNAL,
+                        code="tool.internal_error",
+                        artifacts=attached,
+                    )
                 if not exported.ok:
                     return _failure(
                         "An output could not be attached. Only the listed files were attached.",
