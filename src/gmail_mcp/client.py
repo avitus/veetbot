@@ -20,8 +20,12 @@ import httpx
 from gmail_mcp.constants import (
     ATTACHMENT_MAXIMUM_BYTES,
     ATTACHMENT_UPSTREAM_MAXIMUM_BYTES,
+    DRAFT_ATTACHMENT_BASE64_MAXIMUM_BYTES,
+    DRAFT_ATTACHMENT_MAXIMUM_BYTES,
     GMAIL_API_ROOT,
     GOOGLE_TOKEN_ENDPOINT,
+    MESSAGE_BASE64_MAXIMUM_BYTES,
+    MESSAGE_MIME_MAXIMUM_BYTES,
     OUTPUT_MAXIMUM_BYTES,
     UPSTREAM_MAXIMUM_BYTES,
 )
@@ -688,13 +692,16 @@ class GmailClient:
             for item in attachments:
                 try:
                     encoded = item["data_base64"]
-                    if not isinstance(encoded, str) or len(encoded) > 20 * 1024 * 1024:
+                    if (
+                        not isinstance(encoded, str)
+                        or len(encoded) > DRAFT_ATTACHMENT_BASE64_MAXIMUM_BYTES
+                    ):
                         raise ValueError
                     content = base64.b64decode(encoded, validate=True)
                     total += len(content)
                     if (
                         not content
-                        or total > 15 * 1024 * 1024
+                        or total > DRAFT_ATTACHMENT_MAXIMUM_BYTES
                         or len(content) != item["size_bytes"]
                         or hashlib.sha256(content).hexdigest() != item["sha256"]
                     ):
@@ -707,8 +714,11 @@ class GmailClient:
                     message.add_attachment(content, maintype=main, subtype=sub, filename=filename)
                 except (KeyError, TypeError, ValueError, binascii.Error) as exc:
                     raise GmailError("gmail.arguments_invalid") from exc
-        raw = base64.urlsafe_b64encode(message.as_bytes()).decode().rstrip("=")
-        if len(raw) > 24 * 1024 * 1024:
+        mime = message.as_bytes()
+        if len(mime) > MESSAGE_MIME_MAXIMUM_BYTES:
+            raise GmailError("gmail.attachment_too_large")
+        raw = base64.urlsafe_b64encode(mime).decode().rstrip("=")
+        if len(raw) > MESSAGE_BASE64_MAXIMUM_BYTES:
             raise GmailError("gmail.attachment_too_large")
         return raw
 

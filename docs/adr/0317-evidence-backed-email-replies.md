@@ -74,8 +74,10 @@ itself. Research completion must not be represented as a completed external acti
    cannot change recipients, authorize actions or enlarge the research allowlist.
 4. **Private draft staging, distinct from Save to Chat.** Add an application-only
    attachment staging operation using the existing bounded first-party Gmail
-   fetch. Limit the draft to ten files and 15 MiB aggregate decoded bytes, and
-   reject an encoded outbound message above 24 MiB. Download outside model/event
+   fetch. Originally limited to ten files and 15 MiB aggregate decoded bytes,
+   with a 24 MiB encoded-message cap; [ADR-0331](0331-gmail-draft-attachment-capacity.md)
+   amends the byte ceilings to 25,000,000 decoded bytes, 35 MiB MIME and its
+   padded-base64 transport bound, retaining the ten-file limit. Download outside model/event
    payloads, validate the source position/name and inspected type, and create
    immutable draft-owned blobs with SHA-256 digests. Reuse the artifact store
    through a typed service; do not expose arbitrary filesystem paths or provider

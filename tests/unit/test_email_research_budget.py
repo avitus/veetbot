@@ -4,10 +4,12 @@ import base64
 import hashlib
 import json
 from dataclasses import replace
+from io import BytesIO
 from typing import Any, cast
 from uuid import uuid4
 
 import pytest
+from pypdf import PdfWriter
 
 from agent_core.adapters.mcp.scripted import ScriptedMCPClient
 from agent_core.adapters.models.fake import FakeModelProvider
@@ -23,12 +25,32 @@ from tests.gates.test_email_runtime_m26 import _mailbox_factory
 
 
 @pytest.mark.parametrize(
-    "mode", ["broad", "select_unread", "repeat_search", "overflow", "forged", "incomplete_source"]
+    "mode",
+    [
+        "broad",
+        "select_unread",
+        "repeat_search",
+        "overflow",
+        "forged",
+        "incomplete_source",
+        "large",
+        "single_large",
+        "too_large",
+    ],
 )
 async def test_broad_search_leaves_room_for_the_complete_document_set(mode: str) -> None:
     documents = [
         CONTENT + f"\n% document {i}\n".encode() for i in range(8 if mode == "overflow" else 4)
     ]
+    if mode in {"large", "single_large"}:
+        documents = []
+        for size in (24_000_000,) if mode == "single_large" else (14_000_000, 6_000_000):
+            writer = PdfWriter()
+            writer.add_blank_page(width=72, height=72)
+            writer.add_attachment("synthetic-padding.bin", b"x" * size)
+            output = BytesIO()
+            writer.write(output)
+            documents.append(output.getvalue())
     source = observation(body="The current board meeting materials are attached.")
     source["thread_id"] = "materials"
     source["messages"][0].update(id="materials-message", thread_id="materials")
@@ -36,6 +58,8 @@ async def test_broad_search_leaves_room_for_the_complete_document_set(mode: str)
         {"filename": f"board-{i}.pdf", "mime_type": "application/pdf", "size": len(data)}
         for i, data in enumerate(documents)
     ]
+    if mode == "too_large":
+        source["messages"][0]["attachments"][0]["size"] = 25_000_001
     base = await _mailbox_factory([])
     reads: list[tuple[str, dict[str, object]]] = []
 
@@ -167,7 +191,7 @@ async def test_broad_search_leaves_room_for_the_complete_document_set(mode: str)
             script.turns.insert(1, ScriptedTurn(text=json.dumps(continuation)))
         operation = await service.submit_task(app.principal, kind="draft", thread_id=thread.id)
         run = await app.runs.get(operation.run_id)
-        if mode in {"overflow", "forged", "incomplete_source"}:
+        if mode in {"overflow", "forged", "incomplete_source", "too_large"}:
             assert run.status is RunStatus.FAILED
             assert run.failure is not None
             assert run.failure.error_class == "DraftPreparationError"
@@ -175,6 +199,7 @@ async def test_broad_search_leaves_room_for_the_complete_document_set(mode: str)
                 "overflow": "complete attachment set",
                 "forged": "observed search results",
                 "incomplete_source": "source remains incomplete",
+                "too_large": "email size limit",
             }[mode]
             assert expected in run.failure.message
             assert not any(name == "stage_attachment" for name, _ in reads)
@@ -188,7 +213,7 @@ async def test_broad_search_leaves_room_for_the_complete_document_set(mode: str)
         }
         assert len(reads) <= 10
         source_reads = [args["thread_id"] for name, args in reads if name == "get_thread_page"]
-        if mode == "broad":
+        if mode in {"broad", "large", "single_large"}:
             assert source_reads == ["materials"]
         elif mode == "select_unread":
             assert source_reads == ["other-0", "materials"]

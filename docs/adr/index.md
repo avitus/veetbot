@@ -381,3 +381,4 @@ implementation without one.
 - [ADR-0328: Check pinned capabilities before selecting a browser workflow (Accepted)](0328-browser-workflow-capability-preflight.md)
 - [ADR-0329: Inbox omits mail ranked below a relevance floor (Accepted)](0329-inbox-relevance-floor.md)
 - [ADR-0330: One offline artifact build (Accepted)](0330-one-offline-artifact-build.md)
+- [ADR-0331: Match draft attachment capacity to Gmail (Accepted)](0331-gmail-draft-attachment-capacity.md)

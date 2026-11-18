@@ -1,3 +1,7 @@
+# ADR-0331: On 2026-11-18 the owner approved increasing draft attachment capacity
+# to 25 MB with bounded MIME/transport encoding and unchanged exact-file consent.
+# Repair and dev delivery are authorized; production and live regeneration remain
+# separate. No milestone or gate moves.
 # ADR-0328: Owner-authorized W6 continuation checks pinned tool capabilities
 # before recipe selection performs any browser work. Unsupported recipes use
 # ordinary planning; current authorization and non-replay rules remain unchanged.
