@@ -123,6 +123,11 @@ the explicit ids `gmail_{account_id}_read`, `gmail_{account_id}_write`, and
   files by id, source, filename, media type, size and digest. The platform resolves
   bytes after exact-message approval and passes them only over private stdio.
   The Gmail adapter verifies those bytes and MIME limits before any send request.
+  [ADR-0331](../adr/0331-gmail-draft-attachment-capacity.md) bounds the ten-file
+  manifest to 25,000,000 decoded bytes, serialized MIME to 35 MiB and outer
+  base64url to that MIME ceiling's padded base64 size. Private staging and send
+  decoding enforce the same decoded-file ceiling; source fetching retains its
+  existing 32 MiB bound.
 
 ## Credentials and the bootstrap ceremony
 

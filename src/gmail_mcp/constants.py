@@ -53,3 +53,10 @@ OUTPUT_MAXIMUM_BYTES: Final = 1024 * 1024
 # upstream bound, which holds this many bytes in base64 plus its JSON wrapper.
 ATTACHMENT_MAXIMUM_BYTES: Final = 32 * 1024 * 1024
 ATTACHMENT_UPSTREAM_MAXIMUM_BYTES: Final = (ATTACHMENT_MAXIMUM_BYTES // 3 + 1) * 4 + 64 * 1024
+
+# ADR-0331. Keep the first-party provider package import-isolated from agent_core;
+# boundary regressions verify agreement with its draft manifest/admission limits.
+DRAFT_ATTACHMENT_MAXIMUM_BYTES: Final = 25_000_000
+DRAFT_ATTACHMENT_BASE64_MAXIMUM_BYTES: Final = 4 * ((DRAFT_ATTACHMENT_MAXIMUM_BYTES + 2) // 3)
+MESSAGE_MIME_MAXIMUM_BYTES: Final = 35 * 1024 * 1024
+MESSAGE_BASE64_MAXIMUM_BYTES: Final = 4 * ((MESSAGE_MIME_MAXIMUM_BYTES + 2) // 3)

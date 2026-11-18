@@ -200,7 +200,7 @@ async def test_attachment_capabilities_are_application_only() -> None:
         "exclude_sent",
         "exclude_uncertain",
         "cleanup_failure",
-        "encoded_limit",
+        "attachment_limit",
         "staging_count",
         "send",
         "progress",
@@ -228,8 +228,8 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
     source["messages"][0]["attachments"] = [
         {"filename": "board.pdf", "mime_type": "application/pdf", "size": len(CONTENT)}
     ]
-    if after == "encoded_limit":
-        source["messages"][0]["attachments"][0]["size"] = 14 * 1024 * 1024
+    if after == "attachment_limit":
+        source["messages"][0]["attachments"][0]["size"] = 25_000_001
     factory = await _mailbox_factory(
         [
             ("get_profile", {"email_address": "owner@example.com"}),
@@ -392,12 +392,12 @@ async def test_drafter_stages_verified_file_without_sending_or_persisting_bytes(
         )
         operation = await service.submit_task(app.principal, kind="draft", thread_id=thread.id)
         run = await app.runs.get(operation.run_id)
-        if after in {"encoded_limit", "staging_count"}:
+        if after in {"attachment_limit", "staging_count"}:
             assert run.status is RunStatus.FAILED
             async with app.uow_factory() as uow:
                 calls = await uow.invocations.list_for_run(run.id, app.principal)
                 files = await uow.artifacts.list_for_run(run.id, app.principal)
-            if after == "encoded_limit":
+            if after == "attachment_limit":
                 assert not any(call.tool_name.endswith("stage_attachment") for call in calls)
             else:
                 assert len(files) == 10

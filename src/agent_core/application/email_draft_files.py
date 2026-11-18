@@ -20,6 +20,7 @@ from agent_core.domain.artifacts import (
 from agent_core.domain.attachments import stored_email_attachment_name
 from agent_core.domain.email import EmailDraft, EmailTask, EmailThread, send_message_arguments
 from agent_core.domain.email_drafting import (
+    DRAFT_ATTACHMENT_BASE64_BYTES,
     DRAFT_ATTACHMENT_BYTES,
     DRAFT_ATTACHMENT_ORIGIN,
     DRAFT_TARGET_KEY,
@@ -223,7 +224,7 @@ class EmailDraftFiles:
         ):
             raise ConflictError("Attachment identity changed")
         encoded = value["data_base64"]
-        if not isinstance(encoded, str) or len(encoded) > 20 * 1024 * 1024:
+        if not isinstance(encoded, str) or len(encoded) > DRAFT_ATTACHMENT_BASE64_BYTES:
             raise ValueError("Attachment exceeds limit")
         content = base64.b64decode(encoded, validate=True)
         if not content or len(content) > DRAFT_ATTACHMENT_BYTES:

@@ -12,7 +12,7 @@ from mcp.types import CallToolResult, TextContent
 from pydantic import Field, WithJsonSchema
 
 from gmail_mcp.client import GmailClient
-from gmail_mcp.constants import ROSTERS
+from gmail_mcp.constants import DRAFT_ATTACHMENT_MAXIMUM_BYTES, ROSTERS
 from gmail_mcp.errors import GmailError
 
 DRAFT_FILE_SCHEMA = {
@@ -30,7 +30,11 @@ DRAFT_FILE_SCHEMA = {
             "attachment_index": {"type": "integer", "minimum": 0, "maximum": 1000},
             "filename": {"type": "string", "minLength": 1, "maxLength": 1024},
             "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
-            "size_bytes": {"type": "integer", "minimum": 1, "maximum": 15728640},
+            "size_bytes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": DRAFT_ATTACHMENT_MAXIMUM_BYTES,
+            },
             "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         },
         "required": [

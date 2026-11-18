@@ -756,8 +756,12 @@ successful draft binds its manifest and owns those blobs. The application-only
 resolves and verifies bytes after approval and injects them only into the private
 stdio request. Text-only drafts retain the original send tool. No remote provider
 file is refetched after send approval. Preparation and send admission conservatively
-check MIME wrapping and outer base64 expansion against the existing 24 MiB cap,
-so the 15 MiB decoded-file cap never implies that every such message fits transport.
+check MIME wrapping and outer base64 expansion separately. Under
+[ADR-0331](../adr/0331-gmail-draft-attachment-capacity.md), at most ten files may
+total 25,000,000 decoded bytes. MIME is bounded to 35 MiB, and outer base64url to
+the padded base64 size of that ceiling. Preparation reserves envelope, headers
+and text overhead; the Gmail adapter validates the actual serialized MIME before
+dispatch. Files retain their original bytes and an oversized set still blocks preparation.
 Source pages consume the same ten-read allowance; an unfinished required source
 is a preparation failure, not evidence that a document is absent.
 

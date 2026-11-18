@@ -8,14 +8,18 @@ from pydantic import AwareDatetime, Field
 from agent_core.domain.email_base import EmailValue
 from agent_core.domain.errors import ConflictError
 
-DRAFT_ATTACHMENT_BYTES = 15 * 1024 * 1024
+# ADR-0331: decimal attachment capacity; MIME and outer base64 are separate bounds.
+DRAFT_ATTACHMENT_BYTES = 25_000_000
+DRAFT_ATTACHMENT_BASE64_BYTES = 4 * ((DRAFT_ATTACHMENT_BYTES + 2) // 3)
+DRAFT_MIME_BYTES = 35 * 1024 * 1024
+DRAFT_TRANSPORT_BYTES = 4 * ((DRAFT_MIME_BYTES + 2) // 3)
 DRAFT_ATTACHMENT_LIMIT = 10
 DRAFT_ATTACHMENT_ORIGIN = "email_draft_attachment"
 DRAFT_TARGET_KEY = "email_draft_thread"
 
 
 def draft_transport_fits(body: str, sizes: Iterable[int]) -> bool:
-    """Conservative MIME/outer-base64 admission under the existing 24 MiB cap.
+    """Conservative MIME/outer-base64 admission under the ADR-0331 ceilings.
 
     Reserve one MiB for bounded envelope, filenames and MIME headers. Text may
     use quoted-printable; attachments use wrapped base64, then Gmail wraps the
@@ -26,7 +30,7 @@ def draft_transport_fits(body: str, sizes: Iterable[int]) -> bool:
     for size in sizes:
         encoded = 4 * ((size + 2) // 3)
         mime_bytes += encoded + 2 * ((encoded + 75) // 76)
-    return 4 * ((mime_bytes + 2) // 3) <= 24 * 1024 * 1024
+    return mime_bytes <= DRAFT_MIME_BYTES and 4 * ((mime_bytes + 2) // 3) <= DRAFT_TRANSPORT_BYTES
 
 
 class EmailToolError(Exception):
