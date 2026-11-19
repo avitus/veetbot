@@ -5,6 +5,7 @@ title: Architecture Decisions
 # Architecture decision records
 
 - [ADR-0332: Email refresh reuses unchanged projections (Accepted)](0332-email-refresh-reuses-unchanged-projections.md)
+- [ADR-0333: Readiness checks before reviewed browser actions (Accepted)](0333-browser-workflow-action-readiness.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the

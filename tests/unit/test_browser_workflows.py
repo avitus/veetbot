@@ -1,5 +1,6 @@
 """Reviewed recipes still cross the ordinary action-approval and effect boundary."""
 
+from copy import deepcopy
 from typing import Any
 from uuid import UUID
 
@@ -60,17 +61,23 @@ def test_recipe_stores_normalized_origin(origin: str) -> None:
 @pytest.mark.parametrize("lost_response", [False, True])
 @pytest.mark.parametrize("receipt", [False, True])
 @pytest.mark.parametrize("reason", ["outcome_unknown", "needs_user"])
+@pytest.mark.parametrize("readiness", [False, True])
 async def test_reviewed_workflow_uses_fresh_targets_and_never_replays_a_lost_write(
     monkeypatch: pytest.MonkeyPatch,
     lost_response: bool,
     receipt: bool,
     reason: str,
+    readiness: bool,
 ) -> None:
     original_loader = load_config_document
+    catalog = deepcopy(CATALOG)
+    ready_condition = {"evidence": {"kind": "text", "text": "Account overview"}, "timeout_ms": 0}
+    if readiness:
+        catalog["recipes"][0]["steps"][1]["precondition"] = ready_condition
 
     def load(settings: Any, relative: str) -> dict[str, Any]:
         return (
-            CATALOG
+            catalog
             if relative == "runtime/browser-workflows.yaml"
             else original_loader(settings, relative)
         )
@@ -171,6 +178,14 @@ async def test_reviewed_workflow_uses_fresh_targets_and_never_replays_a_lost_wri
         "verified" if receipt else "unverified"
     )
     assert checkpoint.working_state["browser_workflow_report_only"]
+    from agent_core.domain.messages import ToolCallItem
+
+    assert sum(
+        isinstance(item, ToolCallItem)
+        and item.name == "browser.observe"
+        and item.arguments == {"wait_for": ready_condition}
+        for item in checkpoint.conversation
+    ) == int(readiness)
     assert sum(event.event_type == "run.waiting_for_user" for event in events) == int(signed_in)
     assert sum(event.event_type == "user.message.created" for event in events) == 1
     from agent_core.context.history import validate_tool_pairs

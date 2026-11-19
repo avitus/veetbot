@@ -37,6 +37,7 @@ class BrowserWorkflowStep(BaseModel):
     key: str | None = None
     delta_y: int | None = None
     postcondition: BrowserCondition | None = None
+    precondition: BrowserCondition | None = None
     target_region: BrowserRegionEvidence | None = None
     collection_kind: Literal["table", "list", "form"] | None = None
     index: int = Field(default=0, ge=0, le=15)
@@ -58,6 +59,7 @@ class BrowserWorkflowStep(BaseModel):
                 "key",
                 "delta_y",
                 "postcondition",
+                "precondition",
                 "target_region",
             },
             "extract": {"kind", "collection_kind", "index", "fields", "row_limit"},

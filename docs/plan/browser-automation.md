@@ -2216,6 +2216,20 @@ differences never disambiguate matching intents. Started workflows retain their
 existing resume and binding rules, and actual calls still revalidate current
 policy, schemas, budgets, revisions and approvals.
 
+An action's optional `precondition` requests a bounded readiness wait before
+target discovery ([ADR-0333](../adr/0333-browser-workflow-action-readiness.md)).
+The runner queues an ordinary `browser.observe(wait_for=...)`; only `satisfied`
+evidence from an uninterrupted same-origin result permits a separate fresh target
+read. Declared failure stops as `observed_failure`; missing, conflicting or
+unsuccessful evidence stops as
+`unverified`, before approval or dispatch. The wait spends existing time, read,
+call and step budgets without completing the action or changing its four-window
+target allowance. Region targeting, current authorization and postcondition
+reconciliation remain unchanged. Readiness is not a persistent invariant or
+authorization: actual dispatch still uses fresh target and revision checks.
+Pinned-capability preflight validates the readiness arguments, and omitted
+preconditions preserve existing recipe identities. No deployed recipe changes.
+
 A successful, uninterrupted same-origin result with a declared positive failure
 condition ends an unbranched observe/action step as `observed_failure`, including
 read-only reconciliation after response loss. An action response already carrying
