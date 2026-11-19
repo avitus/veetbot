@@ -1,6 +1,6 @@
 """Atomic call erasure. Dependency sets live in transaction-local PostgreSQL tables."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
 from typing import Any, cast
 
@@ -23,13 +23,13 @@ from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 _BATCH = 64
 
 
-async def _rows(
+async def _pages(
     session: AsyncSession,
     model: type[Any],
     sql: str,
     *flags: str,
     params: dict[str, Any] | None = None,
-) -> AsyncIterator[Any]:
+) -> AsyncIterator[Sequence[Any]]:
     statement = (
         select(model, *(literal_column(flag) for flag in flags))
         .from_statement(text(sql))
@@ -38,12 +38,23 @@ async def _rows(
     cursor = await session.stream(statement, params)
     try:
         async for page in cursor.partitions(_BATCH):
-            for row in page:
-                yield row
+            yield page
             # Dirty ORM objects are strongly retained until flushed.
             await session.flush()
     finally:
         await cursor.close()
+
+
+async def _rows(
+    session: AsyncSession,
+    model: type[Any],
+    sql: str,
+    *flags: str,
+    params: dict[str, Any] | None = None,
+) -> AsyncIterator[Any]:
+    async for page in _pages(session, model, sql, *flags, params=params):
+        for row in page:
+            yield row
 
 
 async def erase_postgres_call(
@@ -180,7 +191,8 @@ async def _find_dependents(session: AsyncSession, owner: dict[str, str]) -> None
     await session.execute(
         text("""
         INSERT INTO pg_temp.call_belief_events
-        SELECT e.id, e.payload->'belief'->>'id' AS belief_id FROM events e
+        SELECT e.id, CASE WHEN jsonb_typeof(e.payload->'belief'->'id')='string'
+            THEN e.payload->'belief'->>'id' END AS belief_id FROM events e
         JOIN (SELECT DISTINCT session_id FROM pg_temp.call_sources) src USING (session_id)
         WHERE e.payload->'belief'->>'authority'='inferred'
           AND e.payload->'belief'->>'source_session_id'=e.session_id::text
@@ -217,7 +229,7 @@ async def _redact_events(session: AsyncSession, call_id: str) -> int:
         """
         SELECT e.*, b.id IS NOT NULL AS belief_event,
             (r.id IS NOT NULL OR seq.sequence IS NOT NULL) AS derived
-        FROM events e JOIN pg_temp.call_sessions cs ON cs.id=e.session_id
+        FROM events e JOIN pg_temp.call_owned o ON o.id=e.session_id
         LEFT JOIN pg_temp.call_belief_events b ON b.id=e.id
         LEFT JOIN pg_temp.call_runs r ON r.id=e.run_id
         LEFT JOIN pg_temp.call_sequences seq USING (session_id, sequence)
@@ -348,8 +360,19 @@ async def _purge_derived_records(
     )
 
 
+def _trace_candidates(trace: dict[str, Any]) -> set[str]:
+    items = trace.get("beliefs", [])
+    candidates = {str(b.get("belief_id")) for b in items if isinstance(b, dict)}
+    candidates.update(
+        str(i) for b in items if isinstance(b, dict) for i in b.get("support_ids", [])
+    )
+    for field in ("returned", "cited", "carried_in", "blocked", "dropped_for_budget"):
+        candidates.update(str(item) for item in trace.get(field, []))
+    return candidates
+
+
 async def _recall_dependencies(session: AsyncSession, owner: dict[str, str]) -> None:
-    async for (row,) in _rows(
+    async for page in _pages(
         session,
         RecallTraceRow,
         """
@@ -358,34 +381,42 @@ async def _recall_dependencies(session: AsyncSession, owner: dict[str, str]) -> 
     """,
         params=owner,
     ):
-        items = row.trace.get("beliefs", [])
-        candidates = {str(b.get("belief_id")) for b in items if isinstance(b, dict)}
-        candidates.update(
-            str(i) for b in items if isinstance(b, dict) for i in b.get("support_ids", [])
-        )
-        for field in ("returned", "cited", "carried_in", "blocked", "dropped_for_budget"):
-            candidates.update(str(item) for item in row.trace.get(field, []))
-        ids = await session.scalars(
-            text("""
+        trace_candidates = [(row, _trace_candidates(row.trace)) for (row,) in page]
+        candidates = {identifier for _, ids in trace_candidates for identifier in ids}
+        if not candidates:
+            continue
+        matches = set(
+            await session.scalars(
+                text("""
             SELECT belief_id FROM pg_temp.call_beliefs WHERE belief_id=ANY(CAST(:ids AS text[]))
         """),
-            {"ids": list(candidates)},
+                {"ids": list(candidates)},
+            )
         )
-        changed = erase_trace(row.trace, set(ids))
-        if changed is None:
-            continue
-        row.trace = changed
-        await session.execute(
-            text("INSERT INTO pg_temp.call_sessions VALUES (:id) ON CONFLICT DO NOTHING"),
-            {"id": row.session_id},
-        )
-        if row.trace.get("run_id"):
+        sessions = set()
+        runs = set()
+        for row, ids in trace_candidates:
+            changed = erase_trace(row.trace, matches.intersection(ids))
+            if changed is not None:
+                row.trace = changed
+                sessions.add(row.session_id)
+                if changed.get("run_id"):
+                    runs.add(changed["run_id"])
+        if sessions:
+            await session.execute(
+                text("""
+                INSERT INTO pg_temp.call_sessions SELECT unnest(CAST(:ids AS uuid[]))
+                ON CONFLICT DO NOTHING
+            """),
+                {"ids": list(sessions)},
+            )
+        if runs:
             await session.execute(
                 text("""
                 INSERT INTO pg_temp.call_runs SELECT r.id FROM runs r JOIN pg_temp.call_owned o
-                ON o.id=r.session_id WHERE r.id=:id ON CONFLICT DO NOTHING
+                ON o.id=r.session_id WHERE r.id=ANY(CAST(:ids AS uuid[])) ON CONFLICT DO NOTHING
             """),
-                {"id": row.trace["run_id"]},
+                {"ids": list(runs)},
             )
     await session.execute(
         text("""

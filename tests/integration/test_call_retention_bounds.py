@@ -7,9 +7,10 @@ import sys
 import time
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
-from sqlalchemy import event, text
+from sqlalchemy import Engine, event, text
 from sqlalchemy.orm import QueryContext
 
 from agent_core.adapters.determinism import FixedClock
@@ -130,6 +131,32 @@ async def test_retention_skips_unrelated_history_and_retries_atomically(tmp_path
                         WHERE e.sequence=5 AND e.event_type='tool.call.proposed'
                 """)
                 )
+                await conn.execute(
+                    text("""
+                    UPDATE events SET run_id=(SELECT run_id FROM events
+                        WHERE event_type='tool.call.proposed' AND sequence=5),
+                        payload='{"content":"cross-session paraphrase"}',
+                        event_type='assistant.message.completed'
+                    WHERE id=(SELECT min(id) FROM events WHERE event_type='background')
+                """)
+                )
+                await conn.execute(
+                    text("""
+                    UPDATE events SET payload=payload || jsonb_build_object('belief',
+                        jsonb_build_object('authority','inferred','id',1,
+                        'source_session_id',session_id::text,'source_event_ids',jsonb_build_array(3)))
+                    WHERE event_type='assistant.message.completed' AND sequence=3
+                """)
+                )
+                await conn.execute(
+                    text("""
+                    INSERT INTO recall_traces (id, tenant_id, principal_id, session_id, trace,
+                        created_at, operator_fields_expire_at)
+                    SELECT gen_random_uuid(), t.tenant_id,t.principal_id,t.session_id,
+                        '{"beliefs":[{"belief_id":"1"}],"rendered":"keep numeric lookalike"}',
+                        now(),now() FROM recall_traces t CROSS JOIN generate_series(1,70)
+                """)
+                )
                 # A second owner in this tenant and a second tenant read the same call ID.
                 await conn.execute(
                     text("""
@@ -163,6 +190,15 @@ async def test_retention_skips_unrelated_history_and_retries_atomically(tmp_path
                 """)
                 )
 
+            membership_reads = 0
+
+            def count_membership(
+                _conn: Any, _cursor: Any, statement: str, _params: Any, _context: Any, _many: bool
+            ) -> None:
+                nonlocal membership_reads
+                if "SELECT belief_id FROM pg_temp.call_beliefs WHERE" in statement:
+                    membership_reads += 1
+
             original = PostgresCallStore.put
             with pytest.MonkeyPatch.context() as patch:
 
@@ -174,12 +210,15 @@ async def test_retention_skips_unrelated_history_and_retries_atomically(tmp_path
                     return await original(self, record, expected_revision=expected_revision)
 
                 patch.setattr(PostgresCallStore, "put", interrupt)
+                event.listen(Engine, "before_cursor_execute", count_membership)
                 event.listen(EventRow, "load", bounded_load)
                 try:
                     with pytest.raises(InterruptedError, match="before tombstone"):
                         await service.delete(owner, CALL_ID)
                 finally:
+                    event.remove(Engine, "before_cursor_execute", count_membership)
                     event.remove(EventRow, "load", bounded_load)
+            assert membership_reads <= 2
             async with app.uow_factory() as uow:
                 retained = await uow.calls.get(owner, "call", CALL_ID)
                 assert retained and retained.payload["status"] == "completed"
@@ -203,6 +242,20 @@ async def test_retention_skips_unrelated_history_and_retries_atomically(tmp_path
                 await assert_rollback()
                 assert await service.expire() == 1
             async with engine.connect() as conn:
+                assert not await conn.scalar(
+                    text("""
+                    SELECT count(*) FROM events WHERE payload->>'content'='cross-session paraphrase'
+                """)
+                )
+                assert (
+                    await conn.scalar(
+                        text("""
+                    SELECT count(*) FROM recall_traces
+                    WHERE trace->>'rendered'='keep numeric lookalike'
+                """)
+                    )
+                    == 70
+                )
                 assert (
                     await conn.scalar(
                         text("SELECT count(*) FROM runs WHERE final_message='foreign final'")
