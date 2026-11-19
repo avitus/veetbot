@@ -32,7 +32,7 @@ dependencies = [
   "uvicorn>=0.34,<1",
   "mcp>=2.0,<3",
   "zstandard==0.25.0",
-  "pypdf>=6.1,<7",
+  "pypdf>=7.1.1,<8",
   "publicsuffixlist==1.0.2.20260925",
   "pgvector>=0.4,<0.5",
   "onnxruntime==1.31.0",
@@ -53,15 +53,15 @@ dev = [
 ]
 test = [
   "hypothesis>=6.124,<7",
-  "pytest>=8.3,<9",
-  "pytest-asyncio>=0.25,<1",
+  "pytest>=9.2,<10",
+  "pytest-asyncio>=1.5,<2",
   "pytest-xdist>=3.8,<4",
   "types-pyyaml>=6.0.12,<7",
 ]
 docs = [
   "mkdocs>=1.6,<2",
   "mkdocs-material>=9.5,<10",
-  "pymdown-extensions>=10.7,<11",
+  "pymdown-extensions>=11.0.1,<12",
 ]
 
 [tool.hatch.build.targets.wheel]

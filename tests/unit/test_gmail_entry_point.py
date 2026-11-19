@@ -6,11 +6,13 @@ import json
 import os
 from pathlib import Path
 
+import httpx
 import pytest
 
 import gmail_mcp.__main__ as gmail_main
 from gmail_mcp.bootstrap import BootstrapError
-from gmail_mcp.constants import GOOGLE_SCOPES
+from gmail_mcp.client import GmailCredential
+from gmail_mcp.constants import GOOGLE_SCOPES, GOOGLE_TOKEN_ENDPOINT
 
 CLIENT = {"client_id": "client-id", "client_secret": "-".join(("client", "value"))}
 
@@ -126,3 +128,57 @@ def test_bootstrap_refuses_a_symlinked_client_file_before_any_consent(tmp_path: 
         gmail_main.main(["bootstrap", "--client-file", str(link)])
 
     assert "absolute private regular file" in str(refused.value.code)
+
+
+@pytest.mark.parametrize(
+    "argv", [["--account-id", "work", "bootstrap"], ["bootstrap", "--account-id", "work"]]
+)
+def test_bootstrap_preserves_the_requested_account(
+    argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def token_exchange(
+        _client: httpx.AsyncClient, url: str, *, data: dict[str, str]
+    ) -> httpx.Response:
+        assert url == GOOGLE_TOKEN_ENDPOINT
+        mode = data["code"]
+        return httpx.Response(
+            200, json={"refresh_token": f"fixture-{mode}", "scope": GOOGLE_SCOPES[mode]}
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", token_exchange)
+    monkeypatch.setattr(gmail_main, "_authorize_via_loopback", lambda mode, url: mode)
+    monkeypatch.setattr("builtins.input", lambda prompt: "CONTINUE")
+    output = tmp_path / "credentials"
+    gmail_main.main(
+        [
+            *argv,
+            "--client-file",
+            str(_client_file(tmp_path, CLIENT)),
+            "--output-directory",
+            str(output),
+        ]
+    )
+    for mode, scope in GOOGLE_SCOPES.items():
+        credential = GmailCredential.parse(
+            (output / f"gmail-{mode}.json").read_text(),
+            expected_scope=scope,
+            expected_account_id="work",
+        )
+        assert credential.refresh_token == f"fixture-{mode}"
+
+
+def test_conflicting_bootstrap_accounts_are_refused_before_consent(
+    tmp_path: Path, no_server: None
+) -> None:
+    with pytest.raises(SystemExit, match="conflicting --account-id"):
+        gmail_main.main(
+            [
+                "--account-id",
+                "personal",
+                "bootstrap",
+                "--account-id",
+                "work",
+                "--client-file",
+                str(_client_file(tmp_path, CLIENT)),
+            ]
+        )

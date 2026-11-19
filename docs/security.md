@@ -170,6 +170,9 @@ the exact data, user-requested feature, hosted AI processors, provider-retention
 boundary, prohibited uses, Veetbot retention, deletion controls, and public
 privacy policy. The three refresh tokens remain separated into owner-only
 credential files, and read, write, and send authority remain independent.
+A file saved from Gmail belongs to its email conversation. Research can stage
+files privately for a draft. Send approval covers the exact attachment set
+along with the recipients and body.
 Every Gmail result enters the context as `EXTERNAL_UNTRUSTED`: mail content
 cannot authorize an action or bypass policy, and a write or send proposed after
 reading mail cannot receive a plain allow. The public policy applies the same

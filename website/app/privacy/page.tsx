@@ -22,7 +22,7 @@ export default function PrivacyPolicy() {
             This policy explains how Veetbot handles information on its public
             website and in its optional Gmail and Google Calendar integrations.
           </p>
-          <p className="effective-date">Effective November 9, 2026</p>
+          <p className="effective-date">Effective November 18, 2026</p>
         </header>
 
         <div className="legal-layout">
@@ -71,9 +71,11 @@ export default function PrivacyPolicy() {
                   <dt><code>gmail.readonly</code></dt>
                   <dd>
                     Search threads and read message metadata, headers, labels,
-                    snippets, and plain-text message bodies. HTML is reduced to
-                    text. Attachment names, media types, and sizes may be seen,
-                    but attachment contents are not downloaded.
+                    snippets, message bodies, and attachment details. You can save an attachment
+                    to the email&apos;s chat by pressing Save in Email or approving the
+                    request in Chat. Eligible text, Markdown, and PDF files can become
+                    searchable knowledge. When preparing a reply, Veetbot can also
+                    stage matching files privately for the draft.
                   </dd>
                 </div>
                 <div>
@@ -90,8 +92,8 @@ export default function PrivacyPolicy() {
                 <div>
                   <dt><code>gmail.send</code></dt>
                   <dd>
-                    Send a plain-text message after the complete proposed
-                    message has been presented for approval, or, for an
+                    Send a reply after you approve the message and its exact attachments,
+                    or, for an
                     unsubscribe you confirm, the message that sender&apos;s own
                     list header specifies.
                   </dd>
@@ -99,7 +101,7 @@ export default function PrivacyPolicy() {
               </dl>
               <p>
                 Veetbot does not use these permissions to permanently delete
-                Gmail messages, download attachments, access calendars, or
+                Gmail messages, access calendars, or
                 connect additional mailboxes without a new authorization.
               </p>
               <p>

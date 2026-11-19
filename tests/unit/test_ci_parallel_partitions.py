@@ -79,9 +79,14 @@ def test_each_device_splits_its_cases_across_two_executors() -> None:
     )
 
 
-def test_the_macos_job_keys_its_record_on_the_apple_inputs() -> None:
+def test_the_macos_job_builds_the_runtime_and_keys_its_record_on_all_inputs() -> None:
     steps = _config()["jobs"]["apple"]["steps"]
-    assert {"skip_verified_tree": {"job": "apple", "inputs": APPLE_INPUTS}} in steps
+    commands = [step["run"]["command"] for step in steps if "run" in step]
+    before_tests = "\n".join(commands[: commands.index("make test-apple")])
+    assert "make cockpit-install" in before_tests
+    assert "npm --prefix cockpit run build" in before_tests
+    inputs = f"{APPLE_INPUTS} cockpit scripts/install_website.mjs"
+    assert {"skip_verified_tree": {"job": "apple", "inputs": inputs}} in steps
     assert {"record_verified_tree": {"job": "apple"}} in steps
 
 

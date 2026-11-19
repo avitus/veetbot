@@ -114,7 +114,7 @@ not find it here should find the reason here.
 
 - **The first-party Gmail servers.** `gmail_mcp` stays the only code that
   speaks to Google, still dials exactly its two fixed endpoints
-  (email-integration.md:356-364), and still imports nothing from
+  (email-integration.md:357-365), and still imports nothing from
   `agent_core`. It already fetches complete headers; it projects a closed
   allowlist of them, and this milestone widens that projection by one closed
   block. It never dials a sender.
@@ -541,7 +541,7 @@ unsub@lists.example.org* — because a tap that sends mail must say so and say
 where. Dispatch is the account's ordinary send server under Milestone 18's
 rules without exception: `NON_IDEMPOTENT`, and an outcome lost after
 dispatch is `uncertain`, shown as *Send status unknown*, and never sent again
-automatically (email-integration.md:404-417).
+automatically (email-integration.md:405-418).
 
 **Report spam** applies `SPAM` and removes `INBOX`. It is what the interface
 offers when a sender has no safe mechanism, when it failed authentication,

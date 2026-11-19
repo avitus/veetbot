@@ -361,11 +361,16 @@ jobs:
     resource_class: m4pro.medium
     steps:
       - checkout
-      # Nothing outside these paths reaches the Apple suites, so a run whose
-      # Apple inputs already passed halts on any branch (ADR-0257).
+      # Native hosted-board tests load the exported Cockpit runtime in WKWebView.
       - skip_verified_tree:
           job: apple
-          inputs: &apple_inputs clients/apple Makefile .circleci/config.yml scripts/ios_ui_shard.py
+          inputs: clients/apple Makefile .circleci/config.yml scripts/ios_ui_shard.py cockpit scripts/install_website.mjs
+      - run:
+          name: Build the runtime for the native Cockpit journeys
+          command: |
+            make cockpit-install
+            npm --prefix cockpit run build
+            test -s cockpit/dist/runtime/manifest.json
       - run:
           name: Native Apple client tests
           command: make test-apple
@@ -394,7 +399,7 @@ jobs:
       - checkout
       - skip_verified_tree:
           job: apple-ios-<< parameters.device >>
-          inputs: *apple_inputs
+          inputs: clients/apple Makefile .circleci/config.yml scripts/ios_ui_shard.py
       - run:
           name: Apple client << parameters.device >> UI tests
           command: >-

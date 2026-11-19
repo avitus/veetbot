@@ -490,6 +490,10 @@ def test_bootstrap_disclosure_requires_affirmative_consent_before_each_google_gr
         assert "Veetbot Gmail data-use disclosure" in disclosure
         assert GOOGLE_SCOPES[mode] in disclosure
         assert expected_data[mode] in disclosure
+        if mode == "read":
+            assert "attachments you save or Veetbot stages for a draft" in disclosure
+        if mode == "send":
+            assert "exact attachments you approve" in disclosure
         assert "OpenAI or Anthropic API" in disclosure
         assert (
             "not used for advertising, credit decisions, or general-purpose AI/ML training"

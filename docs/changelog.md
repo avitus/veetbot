@@ -4,6 +4,10 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-18 — Email attachments
+
+A researched reply can now carry up to ten files totaling 25 MB. Review the files with the message before sending. To keep an incoming file separately, press Save on the attachment in Email to add it to that conversation.
+
 ## 2026-11-14 — Chat tells you how a call went (ADR-0325)
 
 - After a call you ask for in Chat ends, Chat adds a message to the same

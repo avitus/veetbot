@@ -11,7 +11,7 @@ milestone appears here under the wrong group, under a stale title, or with a
 checklist that disagrees with that file's `open_items`. Update the state file
 first; this page follows it.
 
-The **verified gate ceiling is Milestone 14** (289 cumulative gates). The
+The **verified gate ceiling is Milestone 14** (290 gates in the current registry). The
 parallel workstreams below advance their own gates independently but never
 move that ceiling; it advances only when Milestone 15 completes. Which gate belongs to which milestone is the
 [milestone map](../plan/milestone-map.md); the authoritative acceptance
@@ -19,8 +19,8 @@ criteria live in the [engineering plan](../plan/engineering-plan.md).
 
 ## At a glance
 
-State reviewed on 2026-10-27 against `main` at `3295faf8`, which production
-runs as release `20261028-010041-3295faf`; Milestone 14's completion was
+State reviewed on 2026-11-18 against `main` at `7000560d`. The API, documentation, and public website
+reported `20261119-024855-7000560`; Milestone 14's completion was
 recorded on 2026-10-09. Of the thirty-six milestones (0 through 35),
 twenty-two are complete and fourteen are in progress; none is authorized but
 unstarted. Milestone 15's independent reliability repair under ADR-0205 reached
@@ -29,22 +29,24 @@ registered gates; comparative quality and complete runtime/release evidence
 remain pending. Milestone 34 is delivered behind its flag and awaits owner
 activation.
 
-| Milestone | State | What remains | Who acts |
-| --- | --- | --- | --- |
-| 15 Operational hardening | In progress | All sixteen gates; the ADR-0205 reliability repair is delivered | Engineering, then owner |
-| 18 Email integration | In progress | Mailbox smokes; 1 open review finding | Owner; engineering |
-| 21 Memory distillation | In progress | Final-head review; production formation@9 selection audit; Sol/Astra study | Engineering; owner |
-| 24 SMS | In progress | Physical-iPhone verification | Owner |
-| 25 WhatsApp | In progress | Meta ceremony, live smoke | Owner |
-| 26 Email experience | In progress | Private evaluations, cost calibration, two-account acceptance | Owner with engineering |
-| 27 Bland calling | In progress | Dashboard and live checks; final-head review | Owner; engineering |
-| 28 People | In progress | All 36 gates unbound; verification, evaluations, review | Engineering; owner |
-| 30 Advisory approval | In progress | Threshold calibration and enforce decision; final-head review | Owner; engineering |
-| 31 Email unsubscribe | In progress | iPad detail layout, mailbox smoke; final-head review | Engineering; owner |
-| 32 Memory reconsolidation | In progress | Measured quality failures, remaining integrated gates and release evidence | Engineering |
-| 33 General memory recall | In progress | Staged implementation and comparative activation evidence; reviewed release | Engineering; owner |
-| 34 Owner records | In progress | Production flag and the approval tool_rules entry | Owner |
-| 35 Cockpit | In progress | Builder canary, build steps 10 and 11, owner activation | Engineering; owner |
+| Milestone | State | Gates with checks | What remains | Who acts |
+| --- | --- | --- | --- | --- |
+| 15 Operational hardening | In progress | 0/16 | All sixteen gates; the ADR-0205 reliability repair is delivered | Engineering, then owner |
+| 18 Email integration | In progress | 17/17 | Mailbox smokes and reviewed bootstrap repair | Owner; engineering |
+| 21 Memory distillation | In progress | 31/31 | Final-head review; production formation@9 selection audit; Sol/Astra study | Engineering; owner |
+| 24 SMS | In progress | 12/12 | Physical-iPhone verification | Owner |
+| 25 WhatsApp | In progress | 12/12 | Meta ceremony, live smoke | Owner |
+| 26 Email experience | In progress | 28/33 | Private evaluations, cost calibration, two-account acceptance | Owner with engineering |
+| 27 Bland calling | In progress | 12/14 | Dashboard and live checks; final-head review | Owner; engineering |
+| 28 People | In progress | 0/36 | All 36 gates unbound; verification, evaluations, review | Engineering; owner |
+| 30 Advisory approval | In progress | 5/5 | Threshold calibration and enforce decision; final-head review | Owner; engineering |
+| 31 Email unsubscribe | In progress | 22/23 | iPad detail layout, mailbox smoke; final-head review | Engineering; owner |
+| 32 Memory reconsolidation | In progress | 2/24 | Measured quality failures, remaining integrated gates and release evidence | Engineering |
+| 33 General memory recall | In progress | 12/12 | Staged implementation and comparative activation evidence; reviewed release | Engineering; owner |
+| 34 Owner records | In progress | 10/10 | Production flag and the approval tool_rules entry | Owner |
+| 35 Cockpit | In progress | 14/23 | Builder canary, build steps 10 and 11, owner activation | Engineering; owner |
+
+At that revision, 551 of the 642 registered gates had checks. The other 91 referenced the pending placeholder. A bound check still needs passing evidence in its specified environment.
 
 ## Complete
 
@@ -137,13 +139,14 @@ final head of
 GitGuardian, and CodeRabbit with every review thread resolved before merge
 ([Glen review](https://app.tryglen.com/avitus/veetbot/pull/73)). The
 multi-account extension reached `main` in pull request 94, which merged with
-one CodeRabbit finding unresolved and still unfixed. Follow the
+one CodeRabbit finding unresolved. Regression coverage now checks the account
+label in both CLI argument positions and rejection of conflicting labels. Follow the
 [Gmail integration runbook](../gmail-integration-runbook.md) for the remaining
 owner-controlled work. Remaining:
 
 - [ ] Owner real-mailbox smoke covering bootstrap consent, scheduled triage, phone approval, and one approved send
 - [ ] Work-account bootstrap, production manifest activation, and work-only draft smoke
-- [ ] Resolve the CodeRabbit finding pull request 94 left open (a root-level --account-id never reaches bootstrap), then pass hosted CI and the CodeRabbit review loop for the multi-account extension
+- [ ] Verify the account-bound bootstrap repair through hosted CI and final-head CodeRabbit review
 
 ### Milestone 21 — Adaptive memory distillation
 

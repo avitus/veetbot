@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 from collections.abc import AsyncIterator
-from pathlib import Path
 
 import pytest
 from playwright.async_api import Page, Route, async_playwright
 
 from agent_core.browser_control_plane.api import _AUTHENTICATION_HTML, _AUTHENTICATION_SCRIPT
+from tests.real_browser_support import require_real_browser
 
 ORIGIN = "https://profiles.surface.test"
 CEREMONY_PATH = "/authentication/00000000-0000-4000-8000-000000000001"
@@ -20,25 +19,10 @@ ONE_PIXEL_PNG = base64.b64decode(
 )
 
 
-def _chromium_installed() -> bool:
-    async def probe() -> str:
-        async with async_playwright() as playwright:
-            return playwright.chromium.executable_path
-
-    try:
-        return Path(asyncio.run(probe())).exists()
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(
-    not _chromium_installed(), reason="Playwright Chromium is not installed"
-)
-
-
 @pytest.fixture
 async def surface() -> AsyncIterator[tuple[Page, list[dict[str, object]]]]:
     """Open the surface with its capability, a one-pixel frame, and recorded events."""
+    require_real_browser()
     events: list[dict[str, object]] = []
 
     async def serve(route: Route) -> None:
@@ -89,6 +73,8 @@ async def test_keys_typed_after_clicking_the_frame_reach_the_website_one_at_a_ti
     await _settled(page, events, 5)
 
     assert [event["kind"] for event in events] == ["click", "text", "text", "key", "key"]
+    assert await page.locator("#send").count() == 0
+    assert await page.get_by_text("Send securely").count() == 0
     assert events[1:] == [
         {"kind": "text", "text": "a"},
         {"kind": "text", "text": "b"},
@@ -112,13 +98,3 @@ async def test_pasted_text_reaches_the_website_and_leaves_nothing_on_the_surface
         "[...document.querySelectorAll('input,textarea')].map(field => field.value)"
     )
     assert all(value == "" for value in values)
-
-
-async def test_the_surface_has_no_separate_send_step(
-    surface: tuple[Page, list[dict[str, object]]],
-) -> None:
-    """Typing goes straight to the website; nothing waits for a send button."""
-    page, _ = surface
-
-    assert await page.locator("#send").count() == 0
-    assert await page.get_by_text("Send securely").count() == 0

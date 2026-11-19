@@ -413,6 +413,19 @@ the exact disposable opt-in. The existing destructive-reset guard still checks
 that opt-in inside the container. A shared development or production database
 must never be used for this workflow.
 
+### Tests with additional prerequisites
+
+| Tests | When they run |
+| --- | --- |
+| Provider and typed-judgment smokes in `tests/live` | Explicit `RUN_LIVE_MODEL_TESTS=1` and credentials for the selected provider. The recall replay also requires the private capture directory and its OpenAI key. |
+| Milestone 33 reviewed release (`tests/gates/general_memory_recall_m33.py`) | Select this file explicitly and supply `VEETBOT_M33_GATE_INPUTS`. Its twelve cases verify reviewed release evidence outside routine pytest discovery. |
+| People representative-first-page load check | Disposable PostgreSQL and `RUN_PEOPLE_LOAD_TESTS=1`. |
+| PostgreSQL integration and real-browser tests | A disposable database or installed Chromium in their respective partitions. Skips count as missing browser evidence in the required lane. |
+| Native Email, Unsubscribe, Folders, and Cockpit acceptance | Xcode and the target device or VM. Six navigation cases check wide layouts and skip on an iPhone. Two hosted-board Swift tests require the built Cockpit runtime. The macOS CI job builds it before Swift tests and includes `cockpit` and the npm installer in its verification key. |
+| SVP credential persistence and deploy-identity calling permission checks | A non-root process that respects directory permissions. |
+| Owner procedure TLS floor check | An OpenSSL executable capable of serving the legacy TLS version under test. |
+| Duplicate and stale release-evidence fixtures | An artifact in the bundled evidence directory. A separate test requires a nonempty bundle. |
+
 ### Optional remote validation on a sidecar
 
 `.chunk/config.json` lets the CircleCI `chunk` CLI run the same gate on a
@@ -441,7 +454,9 @@ local container (below); use the sidecar as the fallback for a full
 
 ADR-0156 adds the `browser` partition for the existing real Chromium runtime,
 hostile-page, device-handoff, and hosted task-grant modules. Those modules are
-excluded from static, contract, and PostgreSQL selections. `make browser-install`
+excluded from static, contract, and PostgreSQL selections. The same partition
+exercises the sign-in surface in Chromium, including frame refresh, pointer
+coordinates, typing, and pasting. `make browser-install`
 installs the lockfile-matched Chromium and its platform dependencies;
 `make test-browser` requires it, runs the partition serially unless
 `BROWSER_TEST_WORKERS` names xdist workers (each takes whole files), and writes a

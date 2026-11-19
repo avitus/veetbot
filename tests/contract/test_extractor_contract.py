@@ -78,9 +78,9 @@ async def test_pdf_extractor_turns_bookmarks_into_headings() -> None:
 
     writer = PdfWriter(clone_from=io.BytesIO(_text_pdf("The valve clicks after parking.")))
     writer.add_blank_page(width=200, height=200)
-    parent = writer.add_outline_item("Parking", 0)
-    writer.add_outline_item("Fuel system check", 0, parent=parent)
-    writer.add_outline_item("Appendix", 1)
+    parent = writer.add_outline_item(title="Parking", page_number=0)
+    writer.add_outline_item(title="Fuel system check", page_number=0, parent=parent)
+    writer.add_outline_item(title="Appendix", page_number=1)
     buffer = io.BytesIO()
     writer.write(buffer)
 
@@ -99,7 +99,7 @@ async def test_pdf_extractor_turns_bookmarks_into_headings() -> None:
     # headings alone never pass ingestion.
     scan = PdfWriter()
     scan.add_blank_page(width=200, height=200)
-    scan.add_outline_item("Parking", 0)
+    scan.add_outline_item(title="Parking", page_number=0)
     scanned = io.BytesIO()
     scan.write(scanned)
     assert (

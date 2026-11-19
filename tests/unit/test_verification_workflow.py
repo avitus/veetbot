@@ -105,7 +105,10 @@ def test_check_runs_each_required_command_once_even_with_redundant_goals(checkou
     )
 
 
-def test_static_uses_two_workers_with_a_serial_override(checkout: Path) -> None:
+def test_static_uses_two_workers_with_a_serial_override(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("STATIC_TEST_WORKERS", raising=False)
     result = run_make(checkout, "test-static")
     assert result.returncode == 0, result.stderr
     command = commands(checkout)[0]

@@ -7,29 +7,27 @@ title: Current Milestone
 - **One offline artifact build — ADR-0330:** On 2026-11-16 the owner authorized
   one complete offline build invocation and approval-free bundled-guide reads.
   [The decision](../adr/0330-one-offline-artifact-build.md) keeps inputs, rendering
-  and attachments within one sandbox lifetime. Delivery to `dev` is authorized;
-  production delivery and owner acceptance remain pending. No milestone moves.
+  and attachments within one sandbox lifetime. PR 255 delivered the build in the production release.
+  Owner acceptance remains pending. No milestone moves.
 
 - **Chat reports a finished call — ADR-0325:** On 2026-11-14 the owner found that
   Chat never said how a call went and asked for the fix. Bland's post-call
   callbacks already delivered every result; nothing wrote it to the conversation.
   [The decision](../adr/0325-chat-reports-a-finished-call.md) queues one read-only
-  run in the placing conversation. Implemented with offline tests; production
-  and a live call remain pending. No milestone or gate moves.
+  run in the placing conversation. PR 254 delivered the report. A live call remains pending. No milestone or gate moves.
 - **Steering a working chat — ADR-0324:** On 2026-11-13 the owner asked to steer
   a working chat with a follow-up, settled the draft's open questions and accepted
   [the decision](../adr/0324-follow-ups-steer-a-running-run.md), authorizing its
   implementation. A follow-up waits in an inbox and the same run reads it at its
   next step, default off behind `AGENT_RUN_STEERING_ENABLED`. The server side for
   owner chat and the Apple client are built and tested in the sandbox and the Mac
-  VM; surface follow-ups are not. Not delivered. No milestone or gate moves.
+  VM. PR 253 delivered owner-chat steering. Inbound-surface follow-ups remain open. No milestone or gate moves.
 
 - **Researched email replies — ADR-0317:** Owner approved implementation on
   2026-11-11. Bounded email/Calendar research precedes drafting; matching files
   are staged privately and reviewed with the reply. Send remains an exact owner
-  action. Implementation is locally verified; production and live-draft
-  acceptance remain pending. The owner subsequently authorized PR 250, review fixes
-  and merge after verification. No milestone moves.
+  action. PR 250 delivered researched replies and PR 256 raised the
+  decoded attachment limit to 25 MB. A real draft still needs owner acceptance. No milestone moves.
 
 - **Read-only Google Calendar — ADR-0305:** The owner authorized implementation
   on 2026-11-09. [Calendar integration](calendar-integration.md) specifies selected
@@ -506,7 +504,7 @@ title: Current Milestone
   Twenty-two of its twenty-three gates bind passing checks (the simulator
   journeys joined hosted CI in pull requests 142 and 154); the owner's
   real-mailbox smoke and the integrated release-evidence gate remain open.
-- **Verified gate ceiling:** Milestone 14 (289 gates).
+- **Verified gate ceiling:** Milestone 14 (290 gates in the current registry).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
   (ADR-0061) — plus Milestone 16 memory evaluation and lifecycle as an

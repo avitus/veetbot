@@ -1,7 +1,7 @@
 # ADR-0331: On 2026-11-18 the owner approved increasing draft attachment capacity
 # to 25 MB with bounded MIME/transport encoding and unchanged exact-file consent.
 # Repair and dev delivery are authorized; production and live regeneration remain
-# separate. No milestone or gate moves.
+# separate. PR 256 subsequently delivered the change. No milestone or gate moves.
 # ADR-0328: Owner-authorized W6 continuation checks pinned tool capabilities
 # before recipe selection performs any browser work. Unsupported recipes use
 # ordinary planning; current authorization and non-replay rules remain unchanged.
@@ -18,7 +18,7 @@
 # ADR-0324: On 2026-11-13 the owner asked to steer a working chat with a
 # follow-up, then accepted the decision and authorized its implementation. A
 # follow-up joins the active run through an inbox, default off. Server side
-# for owner chat and the Apple client built; surface follow-ups are not. Not delivered.
+# for owner chat and the Apple client shipped in PR 253; surface follow-ups remain open.
 # No milestone or gate moves.
 # ADR-0319: On 2026-11-13 the owner rebuilt Willow as a Bland V2 agent and asked
 # for fifteen-minute calls, the plain "Andy's assistant" introduction and the
@@ -210,7 +210,10 @@
 # policy profile moves.
 # ADR-0330: On 2026-11-16 the owner authorized a complete offline artifact
 # build under one ordinary approval, approval-free bundled-guide reads, and
-# verified delivery to dev. No milestone or gate moves; production is pending.
+# verified delivery to dev. PR 255 subsequently delivered it to production.
+# Maintenance review, 2026-11-18: production, the public site and the docs serve
+# the PR 257 revision. Across milestones 0–35, 551 of 642 registry entries name
+# concrete checks and 91 remain pending. The verified ceiling stays at 14.
 schema_version: 1
 
 project:
@@ -2023,7 +2026,7 @@ milestones:
     open_items:
       - Owner real-mailbox smoke covering bootstrap consent, scheduled triage, phone approval, and one approved send
       - Work-account bootstrap, production manifest activation, and work-only draft smoke
-      - Resolve the CodeRabbit finding pull request 94 left open (a root-level --account-id never reaches bootstrap), then pass hosted CI and the CodeRabbit review loop for the multi-account extension
+      - Verify the account-bound bootstrap repair through hosted CI and final-head CodeRabbit review
     verification:
       - check: thirteen original Milestone 18 gate.email gates
         outcome: passed_locally
@@ -3478,5 +3481,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]
   documents_required_before_coding_reaches_them: []
 
-last_updated: '2026-10-29T21:00:09Z'
-last_reviewed_commit: 3295faf8
+last_updated: '2026-11-19T06:36:00Z'
+last_reviewed_commit: 7000560d

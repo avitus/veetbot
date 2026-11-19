@@ -25,12 +25,18 @@ from gmail_mcp.server import create_server
 
 _PRIVACY_POLICY_URL = "https://www.veetbot.com/privacy"
 _DATA_BY_MODE = {
-    "read": "message metadata, headers, labels, snippets, and plain-text bodies",
+    "read": (
+        "message metadata, headers, labels, snippets, and plain-text bodies, "
+        "plus attachments you save or Veetbot stages for a draft"
+    ),
     "write": (
         "Gmail messages for reading, composing, and sending, including message bodies, "
         "draft recipients and content, and thread and label identifiers"
     ),
-    "send": "the recipient, subject, and plain-text body of the message you approve",
+    "send": (
+        "the recipient, subject, and plain-text body of the message you approve, "
+        "and the exact attachments you approve"
+    ),
 }
 
 
@@ -192,6 +198,12 @@ def main(argv: list[str] | None = None) -> None:
     if arguments.command == "bootstrap":
         if arguments.mode is not None:
             raise SystemExit("--mode and bootstrap are mutually exclusive")
+        if (
+            arguments.account_id is not None
+            and arguments.bootstrap_account_id is not None
+            and arguments.account_id != arguments.bootstrap_account_id
+        ):
+            raise SystemExit("conflicting --account-id values for bootstrap")
         if arguments.client_file is None:
             raise SystemExit("bootstrap requires GMAIL_OAUTH_CLIENT_FILE or --client-file")
         try:
@@ -201,7 +213,11 @@ def main(argv: list[str] | None = None) -> None:
                 bootstrap_credentials(
                     client_id=client_id,
                     client_secret=client_secret,
-                    account_id=arguments.bootstrap_account_id,
+                    account_id=(
+                        arguments.account_id
+                        if arguments.bootstrap_account_id is None
+                        else arguments.bootstrap_account_id
+                    ),
                     output_directory=arguments.output_directory.expanduser().resolve(),
                     authorize=_authorize_with_disclosure,
                 )
