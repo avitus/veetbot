@@ -1,4 +1,4 @@
-FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 
 RUN groupadd --gid 65532 browser-profile \
     && useradd --uid 65532 --gid 65532 --no-create-home --shell /usr/sbin/nologin browser-profile \
@@ -13,13 +13,13 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 # so they stay above the application source and every release image shares
 # them instead of snapshotting them again.
 COPY pyproject.toml uv.lock /opt/veetbot/
-RUN python -m pip install --no-cache-dir uv==0.8.6 \
+RUN python -m pip install --no-cache-dir pip==26.3 uv==0.13.9 \
     && uv sync --frozen --no-dev --no-editable --no-install-project \
     && rm -rf /root/.cache
 # The user's login ceremony runs headed Chromium on a private Xvfb display
 # (ADR-0106); the package is named here rather than left to Playwright's list.
 RUN /opt/veetbot/.venv/bin/playwright install --with-deps chromium \
-    && apt-get install -y --no-install-recommends xvfb \
+    && apt-get install -y --no-install-recommends xvfb zlib1g \
     && chmod -R a+rX /ms-playwright \
     && rm -rf /root/.cache /var/lib/apt/lists/*
 # Headed Chromium downloads a spelling dictionary from its vendor once a text

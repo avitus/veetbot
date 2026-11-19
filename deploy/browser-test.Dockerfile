@@ -2,8 +2,9 @@
 # (ADR-0236). scripts/run_in_linux_container.sh builds it for linux/amd64, the
 # architecture of the sidecar and hosted CI, and mounts the checkout at run
 # time; nothing here is a release image.
-FROM node:22.23.1-bookworm-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf AS node
-FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
+FROM node:22.23.5-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS node
+RUN npm install --global --no-audit --no-fund npm@12.2.3 && npm cache clean --force
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
@@ -21,12 +22,12 @@ COPY pyproject.toml uv.lock /work/
 RUN apt-get update \
     && apt-get install -y --no-install-recommends make git pandoc docker-cli \
     && rm -rf /var/lib/apt/lists/*
-RUN python -m pip install --no-cache-dir uv==0.8.6 \
+RUN python -m pip install --no-cache-dir pip==26.3 uv==0.13.9 \
     && uv sync --all-groups --no-install-project \
     && rm -rf /root/.cache
 # Hosted browsers are headed and draw to a private Xvfb display (ADR-0145).
 RUN /opt/venv/bin/playwright install --with-deps chromium webkit \
-    && apt-get install -y --no-install-recommends xvfb \
+    && apt-get install -y --no-install-recommends xvfb zlib1g \
     && rm -rf /root/.cache /var/lib/apt/lists/*
 # GHC's large virtual reservation can exhaust QEMU's address translation on
 # Apple silicon. Limit only Pandoc's guest address space, not browser processes.

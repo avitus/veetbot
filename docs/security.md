@@ -267,6 +267,12 @@ site is its only public HTTP entry point. The server serializes releases with
 promotion, and requires the health probe to report the same release identity
 locally and through the public TLS endpoint.
 
+The Python and Node base images in the execution and browser Dockerfiles are
+pinned by digest. Audit the built images as well as the application lockfiles.
+The PostgreSQL entrypoint uses Alpine’s packaged privilege helper. The
+production Cockpit builder and code sandbox discard npm after installing their
+locked dependencies. The browser test image retains npm to run its test suites.
+
 Application services run without Docker-group membership or a container-runtime
 socket. The separate `veetbot-execution` systemd service, running as
 `veetbot-exec`, owns gVisor sandbox lifecycle,

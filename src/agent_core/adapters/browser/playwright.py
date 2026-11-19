@@ -1963,13 +1963,12 @@ class PythonPlaywrightRuntime:
     async def _sign_in_challenge_visible(self, page: Page) -> bool:
         """Report a password, one-time-code, CAPTCHA, passkey, MFA, or consent prompt."""
         headings = page.locator(SECURITY_CHALLENGE_HEADINGS)
-        for index in range(await headings.count()):
-            if await headings.nth(index).evaluate(NAMED_CHALLENGE_SCRIPT, SECURITY_CHALLENGE_TEXT):
-                # Keep this for the whole verification, including its second
-                # look. A later redirect cannot turn bot clearance into proof
-                # of an account session, on either side of the comparison.
-                self._security_challenge_seen = True
-                return True
+        # Read the current matches together. Reacquiring a locator by index can
+        # wait for navigation on every fragment change, even on the same document.
+        if await headings.evaluate_all(NAMED_CHALLENGE_SCRIPT, SECURITY_CHALLENGE_TEXT):
+            # A later redirect cannot turn a security challenge into session evidence.
+            self._security_challenge_seen = True
+            return True
         intervention = page.locator(
             f"{_CREDENTIAL_FIELDS},"
             "iframe[src*='captcha' i],iframe[title*='captcha' i],"
@@ -1989,17 +1988,22 @@ class PythonPlaywrightRuntime:
             if await interactive_text.nth(index).is_visible():
                 return True
         prompts = page.locator(REMEMBERED_SIGN_IN_CONTROLS)
-        for index in range(await prompts.count()):
-            if await prompts.nth(index).evaluate(NAMED_CHALLENGE_SCRIPT, REMEMBERED_SIGN_IN_TEXT):
-                return True
+        if await prompts.evaluate_all(NAMED_CHALLENGE_SCRIPT, REMEMBERED_SIGN_IN_TEXT):
+            return True
         return await _credential_field_in_frame(page)
 
     async def authentication_status(self) -> BrowserAuthenticationStatus:
         page = self._current_page()
         if not _origin_allowed(page.url, self._allowed_origins):
             return BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
-        if await self._sign_in_challenge_visible(page):
-            return BrowserAuthenticationStatus.NEEDS_USER
+        try:
+            if await self._sign_in_challenge_visible(page):
+                return BrowserAuthenticationStatus.NEEDS_USER
+        except PlaywrightError as exc:
+            if "Execution context was destroyed" not in str(exc):
+                raise
+            # The form just navigated. Only a fresh reading may advance the ceremony.
+            return BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
         if not self._sign_in_entered:
             # A signed-out page holds analytics and consent storage of its own,
             # so storage state alone never shows that anyone signed in.

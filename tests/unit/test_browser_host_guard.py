@@ -147,7 +147,7 @@ def test_the_local_container_is_linux_x86_64_with_a_private_display() -> None:
     assert "uv.lock" in script
     assert "playwright install --with-deps chromium" in image
     assert "xvfb" in image
-    assert "uv==0.8.6" in image
+    assert "uv==0.13.9" in image
 
 
 def test_browser_dry_run_is_independent_of_parent_make_settings(

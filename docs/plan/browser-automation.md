@@ -1130,7 +1130,12 @@ browser; any other launch navigation failure is
 `tool.browser.provider_unavailable`. Neither carries raw browser text. The launch
 only opens the page: it does not read it for an agent, so a page that keeps
 moving as it loads still reaches the owner. Finishing the sign-in likewise reads
-only the page's address. The application turns the disallowed
+only the page's address before verifying the session. Each verification browser
+checks the currently matching challenge headings and account controls in its
+document, including when the page continuously changes its URL fragment. A
+status read interrupted by a document replacement leaves the ceremony pending
+until its next poll.
+The application turns the disallowed
 redirect into the same `400 malformed_request`
 with a fixed message that names the bare-versus-`www` case and asks for the
 website's final address, creates no ceremony record, and leaves the profile

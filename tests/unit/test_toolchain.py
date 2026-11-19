@@ -1166,7 +1166,7 @@ def test_ci_has_the_required_partitions() -> None:
             "deploy-app": "cimg/base:stable",
             "deploy-nginx": "cimg/base:stable",
             "apple-ios": "cimg/base:stable",
-            "public-site": "cimg/node:22.13",
+            "public-site": "cimg/node:22.23.5",
         }.get(name, "cimg/python:3.12")
         assert job["docker"][0]["image"] == expected_image
 

@@ -4,7 +4,8 @@
 # than the sandbox's Alpine base, because the later preview renderer's browser
 # needs glibc; Python stays, because the execution service manages every
 # sandbox workspace with it.
-FROM node:22.23.1-bookworm-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf
+FROM node:22.23.5-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+RUN npm install --global --no-audit --no-fund npm@12.2.3 && npm cache clean --force
 
 RUN apt-get update \
   && apt-get install --yes --no-install-recommends python3 \
@@ -15,7 +16,8 @@ WORKDIR /opt/cockpit
 COPY cockpit/package.json cockpit/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --with-deps webkit \
   && rm -rf /var/lib/apt/lists/* \
-  && npm cache clean --force
+  && npm cache clean --force \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY cockpit/tsconfig.json ./
 COPY cockpit/builder ./builder
 COPY cockpit/kit ./kit

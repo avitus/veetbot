@@ -4,9 +4,10 @@
 # credentials. Each COPY names its source, because a release's build context also
 # holds .release.env and the virtual environment. The project itself is not
 # installed: a check imports the draft from its workspace, never a baked copy.
-FROM node:22.23.1-bookworm-slim@sha256:53ada149d435c38b14476cb57e4a7da73c15595aba79bd6971b547ceb6d018bf AS node_runtime
+FROM node:22.23.5-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS node_runtime
+RUN npm install --global --no-audit --no-fund npm@12.2.3 && npm cache clean --force
 
-FROM python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
+FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 
 # tini reaps what a test run orphans, so the PID quota does not retain zombies.
 RUN apt-get update && apt-get install -y --no-install-recommends tini \
@@ -17,7 +18,7 @@ COPY --from=node_runtime /usr/local/lib/node_modules/npm /opt/code-sandbox/npm
 # Layer order bounds disk usage on the release host: these change only with the
 # lock files, so every release image shares them.
 COPY pyproject.toml uv.lock /opt/code-sandbox/project/
-RUN python -m pip install --no-cache-dir uv==0.8.6 \
+RUN python -m pip install --no-cache-dir pip==26.3 uv==0.13.9 \
     && cd /opt/code-sandbox/project \
     && UV_PROJECT_ENVIRONMENT=/opt/code-sandbox/venv UV_PYTHON_DOWNLOADS=never \
         uv sync --frozen --no-install-project --no-default-groups \

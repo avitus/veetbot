@@ -29,7 +29,7 @@ endif
 	test-deploy sandbox-image cockpit-builder-image code-sandbox-image browser-image test-browser-image \
 	production-check \
 	docs docs-serve docs-check citations-fix website-install test-website cockpit-install test-cockpit \
-	cockpit-widgets-worktree cockpit-runtime
+	cockpit-widgets-worktree cockpit-runtime cockpit-runtime-build
 
 install:
 	uv sync --all-groups
@@ -413,10 +413,13 @@ test-cockpit: cockpit-install
 	npm --prefix cockpit test
 	npm --prefix cockpit run lint
 
+cockpit-runtime-build: cockpit-install
+	npm --prefix cockpit run build
+	test -s cockpit/dist/runtime/manifest.json
+
 # Export the board's runtime to the local artifact root, as a release does, so a
 # local server can serve Cockpit (docs/plan/cockpit.md, the runtime).
-cockpit-runtime: cockpit-install
-	npm --prefix cockpit run build
+cockpit-runtime: cockpit-runtime-build
 	@root="$${AGENT_ARTIFACT_ROOT:-.agent/artifacts}/cockpit-runtime"; mkdir -p "$$root"; \
 	for asset in cockpit/dist/runtime/*; do \
 		name="$${asset##*/}"; \

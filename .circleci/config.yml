@@ -18,8 +18,8 @@ commands:
       - run:
           name: Install uv
           command: |
-            curl -LsSf https://astral.sh/uv/0.8.6/install.sh -o /tmp/uv-install.sh
-            echo '6879d086185d40aa08dbbfb91f4c982badb563f1591939d8fa255efc6ee1f1cd  /tmp/uv-install.sh' | sha256sum --check --strict
+            curl -LsSf https://astral.sh/uv/0.13.9/install.sh -o /tmp/uv-install.sh
+            echo 'ccc888115ac831bd9c30855c1d4abeae32fce679701d2aac8e72eb0beffb41c2  /tmp/uv-install.sh' | sha256sum --check --strict
             sh /tmp/uv-install.sh
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
       - run:
@@ -120,7 +120,7 @@ commands:
 jobs:
   public-site:
     docker:
-      - image: cimg/node:22.13
+      - image: cimg/node:22.23.5
     resource_class: small
     environment:
       NEXT_TELEMETRY_DISABLED: "1"
@@ -367,10 +367,7 @@ jobs:
           inputs: clients/apple Makefile .circleci/config.yml scripts/ios_ui_shard.py cockpit scripts/install_website.mjs
       - run:
           name: Build the runtime for the native Cockpit journeys
-          command: |
-            make cockpit-install
-            npm --prefix cockpit run build
-            test -s cockpit/dist/runtime/manifest.json
+          command: make cockpit-runtime-build
       - run:
           name: Native Apple client tests
           command: make test-apple
