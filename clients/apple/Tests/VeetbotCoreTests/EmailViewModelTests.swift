@@ -3997,6 +3997,37 @@ import SwiftUI
         model.resetConnection()
     }
 
+    /// A successful unchanged refresh restores automatic paging after a failed page request.
+    @Test func testUnchangedSnapshotRecoversPagingAfterFailure() async throws {
+        let server = AttachmentSaveServer()
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            let cursor = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "cursor" }?.value
+            if cursor != nil && !server.recovered { return (500, Self.error("internal_error", "Page failed")) }
+            let page = self.pageJSON(cursor: cursor == nil ? "next" : nil)
+                .replacingOccurrences(of: "\"items\":", with: "\"snapshot_version\":\"stable\",\"items\":")
+            return (200, page)
+        }
+        await model.reload()
+        await model.loadMore()
+        #expect(model.pagingFailed)
+        #expect(model.hasMore)
+        server.recover()
+        let before = requests.snapshot.count
+        await model.reload(preserveOrder: true)
+        #expect(!model.pagingFailed)
+        #expect(model.errorMessage == nil)
+        #expect(model.items.count == 1)
+        #expect(model.hasMore)
+        #expect(requests.snapshot.dropFirst(before).filter { $0.url!.path.hasSuffix("threads") }.count == 1)
+        await model.loadMore()
+        #expect(requests.snapshot.last?.url?.query?.contains("cursor=next") == true)
+        #expect(!model.hasMore)
+    }
+
     @Test(arguments: [true, false], [300, 1800])
     func testUnchangedSnapshotRefreshReadsOnlyOnePage(versioned: Bool, count: Int) async throws {
         let requests = EmailRequestRecorder()

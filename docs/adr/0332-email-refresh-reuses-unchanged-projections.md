@@ -26,7 +26,8 @@ plan and directed implementation. Production timing remains to be measured.
    Query, connection and local mutation invalidation also discard the version;
    obsolete requests cannot restore it. Existing bounded list snapshots may
    retain their version alongside their rows. Returning to an unchanged list
-   still resumes tracking its pending archive operations.
+   still resumes tracking its pending archive operations. Successful validation
+   clears a prior paging failure while retaining the loaded rows and cursor.
 3. Thread reads support an explicit `If-None-Match` validator. Authorization,
    retention, current draft and operation state are checked before matching.
    The validator covers retained source content and presentation inputs,
@@ -124,6 +125,11 @@ The HTTP boundary cases retain authorization checks for wildcard requests and
 reject malformed tag separators. The final focused API partition passed 83
 cases; the expanded native partition passed 198 tests in seven suites. Lint,
 typing and documentation checks passed in the same local sandboxes.
+The follow-up `testUnchangedSnapshotRecoversPagingAfterFailure` first failed
+because `pagingFailed` remained set after validation. The final native partition
+passed 199 tests in 54.05 seconds after clearing that flag without replacing
+rows or the cursor. The regression also checks one-page refresh and continued
+pagination from the original cursor.
 
 The hide/reopen regression now explicitly holds the initial list response,
 keeping every existing assertion. Holding account metadata alone no longer

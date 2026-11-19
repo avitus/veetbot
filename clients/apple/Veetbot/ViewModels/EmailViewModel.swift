@@ -653,6 +653,7 @@ public final class EmailViewModel: ObservableObject {
                 loadedListVersion = projectionGeneration == projection ? page.snapshotVersion : nil
                 cacheMailList()
             } else {
+                pagingFailed = false
                 // A new foreground visit cancelled the old watchers even when
                 // the server's mailbox snapshot has not changed.
                 for value in inboxItems { observeArchive(value) }
