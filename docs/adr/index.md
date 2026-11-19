@@ -4,6 +4,8 @@ title: Architecture Decisions
 
 # Architecture decision records
 
+- [ADR-0332: Email refresh reuses unchanged projections (Accepted)](0332-email-refresh-reuses-unchanged-projections.md)
+
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the
 [engineering plan](../plan/engineering-plan.md) must not be weakened to match an

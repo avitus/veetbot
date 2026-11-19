@@ -470,4 +470,5 @@ nav:
       - "ADR-0329: Inbox relevance floor": adr/0329-inbox-relevance-floor.md
       - "ADR-0330 — One offline artifact build": adr/0330-one-offline-artifact-build.md
       - "ADR-0331 — Gmail draft attachment capacity": adr/0331-gmail-draft-attachment-capacity.md
+      - "ADR-0332 — Email refresh reuses unchanged projections": adr/0332-email-refresh-reuses-unchanged-projections.md
   - Changelog: changelog.md

@@ -303,6 +303,23 @@ server coalesces overlapping requests from multiple devices, with one active
 refresh per principal/account and a single historical-learning slice per
 principal. Repeated requests cannot build an unbounded backlog.
 
+Under [ADR-0332](../adr/0332-email-refresh-reuses-unchanged-projections.md), a list
+returns `snapshot_version` for its entire authorized ordered result and counts.
+An in-place refresh with the same version retains loaded rows and pagination
+after one page. Mixed-version pages cannot establish a reusable snapshot.
+Query, connection and mutation invalidation discard the version with its rows.
+Thread detail accepts `If-None-Match` after current authorization, retention,
+draft and operation checks; a match returns 304 without preparing reader text.
+Both responses retain `private, no-store`. Reader preparation runs outside the
+API event loop. No body, permission, retention or draft checks are bypassed.
+Native message and conversation parsing runs off the UI thread. Conversation
+parses use a nine-entry least-recently-used cache with exact source and owner
+matching; reset, exclusion and cancellation prevent stale publication. The
+first inbox page renders before independent account freshness finishes loading;
+late account errors remain visible and revoked access clears the cached state.
+Access bookkeeping reuses the source record read under the owner lock unless
+archive recovery has written a newer revision; retention timestamps remain exact.
+
 An empty inbox does not restart its initial loading indicator on each projection
 poll. A failed refresh remains visible across successful reads of cached
 projections until a later refresh succeeds; it is not reported as an empty

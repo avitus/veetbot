@@ -1522,22 +1522,24 @@ private struct EmailThreadScreen: View {
     @ViewBuilder private func conversation(_ thread: EmailThreadView, proxy: ScrollViewProxy) -> some View {
         if (thread.messages ?? []).count >= 2 {
             let owner = model.accounts.first { $0.id == thread.accountID }?.emailAddress
-            EmailThreadConversationView(
-                thread: thread,
-                conversation: EmailConversationCache.conversation(for: thread, ownerAddress: owner),
-                showsOriginal: inspectorReveal?.showsOriginal,
-                showsSummary: !describesInline,
-                proxy: proxy,
-                onName: { message in
-                    if let inspectorReveal {
-                        inspectorReveal.message(message)
-                    } else {
-                        peopleLookup = .correspondent(message.sender, at: message.sentAt)
-                    }
-                },
-                onFiles: inspectorReveal.map { reveal in { reveal.attachments() } },
-                attachmentLine: { attachmentLine($0) }
-            )
+            PreparedEmailConversation(thread: thread, ownerAddress: owner) { conversation, reader in
+                EmailThreadConversationView(
+                    thread: thread,
+                    conversation: conversation,
+                    showsOriginal: inspectorReveal?.showsOriginal,
+                    showsSummary: !describesInline,
+                    proxy: proxy,
+                    onName: { message in
+                        if let inspectorReveal {
+                            inspectorReveal.message(message)
+                        } else {
+                            peopleLookup = .correspondent(message.sender, at: message.sentAt)
+                        }
+                    },
+                    onFiles: inspectorReveal.map { reveal in { reveal.attachments() } },
+                    attachmentLine: { attachmentLine($0) }, reader: reader
+                )
+            }
             .id(thread.id)
         } else {
             proseConversation(thread)
@@ -2166,7 +2168,7 @@ private struct EmailGistBlock: View {
 }
 
 /// A message's own text, and the quoted chain ending it that the reading view folds.
-struct EmailReaderSections: Equatable {
+struct EmailReaderSections: Equatable, Sendable {
     let current: [MarkdownContentBlock]
     let earlier: [MarkdownContentBlock]
 
@@ -2260,6 +2262,7 @@ struct EmailReadingView: View {
     var showsOriginal: Bool? = nil
     @State private var showingOriginal = false
     @State private var showingEarlier = false
+    @State private var prepared: (source: String, sections: EmailReaderSections)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -2279,7 +2282,13 @@ struct EmailReadingView: View {
                 if showsOriginal ?? showingOriginal {
                     original
                 } else {
-                    reading(EmailReaderSections(markdown: reader))
+                    Group {
+                        if let prepared, prepared.source == reader {
+                            reading(prepared.sections)
+                        } else {
+                            ProgressView("Preparing message…")
+                        }
+                    }
                         .environment(\.openURL, OpenURLAction { url in
                             guard ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
                                   url.host != nil else { return .discarded }
@@ -2294,6 +2303,16 @@ struct EmailReadingView: View {
         .onChange(of: message.id) {
             showingOriginal = false
             showingEarlier = false
+        }
+        .task(id: message.displayReaderBody) {
+            prepared = nil
+            guard let reader = message.displayReaderBody, !reader.isEmpty else { return }
+            do {
+                let sections = try await EmailReadPreparation.run { EmailReaderSections(markdown: reader) }
+                try Task.checkCancellation()
+                prepared = (reader, sections)
+            } catch is CancellationError { /* A newer message owns the view. */ }
+            catch { /* Preparation has no other failure path. */ }
         }
     }
 

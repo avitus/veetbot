@@ -1,6 +1,9 @@
 """Flag-mounted Email API. Exact authorization and private cache semantics."""
 
 import asyncio
+import hashlib
+import json
+import re
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal, cast
 from uuid import UUID
@@ -14,6 +17,24 @@ from agent_core.application.services import EmailService
 from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.errors import ConflictError
+
+_ENTITY_TAG = re.compile(r'(?:W/)?"[\x21\x23-\x7e\x80-\xff]*"|\*')
+
+
+def matches_reader_etag(header: str | None, tag: str) -> bool:
+    """Compare complete opaque tags weakly; commas inside quotes are not separators."""
+    if header is None:
+        return False
+    end = 0
+    matched = False
+    for token in _ENTITY_TAG.finditer(header):
+        separator = header[end : token.start()]
+        if separator.strip(" \t,") or (end and "," not in separator):
+            return False
+        candidate = token.group()
+        matched |= candidate == "*" or candidate.removeprefix("W/") == tag.removeprefix("W/")
+        end = token.end()
+    return matched and not header[end:].strip(" \t,")
 
 
 class ImageRequest(BaseModel):
@@ -108,6 +129,32 @@ def private_response(response: Response) -> None:
     response.headers["Cache-Control"] = "private, no-store"
 
 
+def prepare_reading_text(result: dict[str, object]) -> dict[str, object]:
+    """Prepare inert reading text in a worker, never on the API event loop."""
+    messages = cast(list[dict[str, Any]], result["messages"])
+    for message in messages:
+        html = message.pop("reader_html", "")
+        urls: list[str] = []
+        subject = message["subject"] or str(result["subject"])
+        rich = reading_body(html, subject=subject, image_urls=urls)
+        # Image-bearing tables have different layout eligibility. Render each
+        # mode once, reusing the single HTML parse when there are no images.
+        html_text = reading_body(html, subject=subject) if urls else rich
+        source = reading_source(message["body"], html)
+        plain = html_text if source == html else reading_body(source, subject=subject)
+        message["reader_body"] = plain
+        if html_text:
+            # An unrelated image/footer alternative must not replace the text
+            # reader. Prefer HTML structure when it represents source prose.
+            message["reader_body"] = merge_image_body(
+                plain, html_text, html_text, require_overlap=True
+            )
+        if urls:
+            rich = merge_image_body(message["reader_body"], rich, html_text)
+        message["reader_image_body"] = rich if urls else None
+    return result
+
+
 def email_router(service: EmailService, secured: Callable[[str], object]) -> APIRouter:
     """Expose scope-checked email operations with private, non-cacheable responses."""
     router = APIRouter(dependencies=[Depends(private_response)])
@@ -143,39 +190,42 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
             )
         )
 
-    @router.get("/v1/email/threads/{thread_id}", openapi_extra={"required_scope": "email.read"})
+    @router.get(
+        "/v1/email/threads/{thread_id}",
+        response_model=None,
+        openapi_extra={"required_scope": "email.read"},
+    )
     async def thread(
         thread_id: UUID,
+        response: Response,
         authenticated: Annotated[Principal, secured("email.read")],
-    ) -> dict[str, object]:
-        """Project retained message text and optional image references without fetching them."""
+        if_none_match: Annotated[str | None, Header()] = None,
+    ) -> dict[str, object] | Response:
+        """Validate current retained content before reusing the displayed reader."""
         result = await service.thread(authenticated, thread_id)
-        # HTTP presentation only, after authorization and retention, outside the
-        # owner lock. Chat, drafting and learning keep the original service data.
-        messages = cast(list[dict[str, Any]], result["messages"])
-        for message in messages:
-            html = message.pop("reader_html", "")
-            urls: list[str] = []
-            subject = message["subject"] or str(result["subject"])
-            rich = reading_body(html, subject=subject, image_urls=urls)
-            # Image-bearing tables have different layout eligibility. Render each
-            # mode once, reusing the single HTML parse when there are no images.
-            html_text = reading_body(html, subject=subject) if urls else rich
-            source = reading_source(message["body"], html)
-            plain = html_text if source == html else reading_body(source, subject=subject)
-            message["reader_body"] = plain
-            if html_text:
-                # An unrelated image/footer alternative must not replace the text
-                # reader. Prefer HTML structure when it represents source prose.
-                message["reader_body"] = await asyncio.to_thread(
-                    merge_image_body, plain, html_text, html_text, require_overlap=True
-                )
-            if urls:
-                rich = await asyncio.to_thread(
-                    merge_image_body, message["reader_body"], rich, html_text
-                )
-            message["reader_image_body"] = rich if urls else None
-        return result
+        # Access time changes on every read; every other presentation input,
+        # including retained bodies and the current draft, belongs to the validator.
+        source = {key: value for key, value in result.items() if key != "last_accessed_at"}
+        digest = hashlib.sha256(
+            json.dumps(
+                [
+                    "email-reader@1",
+                    authenticated.tenant_id,
+                    authenticated.principal_id,
+                    sorted(authenticated.scopes),
+                    source,
+                ],
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        tag = f'W/"{digest}"'
+        response.headers["ETag"] = tag
+        if matches_reader_etag(if_none_match, tag):
+            return Response(
+                status_code=304, headers={"ETag": tag, "Cache-Control": "private, no-store"}
+            )
+        return await asyncio.to_thread(prepare_reading_text, result)
 
     @router.post(
         "/v1/email/threads/{thread_id}/images", openapi_extra={"required_scope": "email.read"}

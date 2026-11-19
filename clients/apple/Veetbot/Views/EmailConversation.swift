@@ -56,9 +56,9 @@ struct EmailPerson: Hashable, Sendable {
 /// A thread read as a conversation: each message's own words, who wrote them
 /// and who could see them (ADR-0301). Presentation only, from the envelope and
 /// the reading text the server already sends.
-struct EmailConversation {
+struct EmailConversation: Sendable {
     /// Where the audience changed, shown above the message that changed it.
-    enum Marker: Equatable {
+    enum Marker: Equatable, Sendable {
         /// The message left out people already on the thread.
         case narrowed(members: [EmailPerson], hidden: [EmailPerson])
         case added(by: EmailPerson, people: [EmailPerson])
@@ -82,7 +82,7 @@ struct EmailConversation {
     }
 
     /// One message as the conversation shows it.
-    struct Entry: Identifiable {
+    struct Entry: Identifiable, Sendable {
         let message: EmailMessageView
         let author: EmailPerson
         let isOwner: Bool
@@ -107,7 +107,7 @@ struct EmailConversation {
     }
 
     /// Someone who wrote in the thread, with how often and their latest message.
-    struct Writer: Identifiable {
+    struct Writer: Identifiable, Sendable {
         let person: EmailPerson
         let count: Int
         let latestID: String
@@ -117,7 +117,7 @@ struct EmailConversation {
     }
 
     /// Consecutive or recurring messages to the same narrower audience.
-    struct SideConversation: Identifiable {
+    struct SideConversation: Identifiable, Sendable {
         let members: [EmailPerson]
         let notIncluded: [EmailPerson]
         let entryIDs: [String]
@@ -128,7 +128,7 @@ struct EmailConversation {
     }
 
     /// An attachment, with who sent it and which message carried it.
-    struct File: Identifiable {
+    struct File: Identifiable, Sendable {
         let attachment: EmailAttachmentView
         let author: EmailPerson
         let entryID: String

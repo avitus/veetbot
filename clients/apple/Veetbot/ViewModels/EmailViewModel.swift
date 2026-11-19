@@ -130,9 +130,20 @@ public final class EmailViewModel: ObservableObject {
         let total: Int?
         let cursor: String?
         let seenCursors: Set<String>
+        let version: String?
     }
     // Only the two unsearched collections, for this connection and account filter.
     private var cachedMailLists: [String: CachedMailList] = [:]
+    private var loadedListVersion: String?
+    private var threadETag: String?
+    private var projectionGeneration = UUID()
+
+    private func invalidateMailSnapshots() {
+        cachedMailLists = [:]
+        loadedListVersion = nil
+        threadETag = nil
+        projectionGeneration = UUID()
+    }
     @Published private var loadedCollectionCounts: EmailCollectionCounts?
     /// A pending optimistic mailbox change makes the last confirmed counts stale.
     public var collectionCounts: EmailCollectionCounts? {
@@ -418,7 +429,7 @@ public final class EmailViewModel: ObservableObject {
 
     /// Cancels obsolete work and removes all mail, local edits and errors from the old connection.
     public func resetConnection() {
-        cachedMailLists = [:]
+        invalidateMailSnapshots()
         generation = UUID()
         isResettingLearning = false
         activation = UUID()
@@ -453,7 +464,7 @@ public final class EmailViewModel: ObservableObject {
         spamFlagErrors = [:]
         spamFlagSubmitting = []
         subscriptions.resetConnection()
-        EmailConversationCache.removeAll()
+        EmailConversationCache.shared.removeAll()
         active = false
         accounts = []
         inboxItems = []
@@ -500,7 +511,7 @@ public final class EmailViewModel: ObservableObject {
     /// Clears thread selection and reloads the chosen account within the current foreground visit.
     public func setAccount(_ id: String?) {
         guard id != selectedAccountID else { return }
-        cachedMailLists = [:]
+        invalidateMailSnapshots()
         inboxItems = []
         selectedAccountID = id
         resetListQuery()
@@ -518,6 +529,7 @@ public final class EmailViewModel: ObservableObject {
         inboxItems = cached?.rows ?? []
         loadedCollectionCounts = cached?.counts
         loadedListTotal = cached?.total
+        loadedListVersion = cached?.version
         nextCursor = cached?.cursor
         seenCursors = cached?.seenCursors ?? []
         hasMore = nextCursor != nil
@@ -533,7 +545,7 @@ public final class EmailViewModel: ObservableObject {
 
     /// Debounces search changes and binds the eventual reload to the visit that scheduled it.
     public func setSearchText(_ text: String) {
-        cachedMailLists = [:]
+        invalidateMailSnapshots()
         inboxItems = []
         searchText = text
         resetListQuery()
@@ -548,6 +560,7 @@ public final class EmailViewModel: ObservableObject {
 
     /// Invalidates pending page reads and clears metadata belonging to the previous query.
     private func resetListQuery() {
+        loadedListVersion = nil
         listRequest = UUID()
         // The abandoned read can no longer clear its own flag.
         isReadingList = false
@@ -567,7 +580,7 @@ public final class EmailViewModel: ObservableObject {
             return
         }
         cachedMailLists[listView] = CachedMailList(rows: inboxItems, counts: loadedCollectionCounts,
-            total: loadedListTotal, cursor: nextCursor, seenCursors: seenCursors)
+            total: loadedListTotal, cursor: nextCursor, seenCursors: seenCursors, version: loadedListVersion)
     }
 
     /// Allows explicit inactive reads while binding visible inbox work to its current foreground visit.
@@ -578,11 +591,13 @@ public final class EmailViewModel: ObservableObject {
     /// Retains the initiating visit through every asynchronous projection read and error path.
     private func reload(preserveOrder: Bool = false, activation foreground: UUID?) async {
         let connection = generation
+        let projection = projectionGeneration
         let mailboxVersions = archiveVersions
         guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
         let requestID = UUID()
         listRequest = requestID
         if !preserveOrder {
+            loadedListVersion = nil
             loadedCollectionCounts = nil
             loadedListTotal = nil
         }
@@ -595,49 +610,67 @@ public final class EmailViewModel: ObservableObject {
             hasMore = false
         }
         errorMessage = refreshFailure
-        defer { if listRequest == requestID { isLoading = false; isReadingList = false } }
+        var listFinished = false
+        defer {
+            if listRequest == requestID && !listFinished { isLoading = false; isReadingList = false }
+        }
         do {
             async let accountPage = api.emailAccounts()
-            async let threadPage = readInbox(api: api,
+            let page = try await readInbox(api: api,
                 accountID: selectedAccountID, view: queryListView,
                 text: searchText, count: visibleCount, requestID: requestID, anchor: preserveOrder ? eligibleScrollAnchor : nil,
-                connection: connection, activation: foreground
+                connection: connection, activation: foreground,
+                knownVersion: preserveOrder ? loadedListVersion : nil
             )
-            let (loadedAccounts, page) = try await (accountPage, threadPage)
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
-            let loadedThreads = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
-            accounts = loadedAccounts.items
-            loadedCollectionCounts = page.collectionCounts
-            loadedListTotal = page.totalCount
-            pagingFailed = false
-            recordAccountFreshness(loadedAccounts.items)
             unavailable = false
-            seenCursors = []
-            nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
-            hasMore = nextCursor != nil
-            if preserveOrder && !inboxItems.isEmpty {
-                let anchor = scrollAnchor
-                let previousIndex = anchor.flatMap { id in items.firstIndex { $0.id == id } }
-                let oldIDs = Set(inboxItems.map(\.id))
-                let additions = loadedThreads.filter { !oldIDs.contains($0.id) }
-                let current = Dictionary(loadedThreads.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
-                // Keep surviving rows and add arrivals; `items` places them all by recency.
-                inboxItems = inboxItems.compactMap { current[$0.id] } + additions
-                arrivedThreadIDs = Set(additions.map(\.id))
-                if let anchor, let previousIndex, let index = items.firstIndex(where: { $0.id == anchor }),
-                   index != previousIndex {
-                    restoreScrollAnchor.send(anchor)
+            if let page {
+                let loadedThreads = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
+                loadedCollectionCounts = page.collectionCounts
+                loadedListTotal = page.totalCount
+                pagingFailed = false
+                seenCursors = []
+                nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
+                hasMore = nextCursor != nil
+                if preserveOrder && !inboxItems.isEmpty {
+                    let anchor = scrollAnchor
+                    let previousIndex = anchor.flatMap { id in items.firstIndex { $0.id == id } }
+                    let oldIDs = Set(inboxItems.map(\.id))
+                    let additions = loadedThreads.filter { !oldIDs.contains($0.id) }
+                    let current = Dictionary(loadedThreads.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+                    // Keep surviving rows and add arrivals; `items` places them all by recency.
+                    inboxItems = inboxItems.compactMap { current[$0.id] } + additions
+                    arrivedThreadIDs = Set(additions.map(\.id))
+                    if let anchor, let previousIndex, let index = items.firstIndex(where: { $0.id == anchor }),
+                       index != previousIndex {
+                        restoreScrollAnchor.send(anchor)
+                    }
+                } else {
+                    inboxItems = loadedThreads
+                    arrivedThreadIDs = []
                 }
+                for value in loadedThreads { observeArchive(value) }
+                loadedListVersion = projectionGeneration == projection ? page.snapshotVersion : nil
+                cacheMailList()
             } else {
-                inboxItems = loadedThreads
-                arrivedThreadIDs = []
+                pagingFailed = false
+                // A new foreground visit cancelled the old watchers even when
+                // the server's mailbox snapshot has not changed.
+                for value in inboxItems { observeArchive(value) }
             }
-            for value in loadedThreads { observeArchive(value) }
-            cacheMailList()
+            isLoading = false
+            isReadingList = false
+            listFinished = true
+            let loadedAccounts = try await accountPage
+            guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
+            accounts = loadedAccounts.items
+            recordAccountFreshness(loadedAccounts.items)
         } catch {
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             if isUnavailable(error) {
-                cachedMailLists = [:]
+                invalidateMailSnapshots()
+                resetListQuery()
+                isLoading = false
                 unavailable = true
                 loadedListTotal = nil
                 inboxItems = []
@@ -652,7 +685,8 @@ public final class EmailViewModel: ObservableObject {
 
     /// Stops paging when the original connection or foreground visit no longer owns the read.
     private func readInbox(api: VeetbotAPIClient, accountID: String?, view: String, text: String, count: Int,
-                           requestID: UUID, anchor: UUID?, connection: UUID, activation foreground: UUID?) async throws -> EmailThreadPage {
+                           requestID: UUID, anchor: UUID?, connection: UUID, activation foreground: UUID?,
+                           knownVersion: String?) async throws -> EmailThreadPage? {
         var rows: [EmailThreadView] = []
         var counts: EmailCollectionCounts?
         var total: Int?
@@ -660,6 +694,7 @@ public final class EmailViewModel: ObservableObject {
         var cursor: String?
         var cursors: Set<String> = []
         var pages = 0
+        var version: String?
         // Pages the visible rows need, then a bounded search for a displaced visible thread.
         let pageLimit = max(1, (count + 99) / 100) + Self.anchorSearchPages
         repeat {
@@ -669,6 +704,11 @@ public final class EmailViewModel: ObservableObject {
             let limit = remaining > 0 ? min(100, remaining) : 100
             let page = try await api.emailThreads(accountID: accountID, view: view, text: text, limit: limit, cursor: cursor)
             guard listRequest == requestID, acceptsRead(connection: connection, activation: foreground) else { throw CancellationError() }
+            if pages == 0 {
+                if let knownVersion, page.snapshotVersion == knownVersion,
+                   loadedListVersion == knownVersion { return nil }
+                version = page.snapshotVersion
+            } else if page.snapshotVersion != version { version = nil }
             counts = page.collectionCounts
             total = page.totalCount
             rows.append(contentsOf: page.items.filter { ids.insert($0.id).inserted })
@@ -676,7 +716,7 @@ public final class EmailViewModel: ObservableObject {
             pages += 1
         } while cursor != nil
             && ((count > 100 && rows.count < count) || (anchor.map { !ids.contains($0) } == true && pages < pageLimit))
-        return EmailThreadPage(items: rows, nextCursor: cursor, collectionCounts: counts, totalCount: total)
+        return EmailThreadPage(items: rows, nextCursor: cursor, collectionCounts: counts, totalCount: total, snapshotVersion: version)
     }
 
     /// Applies a page only while the requesting connection, list and foreground visit remain current.
@@ -695,6 +735,7 @@ public final class EmailViewModel: ObservableObject {
                 text: searchText, limit: pageSize, cursor: cursor
             )
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
+            if loadedListVersion != page.snapshotVersion { loadedListVersion = nil }
             loadedCollectionCounts = page.collectionCounts
             loadedListTotal = page.totalCount
             var ids = Set(inboxItems.map(\.id))
@@ -904,6 +945,7 @@ public final class EmailViewModel: ObservableObject {
 
     /// Clears thread presentation and its errors without discarding draft edits stored by draft ID.
     public func clearSelection() {
+        threadETag = nil
         selectionRequest = UUID()
         threadRead = nil
         isLoadingThread = false
@@ -958,6 +1000,7 @@ public final class EmailViewModel: ObservableObject {
         selectionRequest = requestID
         threadRead = (id, foreground)
         isLoadingThread = thread == nil
+        let projection = projectionGeneration
         defer {
             if selectionRequest == requestID {
                 threadRead = nil
@@ -965,15 +1008,22 @@ public final class EmailViewModel: ObservableObject {
             }
         }
         do {
-            let response = try await api.emailThread(id)
+            let read = try await api.emailThreadResponse(id, etag: refreshOnly && thread?.id == id ? threadETag : nil)
             guard acceptsRead(connection: connection, activation: foreground), selectionRequest == requestID else { return }
+            guard case .content(let response, let etag) = read else {
+                threadReadError = nil
+                if draft?.isManual == true { await loadRevisions() }
+                if let approvalID, draft?.approvalID == approvalID { await loadReview(activation: foreground) }
+                else { await settlePendingReview(activation: foreground) }
+                return
+            }
             let previousMailbox = archiveStates[id]
             let result = preservingArchiveState(response, since: mailboxVersions)
             if let previousMailbox,
                previousMailbox.inInbox != result.inInbox || previousMailbox.inSpam != result.inSpam
                 || previousMailbox.dismissedRevision != result.dismissedRevision
                 || previousMailbox.isHandled != result.isHandled {
-                cachedMailLists = [:]
+                invalidateMailSnapshots()
                 resetListQuery()
                 isLoading = false
                 if let index = inboxItems.firstIndex(where: { $0.id == id }) {
@@ -992,6 +1042,7 @@ public final class EmailViewModel: ObservableObject {
                 }
             }
             thread = result
+            threadETag = projectionGeneration == projection && (result.draft != nil || result.draftID == nil) ? etag : nil
             isLoadingThread = false
             observeArchive(result)
             if let returnedDraft = result.draft { mergeDraft(returnedDraft) }
@@ -1222,7 +1273,7 @@ public final class EmailViewModel: ObservableObject {
             let result = try await api.emailFeedback(thread: thread, target: target, judgment: judgment,
                                                     explanation: explanation, targetValue: targetValue, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return }
-            cachedMailLists = [:]
+            invalidateMailSnapshots()
             // The owner may have opened another thread while this was in flight: the
             // acknowledgment and its Undo belong to the thread that was judged.
             if selectedThreadID == thread.id {
@@ -1257,7 +1308,7 @@ public final class EmailViewModel: ObservableObject {
             guard generation == connection else { return }
             if feedbackID == id { feedbackID = nil }
             if selectedThreadID == selection, let kind, feedbackGiven[kind]?.id == id { feedbackGiven[kind] = nil }
-            cachedMailLists = [:]
+            invalidateMailSnapshots()
             feedbackMessage = "Feedback undone."
             await reload(preserveOrder: true)
         } catch { if generation == connection { report(error) } }
@@ -1571,7 +1622,7 @@ public final class EmailViewModel: ObservableObject {
         do {
             let result = try await api.dismissEmailThread(thread, dismissed: handled, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return false }
-            cachedMailLists = [:]
+            invalidateMailSnapshots()
             // The command returns a summary. Preserve the open messages and
             // unsaved draft, updating only server-confirmed attention state.
             if self.thread?.id == result.id, self.thread?.revision == result.revision {
@@ -1672,7 +1723,7 @@ public final class EmailViewModel: ObservableObject {
         do {
             let result = try await api.clearEmailThreadSpamFlag(thread.id, cleared: cleared)
             guard generation == connection else { return }
-            cachedMailLists = [:]
+            invalidateMailSnapshots()
             for index in inboxItems.indices where inboxItems[index].id == thread.id {
                 inboxItems[index].suspectedSpam = result.suspectedSpam
                 inboxItems[index].spamCleared = result.spamCleared
@@ -1707,7 +1758,7 @@ public final class EmailViewModel: ObservableObject {
         let request = archiveRequests[thread.id]
             ?? ArchiveRequest(thread: thread, archived: archived, key: UUID().uuidString, spam: spam)
         archiveRequests[thread.id] = request
-        cachedMailLists = [:]
+        invalidateMailSnapshots()
         archiveErrors[thread.id] = nil
         archiveReadErrors.remove(thread.id)
         archiveVersions[thread.id] = UUID()
@@ -1804,7 +1855,7 @@ public final class EmailViewModel: ObservableObject {
 
     /// Applies fresh source context and mailbox state while retaining local drafts and independent errors.
     private func mergeArchive(_ value: EmailThreadView) {
-        cachedMailLists = [:]
+        invalidateMailSnapshots()
         archiveVersions[value.id] = UUID()
         archiveStates[value.id] = ArchiveMailboxState(inInbox: value.inInbox, operation: value.archiveOperation,
             dismissedRevision: value.dismissedRevision, revision: value.revision, inSpam: value.inSpam)
@@ -1960,7 +2011,7 @@ public final class EmailViewModel: ObservableObject {
         do {
             let value = try await api.resetEmailLearning(scope: scope, idempotencyKey: UUID().uuidString)
             guard generation == connection else { return }
-            cachedMailLists = [:]
+            invalidateMailSnapshots()
             learning = value
             toasts.show(scope == "preferences" ? "Importance preferences reset."
                 : scope == "style" ? "Writing style reset." : "Email learning reset.")
@@ -1974,9 +2025,9 @@ public final class EmailViewModel: ObservableObject {
         do {
             try await api.excludeEmailThread(thread, idempotencyKey: UUID().uuidString)
             // The excluded mail leaves the client too, even if the connection moved on.
-            EmailConversationCache.remove(threadID: thread.id)
+            EmailConversationCache.shared.remove(threadID: thread.id)
             guard generation == connection else { return }
-            cachedMailLists = [:]
+            invalidateMailSnapshots()
             edits = edits.filter { $0.value.base.threadID != thread.id }
             // The row goes now: a failed reload must not leave the excluded summary in view.
             inboxItems.removeAll { $0.id == thread.id }

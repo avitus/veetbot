@@ -139,11 +139,17 @@ class ThreadSummaryCache:
     owners = 4
 
     def __init__(self) -> None:
-        self._kept: dict[tuple[str, str], dict[str, tuple[str, EmailThread]]] = {}
+        self._kept: dict[tuple[str, str], dict[str, tuple[str, EmailThread, str]]] = {}
         self._reading: dict[tuple[str, str], asyncio.Lock] = {}
 
     async def read(self, store: EmailStore, principal: Principal) -> list[EmailThread]:
         """Current conversations in key order; never mutate or save one back."""
+        return [thread for thread, _ in await self.read_versioned(store, principal)]
+
+    async def read_versioned(
+        self, store: EmailStore, principal: Principal
+    ) -> list[tuple[EmailThread, str]]:
+        """Pair each summary with a reusable content digest, excluding access timestamps."""
         owner = (principal.tenant_id, principal.principal_id)
         async with self._reading.setdefault(owner, asyncio.Lock()):
             kept = self._kept.get(owner, {})
@@ -158,12 +164,13 @@ class ThreadSummaryCache:
             stale = [key for key in marks if key not in current]
             for start in range(0, len(stale), 1000):
                 for row in await store.get_thread_summaries(principal, stale[start : start + 1000]):
-                    current[row.key] = (marks[row.key], EmailThread.model_validate(row.payload))
+                    thread = EmailThread.model_validate(row.payload)
+                    current[row.key] = (marks[row.key], thread, summary_digest(thread))
             self._kept.pop(owner, None)
             self._kept[owner] = current
             while len(self._kept) > self.owners:
                 del self._kept[next(iter(self._kept))]
-            return [current[key][1] for key in marks if key in current]
+            return [(current[key][1], current[key][2]) for key in marks if key in current]
 
     async def forget(self, principal: Principal, keys: Sequence[str]) -> None:
         """Drop erased threads, after any list of this owner already in flight."""
@@ -252,6 +259,13 @@ def thread_summary(thread: EmailThread) -> dict[str, object]:
             "last_accessed_at",
         },
     )
+
+
+def summary_digest(thread: EmailThread) -> str:
+    """Hash the complete public row only when its source or effective feedback changes."""
+    return hashlib.sha256(
+        json.dumps(thread_summary(thread), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def draft_body_fingerprint(body: str) -> str:
@@ -395,12 +409,19 @@ class EmailExperienceService:
         self, store: EmailStore, principal: Principal, thread_id: UUID
     ) -> EmailThread:
         """Read one authorized conversation; bodies past the window are withheld."""
-        thread = await read_value(store, principal, "thread", str(thread_id), EmailThread)
-        if thread is None:
+        return (await self._thread_with_record(store, principal, thread_id))[1]
+
+    async def _thread_with_record(
+        self, store: EmailStore, principal: Principal, thread_id: UUID
+    ) -> tuple[EmailRecord, EmailThread]:
+        """Keep the locked record revision for access bookkeeping without rereading bodies."""
+        record = await store.get(principal, "thread", str(thread_id))
+        if record is None:
             raise NotFoundError("email thread not found")
+        thread = EmailThread.model_validate(record.payload)
         self._authorize_account(principal, thread.account_id)
         # Maintenance may not have swept yet; its delay cannot expose an expired body.
-        return retained_thread(thread, body_cutoff(self.clock.now()))
+        return record, retained_thread(thread, body_cutoff(self.clock.now()))
 
     def _authorize_account(self, principal: Principal, account_id: str) -> None:
         if account_id not in self.account_servers:
@@ -426,17 +447,19 @@ class EmailExperienceService:
         async with self.uow_factory() as uow:
             feedback = await self._feedback(uow.email, principal)
             threads = []
-            for stored in await self._summaries.read(uow.email, principal):
+            for stored, digest in await self._summaries.read_versioned(uow.email, principal):
                 if (
                     stored.account_id not in self.account_servers
                     or f"mcp.{self.account_servers[stored.account_id]['read']}.use"
                     not in principal.scopes
                 ):
                     continue
-                threads.append(stored)
+                threads.append((stored, digest))
         eligible: list[EmailThread] = []
+        digests: dict[UUID, str] = {}
         counts = {"priority": 0, "inbox": 0, "needs_you": 0, "handled": 0, "suspected_spam": 0}
-        for thread in threads:
+        for stored, digest in threads:
+            thread = stored
             if (
                 thread.archive_operation is not None
                 and thread.archive_operation.status == "pending"
@@ -489,6 +512,7 @@ class EmailExperienceService:
             if view in collections and not collections[view]:
                 continue
             eligible.append(thread)
+            digests[thread.id] = digest if thread is stored else summary_digest(thread)
         if view in {"priority", "other", "all"}:
             # The rank selects Important, Other mail and search results (ADR-0234).
             eligible.sort(
@@ -503,6 +527,23 @@ class EmailExperienceService:
         start = int(cursor or "0")
         page = eligible[start : start + limit]
         return {
+            "snapshot_version": hashlib.sha256(
+                json.dumps(
+                    [
+                        "email-list@1",
+                        principal.tenant_id,
+                        principal.principal_id,
+                        sorted(principal.scopes),
+                        view,
+                        account_id,
+                        text,
+                        counts,
+                        [digests[thread.id] for thread in eligible],
+                    ],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest(),
             "items": [thread_summary(thread) for thread in page],
             "next_cursor": str(start + limit) if start + limit < len(eligible) else None,
             "collection_counts": counts,
@@ -546,12 +587,24 @@ class EmailExperienceService:
         """Read a scoped thread with its current attention state and draft projection."""
         require_scope(principal, "email.read")
         async with self.uow_factory() as uow, uow.email.lock(principal):
-            thread = await self._thread(uow.email, principal, thread_id)
-            thread = await self._reconcile_archive_in(uow, principal, thread)
-            thread = thread.model_copy(update={"last_accessed_at": self.clock.now()})
-            await save_value(
-                uow.email, principal, "thread", str(thread.id), thread, self.clock.now()
-            )
+            record, original = await self._thread_with_record(uow.email, principal, thread_id)
+            reconciled = await self._reconcile_archive_in(uow, principal, original)
+            now = self.clock.now()
+            thread = reconciled.model_copy(update={"last_accessed_at": now})
+            if reconciled is original:
+                await uow.email.put(
+                    record.model_copy(
+                        update={
+                            "revision": record.revision + 1,
+                            "payload": thread.model_dump(mode="json"),
+                            "updated_at": now,
+                        }
+                    ),
+                    expected_revision=record.revision,
+                )
+            else:
+                # Archive recovery may have written a newer durable revision.
+                await save_value(uow.email, principal, "thread", str(thread.id), thread, now)
             selected = apply_feedback(
                 thread, await self._feedback(uow.email, principal), now=self.clock.now()
             )

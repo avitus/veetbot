@@ -511,3 +511,26 @@ async def test_rolled_back_admission_releases_its_claimed_thread_session(
     """A claimed catalog is released exactly once when its transaction fails."""
     async with held_discovery_email() as (app, held):
         await claim_session_then_fail(app, held, monkeypatch)
+
+
+async def test_thread_read_fetches_source_payload_only_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Access bookkeeping reuses the locked source revision instead of rereading its bodies."""
+    async with email_client() as (app, client):
+        thread, _ = await seed_mail(app)
+        reads = 0
+        original = InMemoryEmailStore.get
+
+        async def counted(
+            store: InMemoryEmailStore, principal: Principal, kind: str, key: str
+        ) -> EmailRecord | None:
+            nonlocal reads
+            if kind == "thread" and key == str(thread.id):
+                reads += 1
+            return await original(store, principal, kind, key)
+
+        monkeypatch.setattr(InMemoryEmailStore, "get", counted)
+        response = await client.get(f"/v1/email/threads/{thread.id}")
+        assert response.status_code == 200
+        assert reads == 1
