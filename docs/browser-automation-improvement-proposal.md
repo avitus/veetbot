@@ -238,6 +238,13 @@ satisfied result permits fresh targeting and ordinary approval. Failure or
 uncertainty stops before dispatch. ADR-0333 records the contract and construction
 evidence; deployed recipes and broader live-site acceptance remain unchanged.
 
+The next W3/W6 slice lets reviewed extractions require a minimum row count and
+complete observed coverage. Insufficient evidence stops before later actions;
+recipes that accept empty or partial results retain their behavior. ADR-0334
+records the contract and construction evidence. This does not claim hidden or
+virtualized rows are complete, change deployed recipes or establish live-site
+acceptance.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

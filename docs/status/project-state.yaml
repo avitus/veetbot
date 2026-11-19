@@ -1,3 +1,6 @@
+# ADR-0334: Owner-authorized W3/W6 continuation adds reviewed extraction row
+# and completeness requirements. Insufficient evidence cannot advance to later
+# actions. No public schema, deployed recipe, milestone or gate moves.
 # ADR-0333: Owner-authorized W4/W6 continuation adds bounded reviewed action
 # readiness reads before fresh target discovery. Ordinary approval and uncertain
 # effect handling remain unchanged; no deployed recipe, milestone or gate moves.

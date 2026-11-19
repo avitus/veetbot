@@ -2265,6 +2265,19 @@ replay an earlier action. Generation changes restart the unfinished read through
 the existing workflow binding checks. Both calls spend the existing workflow and
 run budgets, and final reporting retains the extraction's bounded coverage.
 
+[ADR-0334](../adr/0334-browser-workflow-extraction-requirements.md) adds optional
+extraction-only `minimum_rows` and `require_complete` requirements. The strict
+integer minimum is between zero and the step's row limit; completeness is a
+strict boolean. Defaults of zero and false preserve legacy recipe identities.
+After schema validation, too few rows or, when completeness is required, any
+omitted rows, source/row scan limit or byte limit stops as `insufficient_evidence`.
+The step remains incomplete and later actions cannot be proposed. Invalid or
+missing extraction stays `unverified`. Neither path retries or replays effects.
+These are local acceptance checks, not tool arguments. Completeness covers only
+the selected visible collection in the pinned scope, not hidden/virtualized data,
+website truth or semantic row uniqueness. Empty collections may satisfy a zero
+minimum. No public tool schema or deployed recipe changes.
+
 [ADR-0314](../adr/0314-reviewed-browser-read-branches.md) adds optional
 `branches` to reviewed observe steps with a postcondition and positive
 `failure_evidence`. The closed object names `satisfied` and `failed` destinations

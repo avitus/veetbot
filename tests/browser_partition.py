@@ -24,6 +24,7 @@ BROWSER_MODULES = frozenset(
         "test_browser_workflow_regions_real_chromium.py",
         "test_browser_workflow_capabilities_real_chromium.py",
         "test_browser_workflow_readiness_real_chromium.py",
+        "test_browser_workflow_extraction_requirements_real_chromium.py",
         "test_browser_regions_real_chromium.py",
         "test_browser_shadow_regions_real_chromium.py",
         "test_browser_extraction_real_chromium.py",

@@ -44,14 +44,17 @@ def _intent(value: str) -> str:
 
 
 def _definition(recipe: BrowserWorkflowRecipe) -> str:
-    # Omitted optional fields must not change legacy recipe/checkpoint identity.
+    # Optional defaults must not change legacy recipe/checkpoint identity.
+    defaults = {
+        "branches": None,
+        "target_region": None,
+        "precondition": None,
+        "minimum_rows": 0,
+        "require_complete": False,
+    }
     excluded = {
         "steps": {
-            index: {
-                field
-                for field in ("branches", "target_region", "precondition")
-                if getattr(step, field) is None
-            }
+            index: {field for field, default in defaults.items() if getattr(step, field) == default}
             for index, step in enumerate(recipe.steps)
         }
     }
@@ -603,6 +606,20 @@ class BrowserWorkflowRunner:
                 ):
                     await self._stop(context, state, "unverified")
                     return None
+                if step.kind == "extract":
+                    extracted = observed.extraction
+                    assert extracted is not None
+                    if len(extracted.rows) < step.minimum_rows or (
+                        step.require_complete
+                        and (
+                            extracted.omitted_rows
+                            or extracted.source_scan_limit_reached
+                            or extracted.row_scan_limit_reached
+                            or extracted.byte_limit_reached
+                        )
+                    ):
+                        await self._stop(context, state, "insufficient_evidence")
+                        return None
                 state["completed_steps"] += 1
                 if "next_step" in state:
                     state["next_step"] = step_index + 1

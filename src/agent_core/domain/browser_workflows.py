@@ -43,6 +43,8 @@ class BrowserWorkflowStep(BaseModel):
     index: int = Field(default=0, ge=0, le=15)
     fields: list[BrowserExtractionField] = Field(default_factory=list, max_length=8)
     row_limit: int = Field(default=20, ge=1, le=50)
+    minimum_rows: int = Field(default=0, ge=0, le=50, strict=True)
+    require_complete: bool = Field(default=False, strict=True)
     branches: BrowserWorkflowBranches | None = None
 
     @model_validator(mode="after")
@@ -62,7 +64,15 @@ class BrowserWorkflowStep(BaseModel):
                 "precondition",
                 "target_region",
             },
-            "extract": {"kind", "collection_kind", "index", "fields", "row_limit"},
+            "extract": {
+                "kind",
+                "collection_kind",
+                "index",
+                "fields",
+                "row_limit",
+                "minimum_rows",
+                "require_complete",
+            },
             "collect_feed": {"kind", "role", "name"},
         }[self.kind]
         if not self.model_fields_set <= permitted:
@@ -89,6 +99,8 @@ class BrowserWorkflowStep(BaseModel):
             )
         elif self.kind == "extract" and (self.collection_kind is None or not self.fields):
             raise ValueError("extraction requires a collection and fields")
+        if self.minimum_rows > self.row_limit:
+            raise ValueError("minimum rows exceeds the extraction row limit")
         return self
 
     def action_values(self) -> dict[str, str | int]:

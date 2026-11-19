@@ -472,4 +472,5 @@ nav:
       - "ADR-0331 — Gmail draft attachment capacity": adr/0331-gmail-draft-attachment-capacity.md
       - "ADR-0332 — Email refresh reuses unchanged projections": adr/0332-email-refresh-reuses-unchanged-projections.md
       - "ADR-0333: Browser workflow action readiness": adr/0333-browser-workflow-action-readiness.md
+      - "ADR-0334: Browser workflow extraction requirements": adr/0334-browser-workflow-extraction-requirements.md
   - Changelog: changelog.md
