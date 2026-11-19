@@ -31,7 +31,10 @@ plan and directed implementation. Production timing remains to be measured.
    retention, current draft and operation state are checked before matching.
    The validator covers retained source content and presentation inputs,
    excluding only access time, and includes a reader-format version. A match
-   returns 304 without regenerating reading text. Both responses remain
+   returns 304 without regenerating reading text. Matching honors wildcard and
+   weak validators, preserving commas inside quoted tags and rejecting malformed
+   separators ([RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html#section-13.1.2)).
+   Both responses remain
    `private, no-store`; this introduces no HTTP disk cache or offline authority.
 4. The native client uses a validator only for its currently displayed thread
    and only during refresh. Selection, connection and list-invalidating owner
@@ -46,6 +49,10 @@ plan and directed implementation. Production timing remains to be measured.
    is available. A nine-entry least-recently-used cache retains one parse per
    thread. Message changes (including retention), exclusion and connection reset
    invalidate it; cancelled or invalidated workers cannot repopulate the cache.
+   Each cancelled reader resumes promptly; the worker is cancelled only when
+   its final reader leaves. Reader controls belong to the thread outside the
+   preparation gate, so an updated account address or message source preserves
+   the selected mode, focus, side conversation and expanded content.
 7. The first authorized inbox page is published independently of account
    metadata. Account freshness continues loading concurrently; its failures
    remain visible and permission loss still removes inaccessible content.
@@ -108,6 +115,15 @@ Regression-first evidence for the remaining latency changes:
 | `testInboxRowsAppearBeforeSlowAccountMetadata` | Rows stayed hidden and the initial loader remained active |
 | `testConversationPreparationRunsOffTheMainThread` | The builder observed `Thread.isMainThread == true` |
 | `testLateAccountsDoNotFinishAnOverlappingPageLoad` | Account completion cleared the newer page's loading indicator |
+
+PR review hardening also reproduced blocked cancelled readers, a reset native
+mode after owner-address preparation, and missing HTTP wildcard/weak matches.
+`testCancellationReleasesReaderBeforeWorkerFinishes` covers one and two readers;
+`testPreparationPreservesConversationMode` exercises the actual native picker.
+The HTTP boundary cases retain authorization checks for wildcard requests and
+reject malformed tag separators. The final focused API partition passed 83
+cases; the expanded native partition passed 198 tests in seven suites. Lint,
+typing and documentation checks passed in the same local sandboxes.
 
 The hide/reopen regression now explicitly holds the initial list response,
 keeping every existing assertion. Holding account metadata alone no longer

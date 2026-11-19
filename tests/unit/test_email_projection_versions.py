@@ -167,3 +167,43 @@ async def test_thread_validator_cannot_bypass_revoked_read_scope() -> None:
         response = await client.get(path, headers={"If-None-Match": first.headers["etag"]})
         assert response.status_code == 403
         assert response.headers["cache-control"] == "private, no-store"
+
+
+@pytest.mark.parametrize(
+    "header",
+    ["*", "{strong}", '"unrelated,tag", {strong}', '{weak}, "unrelated,tag"'],
+)
+async def test_thread_validator_uses_http_weak_comparison(header: str) -> None:
+    async with email_client() as (app, client):
+        thread, _ = await seed_mail(app)
+        path = f"/v1/email/threads/{thread.id}"
+        first = await client.get(path)
+        weak = first.headers["etag"]
+        response = await client.get(
+            path,
+            headers={"If-None-Match": header.format(weak=weak, strong=weak.removeprefix("W/"))},
+        )
+        assert response.status_code == 304
+        assert response.content == b""
+        app.services.email.account_servers = {}
+        assert (await client.get(path, headers={"If-None-Match": "*"})).status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("header", "tag", "matches"),
+    [
+        ('"other,tag"', 'W/"tag"', False),
+        ('"other,tag", W/"a,b"', '"a,b"', True),
+        ('W/"a,b", "unrelated"', '"a,b"', True),
+        ('"unrelated", *', 'W/"a,b"', True),
+        ('garbage "a,b"', '"a,b"', False),
+        ('"a,b" trailing', '"a,b"', False),
+        ('"a,b""other"', '"a,b"', False),
+        ('"a,b" "other"', '"a,b"', False),
+        ('"a,b"', '"different"', False),
+    ],
+)
+def test_reader_entity_tags_preserve_quoted_commas(header: str, tag: str, matches: bool) -> None:
+    from agent_core.api.email import matches_reader_etag
+
+    assert matches_reader_etag(header, tag) is matches

@@ -8,10 +8,10 @@ final class EmailConversationCache {
         let request: EmailConversationRequest
         let conversation: EmailConversation
     }
-    private final class Flight {
+    @MainActor private final class Flight {
         let request: EmailConversationRequest
         let worker: Task<EmailConversation, Error>
-        var readers = 0
+        var readers: [UUID: CheckedContinuation<EmailConversation, Error>] = [:]
         init(request: EmailConversationRequest, worker: Task<EmailConversation, Error>) {
             self.request = request
             self.worker = worker
@@ -45,26 +45,60 @@ final class EmailConversationCache {
                 }
             })
             inFlight[thread.id] = flight
+            Task {
+                let result = await flight.worker.result
+                finish(flight, threadID: thread.id, result: result)
+            }
         }
-        flight.readers += 1
-        defer {
-            flight.readers -= 1
-            if flight.readers == 0, inFlight[thread.id] === flight { inFlight.removeValue(forKey: thread.id) }
+        let readerID = UUID()
+        let conversation = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                flight.readers[readerID] = continuation
+                if Task.isCancelled { cancelReader(readerID, flight: flight, threadID: thread.id) }
+            }
+        } onCancel: {
+            Task { @MainActor in self.cancelReader(readerID, flight: flight, threadID: thread.id) }
         }
-        let conversation = try await flight.worker.value
         try Task.checkCancellation()
-        guard inFlight[thread.id] === flight else { throw CancellationError() }
-        built[thread.id] = Cached(request: request, conversation: conversation)
-        touch(thread.id)
-        while recent.count > 9 { built.removeValue(forKey: recent.removeFirst()) }
         return conversation
+    }
+
+    /// A reader leaves promptly; only the final reader owns cancellation of the shared worker.
+    private func cancelReader(_ id: UUID, flight: Flight, threadID: UUID) {
+        guard let reader = flight.readers.removeValue(forKey: id) else { return }
+        if flight.readers.isEmpty {
+            if inFlight[threadID] === flight { inFlight.removeValue(forKey: threadID) }
+            flight.worker.cancel()
+        }
+        reader.resume(throwing: CancellationError())
+    }
+
+    /// Completion publishes once and releases every remaining reader, on success or failure.
+    private func finish(_ flight: Flight, threadID: UUID, result: Result<EmailConversation, Error>) {
+        guard inFlight[threadID] === flight else { return }
+        inFlight.removeValue(forKey: threadID)
+        if case .success(let conversation) = result, !flight.readers.isEmpty {
+            built[threadID] = Cached(request: flight.request, conversation: conversation)
+            touch(threadID)
+            while recent.count > 9 { built.removeValue(forKey: recent.removeFirst()) }
+        }
+        let readers = flight.readers.values
+        flight.readers.removeAll()
+        for reader in readers { reader.resume(with: result) }
+    }
+
+    private func invalidate(_ flight: Flight) {
+        flight.worker.cancel()
+        let readers = flight.readers.values
+        flight.readers.removeAll()
+        for reader in readers { reader.resume(throwing: CancellationError()) }
     }
 
     private func touch(_ id: UUID) { recent.removeAll { $0 == id }; recent.append(id) }
 
     /// Invalidated in-flight parses cannot repopulate the connection's cache.
     func removeAll() {
-        for flight in inFlight.values { flight.worker.cancel() }
+        for flight in inFlight.values { invalidate(flight) }
         inFlight.removeAll()
         built.removeAll()
         recent.removeAll()
@@ -72,7 +106,7 @@ final class EmailConversationCache {
 
     /// Drops one thread, including any obsolete parse still being prepared.
     func remove(threadID: UUID) {
-        inFlight.removeValue(forKey: threadID)?.worker.cancel()
+        if let flight = inFlight.removeValue(forKey: threadID) { invalidate(flight) }
         built.removeValue(forKey: threadID)
         recent.removeAll { $0 == threadID }
     }
@@ -113,25 +147,37 @@ private struct EmailConversationRequest: Equatable, Sendable {
     }
 }
 
+/// Reader choices belong to a thread, not to one prepared representation of it.
+struct EmailConversationReaderState {
+    enum Mode: Hashable { case conversation, brief }
+    var mode: Mode?
+    var focus: String?
+    var sideID: String?
+    var expanded: Set<String> = []
+    var openWriters: Set<String> = []
+}
+
 /// Publishes only the parse belonging to the view's current source and account.
 struct PreparedEmailConversation<Content: View>: View {
     let thread: EmailThreadView
     let ownerAddress: String?
-    @ViewBuilder var content: (EmailConversation) -> Content
+    var cache: EmailConversationCache = .shared
+    @ViewBuilder var content: (EmailConversation, Binding<EmailConversationReaderState>) -> Content
+    @State private var reader = EmailConversationReaderState()
     @State private var prepared: (EmailConversationRequest, EmailConversation)?
 
     var body: some View {
         let request = EmailConversationRequest(thread: thread, ownerAddress: ownerAddress)
         Group {
             if let prepared, prepared.0 == request {
-                content(prepared.1)
+                content(prepared.1, $reader)
             } else {
                 ProgressView("Preparing conversation…")
             }
         }
         .task(id: request) {
             do {
-                let conversation = try await EmailConversationCache.shared.conversation(for: thread, ownerAddress: ownerAddress)
+                let conversation = try await cache.conversation(for: thread, ownerAddress: ownerAddress)
                 try Task.checkCancellation()
                 prepared = (request, conversation)
             } catch is CancellationError { /* The current source owns the next parse. */ }
@@ -198,7 +244,7 @@ func emailPeopleList(_ people: [EmailPerson], limit: Int = 3) -> String {
 /// view, the focus and the filter start fresh for each thread.
 struct EmailThreadConversationView<Attachments: View>: View {
     /// Which view of the thread is showing.
-    enum Mode: Hashable { case conversation, brief }
+    typealias Mode = EmailConversationReaderState.Mode
 
     let thread: EmailThreadView
     let conversation: EmailConversation
@@ -214,11 +260,28 @@ struct EmailThreadConversationView<Attachments: View>: View {
     var startsOn: Mode? = nil
     @ViewBuilder let attachmentLine: (EmailMessageView) -> Attachments
 
-    @State private var mode: Mode?
-    @State private var focus: String?
-    @State private var sideID: String?
-    @State private var expanded: Set<String> = []
-    @State private var openWriters: Set<String> = []
+    @Binding var reader: EmailConversationReaderState
+
+    private var mode: Mode? {
+        get { reader.mode }
+        nonmutating set { reader.mode = newValue }
+    }
+    private var focus: String? {
+        get { reader.focus }
+        nonmutating set { reader.focus = newValue }
+    }
+    private var sideID: String? {
+        get { reader.sideID }
+        nonmutating set { reader.sideID = newValue }
+    }
+    private var expanded: Set<String> {
+        get { reader.expanded }
+        nonmutating set { reader.expanded = newValue }
+    }
+    private var openWriters: Set<String> {
+        get { reader.openWriters }
+        nonmutating set { reader.openWriters = newValue }
+    }
 
     /// Brief for a complex thread unless the owner switched; otherwise the conversation.
     private var effectiveMode: Mode {

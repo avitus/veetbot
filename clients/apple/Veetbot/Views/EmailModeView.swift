@@ -1522,7 +1522,7 @@ private struct EmailThreadScreen: View {
     @ViewBuilder private func conversation(_ thread: EmailThreadView, proxy: ScrollViewProxy) -> some View {
         if (thread.messages ?? []).count >= 2 {
             let owner = model.accounts.first { $0.id == thread.accountID }?.emailAddress
-            PreparedEmailConversation(thread: thread, ownerAddress: owner) { conversation in
+            PreparedEmailConversation(thread: thread, ownerAddress: owner) { conversation, reader in
                 EmailThreadConversationView(
                     thread: thread,
                     conversation: conversation,
@@ -1537,7 +1537,7 @@ private struct EmailThreadScreen: View {
                         }
                     },
                     onFiles: inspectorReveal.map { reveal in { reveal.attachments() } },
-                    attachmentLine: { attachmentLine($0) }
+                    attachmentLine: { attachmentLine($0) }, reader: reader
                 )
             }
             .id(thread.id)

@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import re
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal, cast
 from uuid import UUID
@@ -16,6 +17,24 @@ from agent_core.application.services import EmailService
 from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailDraft, EmailDraftEdit, EmailLearningState, EmailOperation
 from agent_core.domain.errors import ConflictError
+
+_ENTITY_TAG = re.compile(r'(?:W/)?"[\x21\x23-\x7e\x80-\xff]*"|\*')
+
+
+def matches_reader_etag(header: str | None, tag: str) -> bool:
+    """Compare complete opaque tags weakly; commas inside quotes are not separators."""
+    if header is None:
+        return False
+    end = 0
+    matched = False
+    for token in _ENTITY_TAG.finditer(header):
+        separator = header[end : token.start()]
+        if separator.strip(" \t,") or (end and "," not in separator):
+            return False
+        candidate = token.group()
+        matched |= candidate == "*" or candidate.removeprefix("W/") == tag.removeprefix("W/")
+        end = token.end()
+    return matched and not header[end:].strip(" \t,")
 
 
 class ImageRequest(BaseModel):
@@ -202,7 +221,7 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
         ).hexdigest()
         tag = f'W/"{digest}"'
         response.headers["ETag"] = tag
-        if if_none_match is not None and tag in [item.strip() for item in if_none_match.split(",")]:
+        if matches_reader_etag(if_none_match, tag):
             return Response(
                 status_code=304, headers={"ETag": tag, "Cache-Control": "private, no-store"}
             )

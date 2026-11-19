@@ -1,6 +1,9 @@
 import Foundation
 import SwiftUI
 import Testing
+#if os(macOS)
+import AppKit
+#endif
 @testable import VeetbotCore
 
 /// A long reply-all thread reads as a conversation: each message's own words,
@@ -382,6 +385,92 @@ struct EmailConversationCacheTests {
         #expect(cache.parses(of: thread.id) == 1)
     }
 
+    /// A cancelled reader leaves immediately; a shared worker lives until its last reader leaves.
+    @Test(arguments: [false, true])
+    func testCancellationReleasesReaderBeforeWorkerFinishes(shared: Bool) async throws {
+        let thread = try Self.thread(body: "Blocked parser", complete: true)
+        let (entered, signal) = AsyncStream<Void>.makeStream()
+        let (cancelled, cancellation) = AsyncStream<Bool>.makeStream()
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal(); signal.finish(); cancellation.finish() }
+        var readerCancelled = false
+        let first = Task {
+            do {
+                return try await cache.conversation(for: thread, ownerAddress: nil) { messages, owners in
+                    signal.yield(())
+                    release.wait()
+                    cancellation.yield(withUnsafeCurrentTask { $0?.isCancelled ?? false })
+                    return EmailConversation(messages: messages, ownerAddresses: owners)
+                }
+            } catch {
+                readerCancelled = true
+                throw error
+            }
+        }
+        var enteredIterator = entered.makeAsyncIterator()
+        await enteredIterator.next()
+        var secondStarted = false
+        let second: Task<EmailConversation, Error>? = shared ? Task {
+            secondStarted = true
+            return try await cache.conversation(for: thread, ownerAddress: nil)
+        } : nil
+        while shared && !secondStarted { await Task.yield() }
+        first.cancel()
+        for _ in 0..<40 where !readerCancelled { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(readerCancelled, "Cancellation must finish before the blocked parser is released")
+        release.signal()
+        var cancelledIterator = cancelled.makeAsyncIterator()
+        #expect(await cancelledIterator.next() == !shared)
+        do { _ = try await first.value; Issue.record("Cancelled reader returned content") }
+        catch is CancellationError { }
+        if let second { #expect(try await second.value.entries.count == 2) }
+        #expect(cache.parses(of: thread.id) == (shared ? 1 : 0))
+    }
+
+    #if os(macOS)
+    /// Re-preparing the same thread must preserve the reader's chosen mode.
+    @Test func testPreparationPreservesConversationMode() async throws {
+        let original = try Self.thread(body: "Body", complete: true)
+        var payload = try #require(JSONSerialization.jsonObject(with: JSONEncoder.server.encode(original)) as? [String: Any])
+        let source = try #require((payload["messages"] as? [[String: Any]])?.first)
+        payload["messages"] = (0..<9).map { index in
+            var message = source
+            message["id"] = "m\(index)"
+            message["sender"] = "Writer \(index % 3) <writer\(index % 3)@example.test>"
+            return message
+        }
+        let thread = try JSONDecoder.server.decode(EmailThreadView.self, from: JSONSerialization.data(withJSONObject: payload))
+        let owner = EmailPreparationTestOwner()
+        let host = NSHostingView(rootView: EmailPreparationTestView(thread: thread, owner: owner, cache: cache))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 800),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        defer { window.contentView = nil; cache.remove(threadID: thread.id) }
+        func picker(_ view: NSView) -> NSSegmentedControl? {
+            if let picker = view as? NSSegmentedControl { return picker }
+            return view.subviews.lazy.compactMap { picker($0) }.first
+        }
+        for _ in 0..<200 where picker(host) == nil {
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let before = try #require(picker(host))
+        #expect(before.selectedSegment == 1)
+        before.selectedSegment = 0
+        before.sendAction(before.action, to: before.target)
+        #expect(before.selectedSegment == 0)
+        owner.address = "owner@example.test"
+        for _ in 0..<200 where !owner.preparedOwnerKnown {
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(owner.preparedOwnerKnown, "The replacement conversation must finish preparing")
+        host.layoutSubtreeIfNeeded()
+        let after = try #require(picker(host))
+        #expect(after.selectedSegment == 0)
+    }
+    #endif
+
     /// Filling the bounded cache evicts only the least recently opened conversation.
     @Test func testCacheEvictsOnlyTheLeastRecentlyUsedConversation() async throws {
         cache.removeAll()
@@ -470,3 +559,26 @@ struct EmailReaderOutlookFoldTests {
         }
     }
 }
+
+#if os(macOS)
+@MainActor private final class EmailPreparationTestOwner: ObservableObject {
+    @Published var address: String?
+    var preparedOwnerKnown = false
+}
+
+@MainActor private struct EmailPreparationTestView: View {
+    let thread: EmailThreadView
+    @ObservedObject var owner: EmailPreparationTestOwner
+    let cache: EmailConversationCache
+    var body: some View {
+        PreparedEmailConversation(thread: thread, ownerAddress: owner.address, cache: cache) { conversation, reader in
+            EmailThreadConversationView(thread: thread, conversation: conversation, showsOriginal: nil,
+                showsSummary: true, proxy: nil, onName: { _ in }, onFiles: nil,
+                attachmentLine: { _ in EmptyView() }, reader: reader)
+                .onChange(of: conversation.ownerUnknown, initial: true) {
+                    owner.preparedOwnerKnown = !conversation.ownerUnknown
+                }
+        }.id(thread.id)
+    }
+}
+#endif
