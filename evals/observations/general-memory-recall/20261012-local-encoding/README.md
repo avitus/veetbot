@@ -26,6 +26,9 @@ paths. These in-memory timings do not establish PostgreSQL production latency.
 The sequential eight-run comparison took 208.88 seconds wall time, with no overlap;
 the slowest whole run was the 34.95-second JSON/automatic control.
 
+The historical runner is available at Git revision `54e4cc24275a56afbcaaa4eb493c703983b50d77`.
+Run the commands below from a checkout of that revision.
+
 The fixed model/tokenizer hashes and CPU parameters are in `configuration.json`.
 Use operator-installed regular files named `model.onnx` and `tokenizer.json` that
 match those hashes. The adapter does not download assets. Reproduce one arm with:
