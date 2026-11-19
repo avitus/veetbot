@@ -180,7 +180,10 @@ commit a call and notification atomically and can erase a call's derived copies.
 Erasure locks the owner's conversations while it rewrites them, and PostgreSQL
 allows that lock only with `UPDATE`, so the worker needs it on `sessions`.
 `tests/integration/test_call_role_privileges_m27.py` runs the worker under
-exactly these grants.
+exactly these grants. The worker also needs the database `TEMPORARY` privilege
+to keep source and dependency identifiers in transaction-local tables. Check
+`has_database_privilege('veetbot_call', current_database(), 'TEMPORARY')`
+when provisioning a database with hardened defaults.
 
 Grants issued before 2026-10-20 lacked `UPDATE` on `sessions` and both
 privileges on `memory_revisions`. Reconciliation on such a host fails once the
@@ -307,6 +310,51 @@ content in affected sessions; it preserves original owner messages. Active runs
 must settle first. Other devices refresh their presentation on the next fetch.
 Provider retention, recordings, external exports and backup retention remain
 separate operational controls: local deletion does not claim deletion at Bland.
+
+### Recovery after a retention worker OOM
+
+A stopped, enabled worker can start on reboot. The release script also enables
+and restarts the configured worker. Coordinate reboot and release activity
+during containment. Leave signed ingress running so it can queue callbacks.
+Deployment and worker activation each require the operator's approval.
+
+In a disposable PostgreSQL sandbox, run
+`VEETBOT_RETENTION_SCALE=1 uv run pytest -qs tests/integration/test_call_retention_bounds.py`
+inside the Linux test container. The scale case seeds 19,426 owner sessions and
+1,403,944 owner events. It disconnects the worker before the tombstone commits,
+checks rollback, and measures expiry in a fresh worker with the restricted
+call login. Process peak RSS includes Python startup. Fixture loading and the
+separate PostgreSQL process are outside the worker timing.
+
+On November 19, 2026, the Linux sandbox retry took 2.39 seconds and peaked
+at 261,244 KiB RSS with 2,048 later paraphrases. The database cache was warm.
+After the injected process exit, the original checkpoint, call and paraphrases
+remained. The retry removed the derived copies, preserved the owner's message
+and both foreign records, and left zero calls eligible on the following pass.
+In a separate control using the eraser from release `41d5d29`, fetching just
+the event rows increased RSS by 44.9 MiB for 20,000 synthetic 512-byte text
+payloads and 182.4 MiB for 80,000. Full production payloads were never copied.
+
+The transaction holds the owner's call advisory lock and session row locks
+until the tombstone commits. Callback enqueue and session writers can wait, so
+schedule the first production sweep when owner activity is low. PostgreSQL
+keeps the affected identifiers. The worker streams typed call-read candidates
+and processes derived payloads in pages of 64. A large individual payload can
+still raise peak memory. On a shared host, consider a worker-only systemd
+drop-in with `MemoryHigh=768M`, `MemoryMax=1G` and `RestartSec=60s` under
+`[Service]`, and `StartLimitIntervalSec=1h` and `StartLimitBurst=3` under
+`[Unit]`. Check headroom for provider subprocesses and monitor PostgreSQL
+separately. A rate-limited worker needs operator attention while receipts queue.
+
+For the approved first sweep, record the release identity, start time, restart
+counter, host available memory and neighboring service latency. Check that
+the eligible call becomes a content-free tombstone, its receipt becomes
+inactive, and reconciliation advances. Watch worker cgroup peak, database
+lock waits, Memverse and Mankunku latency, and kernel OOM messages through
+the next reconciliation passes. If pressure returns or the worker restarts,
+stop only `veetbot-call.service` and verify ingress and the API remain healthy.
+Keep the worker held across any release rollback or reboot. The fix requires
+no database migration. Preserve committed tombstones and queued receipts.
 
 Milestone 27 remains in progress until live admission, signed delivery and the
 authorized review/release evidence pass. See the

@@ -22,7 +22,7 @@ from uuid import uuid4
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.bootstrap import build, build_call_worker
-from agent_core.config import load_call_worker_settings
+from agent_core.config import Settings, load_call_worker_settings
 from agent_core.domain.calls import CallRecord
 from agent_core.domain.mcp import MCPCallResult
 from tests.contract.support import NOW, principal
@@ -140,27 +140,7 @@ async def test_call_worker_expires_and_records_calls_under_documented_grants(
             )
 
         async with release_probe_role("veetbot_call_probe", CALL_WORKER_TABLE_PRIVILEGES) as url:
-            configuration = tmp_path / "calls.json"
-            configuration.write_text(call_configuration().model_dump_json())
-            credential = tmp_path / "bland-api-key"
-            credential.write_text(KEY)
-            credential.chmod(0o600)
-            shipped = load_call_worker_settings(
-                {
-                    **_shipped_role_environment("veetbot-call.env.example"),
-                    "AUTH_TENANT_ID": owner.tenant_id,
-                    "AUTH_PRINCIPAL_ID": owner.principal_id,
-                    "AGENT_ARTIFACT_ROOT": str(tmp_path / "artifacts"),
-                    "AGENT_CALL_ENABLED": "1",
-                    "AGENT_CALL_NOTIFICATIONS_ENABLED": "1",
-                    "AGENT_NOTIFICATION_API_ENABLED": "1",
-                    "AGENT_NOTIFICATION_DISPATCH_ENABLED": "1",
-                    "BLAND_CONFIGURATION_FILE": str(configuration),
-                    "BLAND_API_KEY_FILE": str(credential),
-                }
-            )
-            # The shipped login placeholder gives way to the probe login.
-            settings = replace(shipped, database_url=url)
+            settings = worker_settings(tmp_path, url)
             async with build_call_worker(settings=settings, clock=FixedClock(LATER)) as calling:
                 assert calling.worker is not None
                 service = calling.worker.service
@@ -178,3 +158,28 @@ async def test_call_worker_expires_and_records_calls_under_documented_grants(
         assert expired is not None and expired.payload["erased"] is True
         assert fresh is not None and fresh.payload["status"] == "completed"
         assert len(notifications) == 1
+
+
+def worker_settings(tmp_path: Path, url: str) -> Settings:
+    owner = principal()
+    configuration = tmp_path / "calls.json"
+    configuration.write_text(call_configuration().model_dump_json())
+    credential = tmp_path / "bland-api-key"
+    credential.write_text(KEY)
+    credential.chmod(0o600)
+    shipped = load_call_worker_settings(
+        {
+            **_shipped_role_environment("veetbot-call.env.example"),
+            "AUTH_TENANT_ID": owner.tenant_id,
+            "AUTH_PRINCIPAL_ID": owner.principal_id,
+            "AGENT_ARTIFACT_ROOT": str(tmp_path / "artifacts"),
+            "AGENT_CALL_ENABLED": "1",
+            "AGENT_CALL_NOTIFICATIONS_ENABLED": "1",
+            "AGENT_NOTIFICATION_API_ENABLED": "1",
+            "AGENT_NOTIFICATION_DISPATCH_ENABLED": "1",
+            "BLAND_CONFIGURATION_FILE": str(configuration),
+            "BLAND_API_KEY_FILE": str(credential),
+        }
+    )
+    # The shipped login placeholder gives way to the probe login.
+    return replace(shipped, database_url=url)

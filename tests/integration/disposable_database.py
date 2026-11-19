@@ -41,6 +41,15 @@ def disposable_database_url() -> str:
     return database_url
 
 
+def disposable_role_environment(role_url: str) -> dict[str, str]:
+    """Give a subprocess its probe login on the opted-in database."""
+    database = make_url(disposable_database_url())
+    role = make_url(role_url)
+    if database._replace(username=role.username, password=role.password) != role:
+        raise ValueError("the probe role must use the opted-in database")
+    return {**os.environ, "DATABASE_URL": role_url}
+
+
 async def truncate_application_tables(*, existing_only: bool = False) -> None:
     """Empty the application tables, keeping ``alembic_version``.
 
