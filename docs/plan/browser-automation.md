@@ -2216,6 +2216,20 @@ differences never disambiguate matching intents. Started workflows retain their
 existing resume and binding rules, and actual calls still revalidate current
 policy, schemas, budgets, revisions and approvals.
 
+An action's optional `precondition` requests a bounded readiness wait before
+target discovery ([ADR-0333](../adr/0333-browser-workflow-action-readiness.md)).
+The runner queues an ordinary `browser.observe(wait_for=...)`; only `satisfied`
+evidence from an uninterrupted same-origin result permits a separate fresh target
+read. Declared failure stops as `observed_failure`; missing, conflicting or
+unsuccessful evidence stops as
+`unverified`, before approval or dispatch. The wait spends existing time, read,
+call and step budgets without completing the action or changing its four-window
+target allowance. Region targeting, current authorization and postcondition
+reconciliation remain unchanged. Readiness is not a persistent invariant or
+authorization: actual dispatch still uses fresh target and revision checks.
+Pinned-capability preflight validates the readiness arguments, and omitted
+preconditions preserve existing recipe identities. No deployed recipe changes.
+
 A successful, uninterrupted same-origin result with a declared positive failure
 condition ends an unbranched observe/action step as `observed_failure`, including
 read-only reconciliation after response loss. An action response already carrying
@@ -2250,6 +2264,19 @@ stops unverified; the existing bounded recovery read cannot retry extraction or
 replay an earlier action. Generation changes restart the unfinished read through
 the existing workflow binding checks. Both calls spend the existing workflow and
 run budgets, and final reporting retains the extraction's bounded coverage.
+
+[ADR-0334](../adr/0334-browser-workflow-extraction-requirements.md) adds optional
+extraction-only `minimum_rows` and `require_complete` requirements. The strict
+integer minimum is between zero and the step's row limit; completeness is a
+strict boolean. Defaults of zero and false preserve legacy recipe identities.
+After schema validation, too few rows or, when completeness is required, any
+omitted rows, source/row scan limit or byte limit stops as `insufficient_evidence`.
+The step remains incomplete and later actions cannot be proposed. Invalid or
+missing extraction stays `unverified`. Neither path retries or replays effects.
+These are local acceptance checks, not tool arguments. Completeness covers only
+the selected visible collection in the pinned scope, not hidden/virtualized data,
+website truth or semantic row uniqueness. Empty collections may satisfy a zero
+minimum. No public tool schema or deployed recipe changes.
 
 [ADR-0314](../adr/0314-reviewed-browser-read-branches.md) adds optional
 `branches` to reviewed observe steps with a postcondition and positive

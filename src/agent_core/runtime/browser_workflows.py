@@ -44,12 +44,17 @@ def _intent(value: str) -> str:
 
 
 def _definition(recipe: BrowserWorkflowRecipe) -> str:
-    # Omitted optional fields must not change legacy recipe/checkpoint identity.
+    # Optional defaults must not change legacy recipe/checkpoint identity.
+    defaults = {
+        "branches": None,
+        "target_region": None,
+        "precondition": None,
+        "minimum_rows": 0,
+        "require_complete": False,
+    }
     excluded = {
         "steps": {
-            index: {
-                field for field in ("branches", "target_region") if getattr(step, field) is None
-            }
+            index: {field for field, default in defaults.items() if getattr(step, field) == default}
             for index, step in enumerate(recipe.steps)
         }
     }
@@ -93,6 +98,8 @@ def _supports_recipe(
         calls.append(("browser.observe", {}))
         if step.kind == "act":
             assert step.postcondition is not None
+            if step.precondition is not None:
+                calls.append(("browser.observe", {"wait_for": _condition(step.precondition)}))
             if step.target_region is not None:
                 calls.append(
                     (
@@ -450,6 +457,30 @@ class BrowserWorkflowRunner:
                 ):
                     await self._stop(context, state, "unverified")
                     return None
+                if state["phase"] == "before_ready":
+                    assert step.precondition is not None
+                    if observed.condition is None or observed.condition.status != "satisfied":
+                        await self._stop(
+                            context,
+                            state,
+                            "observed_failure"
+                            if observed.condition is not None
+                            and observed.condition.status == "failed"
+                            and step.precondition.failure_evidence is not None
+                            else "unverified",
+                        )
+                        return None
+                    # Readiness is not a reusable target or a completed action step.
+                    if not await self._read_target_window(
+                        context,
+                        state,
+                        {},
+                        phase="before_region"
+                        if step.target_region is not None
+                        else "before_action",
+                    ):
+                        return None
+                    continue
                 if state["phase"] == "before_extract":
                     await self._queue(
                         context,
@@ -575,6 +606,20 @@ class BrowserWorkflowRunner:
                 ):
                     await self._stop(context, state, "unverified")
                     return None
+                if step.kind == "extract":
+                    extracted = observed.extraction
+                    assert extracted is not None
+                    if len(extracted.rows) < step.minimum_rows or (
+                        step.require_complete
+                        and (
+                            extracted.omitted_rows
+                            or extracted.source_scan_limit_reached
+                            or extracted.row_scan_limit_reached
+                            or extracted.byte_limit_reached
+                        )
+                    ):
+                        await self._stop(context, state, "insufficient_evidence")
+                        return None
                 state["completed_steps"] += 1
                 if "next_step" in state:
                     state["next_step"] = step_index + 1
@@ -584,7 +629,15 @@ class BrowserWorkflowRunner:
             if step.kind == "navigate":
                 await self._queue(context, state, "read", "browser.navigate", {"url": step.url})
             elif step.kind == "act":
-                if not await self._read_target_window(
+                if step.precondition is not None:
+                    await self._queue(
+                        context,
+                        state,
+                        "before_ready",
+                        "browser.observe",
+                        {"wait_for": _condition(step.precondition)},
+                    )
+                elif not await self._read_target_window(
                     context,
                     state,
                     {},
