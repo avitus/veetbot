@@ -24,6 +24,7 @@ from tests.contract.support import NOW, principal
 from tests.contract.test_bland_client_contract import CALL_ID
 from tests.contract.test_call_source_erasure_contract import assert_call_source_erasure
 from tests.gates.test_call_m27 import call_configuration
+from tests.integration.disposable_database import disposable_role_environment
 from tests.integration.m2_support import database_settings
 from tests.integration.role_probe import release_probe_role
 from tests.integration.test_call_role_privileges_m27 import (
@@ -233,7 +234,7 @@ async def test_retention_skips_unrelated_history_and_retries_atomically(tmp_path
                             "tests.integration.test_call_retention_bounds",
                             mode,
                             str(tmp_path),
-                            env={**os.environ, "DATABASE_URL": url},
+                            env=disposable_role_environment(url),
                         )
                         assert await process.wait() == status
                         if mode == "crash":

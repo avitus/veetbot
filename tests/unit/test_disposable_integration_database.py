@@ -64,6 +64,18 @@ def test_marked_database_url_is_returned(monkeypatch: pytest.MonkeyPatch) -> Non
     assert disposable.disposable_database_url() == DATABASE_URL
 
 
+def test_probe_subprocess_changes_only_the_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
+    monkeypatch.setenv(disposable.DISPOSABLE_FLAG, "1")
+    probe = DATABASE_URL.replace("agent:agent@", "probe:fixture@")
+    assert disposable.disposable_role_environment(probe)["DATABASE_URL"] == probe
+    with pytest.raises(ValueError, match="opted-in database"):
+        disposable.disposable_role_environment(probe + "-other")
+    monkeypatch.delenv(disposable.DISPOSABLE_FLAG)
+    with pytest.raises(pytest.skip.Exception):
+        disposable.disposable_role_environment(probe)
+
+
 def test_missing_database_url_skips_before_the_opt_in_matters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
