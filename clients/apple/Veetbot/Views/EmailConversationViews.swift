@@ -1,34 +1,143 @@
 import SwiftUI
 
-/// Builds a thread's conversation once per revision: the thread screen
-/// re-renders on every draft keystroke and the parse is not free. It holds one
-/// parse per thread, for nine threads at most, and gives up a thread's parse
-/// when the thread changes, is excluded, or the connection resets.
+/// Keeps up to nine recently read conversations. Parsing never runs in a SwiftUI body.
 @MainActor
-enum EmailConversationCache {
-    private static var built: [String: (messages: [EmailMessageView], conversation: EmailConversation)] = [:]
+final class EmailConversationCache {
+    static let shared = EmailConversationCache()
+    private struct Cached {
+        let request: EmailConversationRequest
+        let conversation: EmailConversation
+    }
+    private final class Flight {
+        let request: EmailConversationRequest
+        let worker: Task<EmailConversation, Error>
+        var readers = 0
+        init(request: EmailConversationRequest, worker: Task<EmailConversation, Error>) {
+            self.request = request
+            self.worker = worker
+        }
+    }
+    private var built: [UUID: Cached] = [:]
+    private var recent: [UUID] = []
+    private var inFlight: [UUID: Flight] = [:]
 
-    /// The cached parse, reused only while the messages are unchanged: retention
-    /// can empty bodies without moving the thread's revision.
-    static func conversation(for thread: EmailThreadView, ownerAddress: String?) -> EmailConversation {
-        let messages = thread.messages ?? []
-        let key = "\(thread.id)|\(thread.revision)|\(messages.count)|\(ownerAddress ?? "")"
-        if let cached = built[key], cached.messages == messages { return cached.conversation }
-        remove(threadID: thread.id)
-        if built.count > 8 { built.removeAll() }
-        let conversation = EmailConversation(messages: messages, ownerAddresses: Set([ownerAddress].compactMap { $0 }))
-        built[key] = (messages, conversation)
+    /// Rechecks exact message content because retention need not move a thread's revision.
+    func conversation(
+        for thread: EmailThreadView, ownerAddress: String?,
+        build: @escaping @Sendable ([EmailMessageView], Set<String>) -> EmailConversation = {
+            EmailConversation(messages: $0, ownerAddresses: $1)
+        }
+    ) async throws -> EmailConversation {
+        try Task.checkCancellation()
+        let request = EmailConversationRequest(thread: thread, ownerAddress: ownerAddress)
+        if let cached = built[thread.id], cached.request == request {
+            touch(thread.id)
+            return cached.conversation
+        }
+        let flight: Flight
+        if let pending = inFlight[thread.id], pending.request == request {
+            flight = pending
+        } else {
+            remove(threadID: thread.id)
+            flight = Flight(request: request, worker: Task {
+                try await EmailReadPreparation.run {
+                    build(request.messages, Set([ownerAddress].compactMap { $0 }))
+                }
+            })
+            inFlight[thread.id] = flight
+        }
+        flight.readers += 1
+        defer {
+            flight.readers -= 1
+            if flight.readers == 0, inFlight[thread.id] === flight { inFlight.removeValue(forKey: thread.id) }
+        }
+        let conversation = try await flight.worker.value
+        try Task.checkCancellation()
+        guard inFlight[thread.id] === flight else { throw CancellationError() }
+        built[thread.id] = Cached(request: request, conversation: conversation)
+        touch(thread.id)
+        while recent.count > 9 { built.removeValue(forKey: recent.removeFirst()) }
         return conversation
     }
 
-    /// Drops every parse, so no mail text outlives the connection that read it.
-    static func removeAll() { built.removeAll() }
+    private func touch(_ id: UUID) { recent.removeAll { $0 == id }; recent.append(id) }
 
-    /// Drops every parse of one thread, whatever its revision.
-    static func remove(threadID: UUID) { built = built.filter { !$0.key.hasPrefix("\(threadID)|") } }
+    /// Invalidated in-flight parses cannot repopulate the connection's cache.
+    func removeAll() {
+        for flight in inFlight.values { flight.worker.cancel() }
+        inFlight.removeAll()
+        built.removeAll()
+        recent.removeAll()
+    }
+
+    /// Drops one thread, including any obsolete parse still being prepared.
+    func remove(threadID: UUID) {
+        inFlight.removeValue(forKey: threadID)?.worker.cancel()
+        built.removeValue(forKey: threadID)
+        recent.removeAll { $0 == threadID }
+    }
 
     /// How many parses of this thread are held: one at most.
-    static func parses(of threadID: UUID) -> Int { built.keys.filter { $0.hasPrefix("\(threadID)|") }.count }
+    func parses(of threadID: UUID) -> Int { built[threadID] == nil ? 0 : 1 }
+}
+
+/// CPU-only reader work shares no mutable UI state and cooperates at its boundaries.
+enum EmailReadPreparation {
+    static func run<Value: Sendable>(_ build: @escaping @Sendable () -> Value) async throws -> Value {
+        let worker = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            let value = build()
+            try Task.checkCancellation()
+            return value
+        }
+        return try await withTaskCancellationHandler {
+            let value = try await worker.value
+            try Task.checkCancellation()
+            return value
+        } onCancel: { worker.cancel() }
+    }
+}
+
+/// Every input that can change conversation preparation, including same-revision retention.
+private struct EmailConversationRequest: Equatable, Sendable {
+    let id: UUID
+    let revision: Int
+    let messages: [EmailMessageView]
+    let ownerAddress: String?
+
+    init(thread: EmailThreadView, ownerAddress: String?) {
+        id = thread.id
+        revision = thread.revision
+        messages = thread.messages ?? []
+        self.ownerAddress = ownerAddress
+    }
+}
+
+/// Publishes only the parse belonging to the view's current source and account.
+struct PreparedEmailConversation<Content: View>: View {
+    let thread: EmailThreadView
+    let ownerAddress: String?
+    @ViewBuilder var content: (EmailConversation) -> Content
+    @State private var prepared: (EmailConversationRequest, EmailConversation)?
+
+    var body: some View {
+        let request = EmailConversationRequest(thread: thread, ownerAddress: ownerAddress)
+        Group {
+            if let prepared, prepared.0 == request {
+                content(prepared.1)
+            } else {
+                ProgressView("Preparing conversation…")
+            }
+        }
+        .task(id: request) {
+            do {
+                let conversation = try await EmailConversationCache.shared.conversation(for: thread, ownerAddress: ownerAddress)
+                try Task.checkCancellation()
+                prepared = (request, conversation)
+            } catch is CancellationError { /* The current source owns the next parse. */ }
+            catch { /* Preparation has no other failure path. */ }
+        }
+    }
 }
 
 /// One muted ink per writer, in the order they first wrote, with a dark-mode partner.

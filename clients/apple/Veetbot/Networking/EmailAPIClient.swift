@@ -1,5 +1,10 @@
 import Foundation
 
+public enum EmailThreadResponse: Sendable {
+    case content(EmailThreadView, etag: String?)
+    case notModified
+}
+
 extension VeetbotAPIClient {
     public func emailAccounts() async throws -> Page<EmailAccountView> {
         try await transport.send(TransportRequest(method: .get, path: "/v1/email/accounts"))
@@ -18,6 +23,20 @@ extension VeetbotAPIClient {
 
     public func emailThread(_ id: UUID) async throws -> EmailThreadView {
         try await transport.send(TransportRequest(method: .get, path: "/v1/email/threads/\(id.uuidString)"))
+    }
+
+    /// Explicit volatile-reader validation; the transport never stores mailbox content.
+    public func emailThreadResponse(_ id: UUID, etag: String? = nil) async throws -> EmailThreadResponse {
+        let headers = etag.map { ["If-None-Match": $0] } ?? [:]
+        let (data, response) = try await transport.sendData(TransportRequest(
+            method: .get, path: "/v1/email/threads/\(id.uuidString)", headers: headers
+        ), accepting: [304])
+        if response.statusCode == 304 {
+            guard etag != nil else { throw HTTPTransportError.invalidResponse }
+            return .notModified
+        }
+        return .content(try JSONDecoder.server.decode(EmailThreadView.self, from: data),
+                        etag: response.value(forHTTPHeaderField: "ETag"))
     }
 
     public func emailImage(threadID: UUID, messageID: String, index: Int) async throws -> Data {

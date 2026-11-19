@@ -320,10 +320,11 @@ struct EmailThreadModeTests {
 
 /// The cache keeps one parse per thread revision, but never past a change to
 /// the messages themselves, such as bodies expired by retention.
-@MainActor
+@Suite(.serialized) @MainActor
 struct EmailConversationCacheTests {
+    private let cache = EmailConversationCache()
     /// A two-message thread at a fixed revision.
-    private static func thread(body: String, complete: Bool, revision: Int = 4) throws -> EmailThreadView {
+    private static func thread(body: String, complete: Bool, revision: Int = 4, id: UUID = UUID()) throws -> EmailThreadView {
         let message: (String) -> [String: Any] = { id in
             [
                 "id": id, "sender": "Dana <dana@example.test>", "to": ["owner@example.test"], "cc": [],
@@ -332,7 +333,7 @@ struct EmailConversationCacheTests {
             ]
         }
         let payload: [String: Any] = [
-            "id": "00000000-0000-0000-0000-000000000901", "account_id": "work", "subject": "Plan",
+            "id": id.uuidString, "account_id": "work", "subject": "Plan",
             "senders": ["dana@example.test"], "updated_at": "2026-11-02T10:00:00Z", "revision": revision,
             "summary": "", "reason": "", "needs_reply": false, "priority": 0.5, "complete": complete,
             "messages": [message("c1"), message("c2")],
@@ -340,34 +341,91 @@ struct EmailConversationCacheTests {
         return try JSONDecoder.server.decode(EmailThreadView.self, from: JSONSerialization.data(withJSONObject: payload))
     }
 
+    /// A cache miss must not parse on the UI thread.
+    @Test func testConversationPreparationRunsOffTheMainThread() async throws {
+        let thread = try Self.thread(body: "Fresh content", complete: true)
+        _ = try await cache.conversation(for: thread, ownerAddress: nil) { messages, owners in
+            #expect(!Thread.isMainThread)
+            return EmailConversation(messages: messages, ownerAddresses: owners)
+        }
+    }
+
+    /// Work finishing after reset, exclusion or view cancellation cannot restore retained mail.
+    @Test(arguments: ["reset", "exclude", "cancel"])
+    func testInvalidatedWorkerCannotRestoreConversation(action: String) async throws {
+        let thread = try Self.thread(body: "Invalidated content", complete: true)
+        let (entered, signal) = AsyncStream<Void>.makeStream()
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal(); signal.finish() }
+        let preparing = Task {
+            try await cache.conversation(for: thread, ownerAddress: nil) { messages, owners in
+                signal.yield(())
+                release.wait()
+                return EmailConversation(messages: messages, ownerAddresses: owners)
+            }
+        }
+        var iterator = entered.makeAsyncIterator()
+        await iterator.next()
+        switch action {
+        case "reset": cache.removeAll()
+        case "exclude": cache.remove(threadID: thread.id)
+        default: preparing.cancel()
+        }
+        release.signal()
+        do {
+            _ = try await preparing.value
+            Issue.record("Invalidated preparation must be cancelled")
+        } catch is CancellationError { }
+        #expect(cache.parses(of: thread.id) == 0)
+        let fresh = try await cache.conversation(for: thread, ownerAddress: nil)
+        #expect(fresh.entries.count == 2)
+        #expect(cache.parses(of: thread.id) == 1)
+    }
+
+    /// Filling the bounded cache evicts only the least recently opened conversation.
+    @Test func testCacheEvictsOnlyTheLeastRecentlyUsedConversation() async throws {
+        cache.removeAll()
+        let threads = try (0..<10).map { try Self.thread(body: "Message \($0)", complete: true) }
+        for thread in threads.prefix(9) {
+            _ = try await cache.conversation(for: thread, ownerAddress: nil)
+        }
+        _ = try await cache.conversation(for: threads[0], ownerAddress: nil)
+        _ = try await cache.conversation(for: threads[9], ownerAddress: nil)
+        #expect(cache.parses(of: threads[0].id) == 1)
+        #expect(cache.parses(of: threads[1].id) == 0)
+        #expect(cache.parses(of: threads[2].id) == 1)
+        #expect(cache.parses(of: threads[9].id) == 1)
+    }
+
     /// Emptied bodies at the same revision rebuild the conversation.
-    @Test func testChangedMessagesRebuildAtTheSameRevision() throws {
-        let before = EmailConversationCache.conversation(
-            for: try Self.thread(body: "The full text.", complete: true), ownerAddress: "owner@example.test")
+    @Test func testChangedMessagesRebuildAtTheSameRevision() async throws {
+        let beforeThread = try Self.thread(body: "The full text.", complete: true)
+        let before = try await cache.conversation(
+            for: beforeThread, ownerAddress: "owner@example.test")
         #expect(before.entries[0].own == MarkdownContentParser.parse("The full text."))
-        let after = EmailConversationCache.conversation(
-            for: try Self.thread(body: "", complete: false), ownerAddress: "owner@example.test")
+        let after = try await cache.conversation(
+            for: try Self.thread(body: "", complete: false, id: beforeThread.id), ownerAddress: "owner@example.test")
         #expect(after.entries[0].message.complete == false)
         #expect(after.entries[0].own != before.entries[0].own)
     }
 
     /// A new revision replaces the thread's older parse instead of keeping both.
-    @Test func testANewRevisionReplacesTheOlderParse() throws {
+    @Test func testANewRevisionReplacesTheOlderParse() async throws {
         let older = try Self.thread(body: "First.", complete: true, revision: 7)
-        _ = EmailConversationCache.conversation(for: older, ownerAddress: "owner@example.test")
-        _ = EmailConversationCache.conversation(
-            for: try Self.thread(body: "Second.", complete: true, revision: 8), ownerAddress: "owner@example.test")
-        #expect(EmailConversationCache.parses(of: older.id) == 1)
+        _ = try await cache.conversation(for: older, ownerAddress: "owner@example.test")
+        _ = try await cache.conversation(
+            for: try Self.thread(body: "Second.", complete: true, revision: 8, id: older.id), ownerAddress: "owner@example.test")
+        #expect(cache.parses(of: older.id) == 1)
     }
 
     /// Resetting the Email connection drops every parsed conversation with the
     /// rest of the old connection's mail.
-    @Test func testResettingTheConnectionDropsCachedConversations() throws {
+    @Test func testClearingTheCacheDropsConversations() async throws {
         let thread = try Self.thread(body: "Kept only while connected.", complete: true)
-        _ = EmailConversationCache.conversation(for: thread, ownerAddress: "owner@example.test")
-        #expect(EmailConversationCache.parses(of: thread.id) == 1)
-        EmailViewModel(makeAPIClient: { nil }).resetConnection()
-        #expect(EmailConversationCache.parses(of: thread.id) == 0)
+        _ = try await cache.conversation(for: thread, ownerAddress: "owner@example.test")
+        #expect(cache.parses(of: thread.id) == 1)
+        cache.removeAll()
+        #expect(cache.parses(of: thread.id) == 0)
     }
 }
 

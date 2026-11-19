@@ -14,6 +14,79 @@ import SwiftUI
     private let runID = UUID(uuidString: "00000000-0000-0000-0000-000000000803")!
     private let approvalID = UUID(uuidString: "00000000-0000-0000-0000-000000000804")!
 
+    /// The independently authorized inbox can render while account freshness is still loading.
+    @Test func testInboxRowsAppearBeforeSlowAccountMetadata() async throws {
+        let gate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, gate) }
+            return (200, self.pageJSON(), nil)
+        }
+        defer { gate.release(); model.resetConnection() }
+        let loading = Task { await model.reload() }
+        try await waitForEmailTestCondition { gate.isWaiting }
+        try await waitForEmailTestCondition { model.items.count == 1 }
+        #expect(!model.isLoading)
+        #expect(model.accounts.isEmpty)
+        gate.release()
+        await loading.value
+        #expect(model.accounts.count == 2)
+    }
+
+    /// Finishing account metadata cannot dismiss the loader owned by a newer page read.
+    @Test(arguments: [200, 404])
+    func testLateAccountsDoNotFinishAnOverlappingPageLoad(status: Int) async throws {
+        let accounts = EmailArchiveResponseGate()
+        let page = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (status, status == 200 ? Self.accountsJSON : Self.error("not_found", "Unavailable"), accounts) }
+            let paging = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?.contains { $0.name == "cursor" } == true
+            return (200, self.pageJSON(cursor: paging ? nil : "next"), paging ? page : nil)
+        }
+        defer { accounts.release(); page.release(); model.resetConnection() }
+        let loading = Task { await model.reload() }
+        try await waitForEmailTestCondition { model.items.count == 1 }
+        let paging = Task { await model.loadMore() }
+        try await waitForEmailTestCondition { page.isWaiting }
+        #expect(model.isLoading)
+        accounts.release()
+        await loading.value
+        #expect(model.isLoading == (status == 200))
+        page.release()
+        await paging.value
+        #expect(!model.isLoading)
+        #expect(model.items.count == (status == 200 ? 1 : 0))
+        #expect(model.unavailable == (status == 404))
+    }
+
+    /// Late metadata failures remain visible; revoked access removes the early rows.
+    @Test(arguments: [403, 500])
+    func testAccountFailureAfterEarlyInboxPublication(status: Int) async throws {
+        let gate = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            if request.url!.path.hasSuffix("accounts") {
+                return (status, "{\"error\":{\"code\":\"forbidden\",\"message\":\"Unavailable\"}}", gate)
+            }
+            return (200, self.pageJSON(), nil)
+        }
+        defer { gate.release(); model.resetConnection() }
+        let loading = Task { await model.reload() }
+        try await waitForEmailTestCondition { model.items.count == 1 }
+        gate.release()
+        await loading.value
+        #expect(model.errorMessage != nil)
+        #expect(model.items.count == (status == 403 ? 0 : 1))
+    }
+
+    /// Connection reset invalidates the shared conversation cache as well as list/detail state.
+    @Test func testConnectionResetClearsPreparedConversations() async throws {
+        let thread = try JSONDecoder.server.decode(EmailThreadView.self, from: Data(threadJSON().utf8))
+        _ = try await EmailConversationCache.shared.conversation(for: thread, ownerAddress: nil)
+        #expect(EmailConversationCache.shared.parses(of: threadID) == 1)
+        EmailViewModel(makeAPIClient: { nil }).resetConnection()
+        #expect(EmailConversationCache.shared.parses(of: threadID) == 0)
+    }
+
     @Test func testDraftAttachmentManifestSurvivesNativeRoundTrip() throws {
         var payload = try #require(JSONSerialization.jsonObject(with: Data(draftJSON().utf8)) as? [String: Any])
         let fileID = UUID().uuidString
@@ -1059,7 +1132,8 @@ import SwiftUI
     }
 
     /// A recovered pending row stays hidden while foreground polling resumes without a second mutation.
-    @Test func testArchivePendingProjectionRecoversAcrossVisits() async throws {
+    @Test(arguments: [false, true])
+    func testArchivePendingProjectionRecoversAcrossVisits(versioned: Bool) async throws {
         let requests = EmailRequestRecorder()
         let model = try makeModel { request in
             requests.append(request)
@@ -1069,7 +1143,8 @@ import SwiftUI
             let recovered = requests.snapshot.contains { $0.url!.path == "/v1/email/threads/\(self.threadID.uuidString)" }
             let thread = self.archiveThreadJSON(inInbox: !recovered, status: recovered ? "completed" : "pending")
             if request.url!.path.hasSuffix("threads") {
-                return (200, "{\"items\":[\(recovered ? "" : thread)],\"next_cursor\":null}")
+                let version = versioned ? "\"\(recovered ? "finished" : "pending")\"" : "null"
+                return (200, "{\"items\":[\(recovered ? "" : thread)],\"next_cursor\":null,\"snapshot_version\":\(version)}")
             }
             return (200, thread)
         }
@@ -1659,11 +1734,11 @@ import SwiftUI
         await model.reload()
         await model.openThread(threadID)
         let thread = try #require(model.thread)
-        _ = EmailConversationCache.conversation(for: thread, ownerAddress: nil)
-        #expect(EmailConversationCache.parses(of: threadID) == 1)
+        _ = try await EmailConversationCache.shared.conversation(for: thread, ownerAddress: nil)
+        #expect(EmailConversationCache.shared.parses(of: threadID) == 1)
         await model.excludeSelectedThread()
         #expect(model.thread == nil)
-        #expect(EmailConversationCache.parses(of: threadID) == 0)
+        #expect(EmailConversationCache.shared.parses(of: threadID) == 0)
     }
 
     /// An accepted exclusion removes the thread's row even when the list
@@ -3440,7 +3515,9 @@ import SwiftUI
         let initial = origin == "initial"
         let polling = origin == "poll"
         let requests = EmailRequestRecorder()
-        let model = try makeModel { request in
+        let firstPage = EmailArchiveResponseGate()
+        defer { firstPage.release() }
+        let model = try makeArchiveRaceModel { request in
             requests.append(request)
             if request.url!.path.hasSuffix("accounts") {
                 let count = requests.snapshot.filter { $0.url!.path.hasSuffix("accounts") }.count
@@ -3448,15 +3525,16 @@ import SwiftUI
                     Thread.sleep(forTimeInterval: 0.15)
                     return (status, status == 200
                         ? Self.accountsJSON.replacingOccurrences(of: "Personal", with: "Obsolete account")
-                        : Self.error(status == 403 ? "permission_denied" : "not_found", "Obsolete projection failure"))
+                        : Self.error(status == 403 ? "permission_denied" : "not_found", "Obsolete projection failure"), nil)
                 }
-                return (200, Self.accountsJSON)
+                return (200, Self.accountsJSON, nil)
             }
             if request.url!.path.hasSuffix("refresh") {
-                return (200, self.operationJSON(status: polling ? "RUNNING" : "COMPLETED"))
+                return (200, self.operationJSON(status: polling ? "RUNNING" : "COMPLETED"), nil)
             }
-            if request.url!.path.contains("/operations/") { return (200, self.operationJSON(status: "COMPLETED")) }
-            return (200, self.pageJSON())
+            if request.url!.path.contains("/operations/") { return (200, self.operationJSON(status: "COMPLETED"), nil) }
+            // Hold the projection itself: rows no longer wait for account metadata.
+            return (200, self.pageJSON(), initial ? firstPage : nil)
         }
         model.setActive(true)
         defer { model.resetConnection() }
@@ -3465,7 +3543,12 @@ import SwiftUI
         }
         let manual = (initial || polling) ? nil : Task { await model.refresh() }
         try await waitForEmailTestCondition { requests.snapshot.filter { $0.url!.path.hasSuffix("accounts") }.count == (initial ? 1 : 3) }
+        if initial {
+            try await waitForEmailTestCondition { firstPage.isWaiting }
+            #expect(model.items.isEmpty)
+        }
         model.setActive(false)
+        firstPage.release()
         if origin == "reopenedManual" { model.setActive(true) }
         await manual?.value
         try await Task.sleep(nanoseconds: 200_000_000)
@@ -3894,6 +3977,97 @@ import SwiftUI
         #expect(model.items.map(\.id) == [threadID, second, arrival], "Repeated refreshes must not duplicate or reorder arrivals")
     }
 
+    @Test func testThreadRefreshReusesValidatedContentAndKeepsEdits() async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel(responseHeaders: ["ETag": "W/\"retained-thread\""]) { request in
+            requests.append(request)
+            if request.value(forHTTPHeaderField: "If-None-Match") != nil { return (304, "") }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Unsent local words")
+        await model.openThread(threadID, refreshOnly: true)
+        #expect(requests.snapshot.last?.value(forHTTPHeaderField: "If-None-Match") == "W/\"retained-thread\"")
+        #expect(model.thread?.id == threadID)
+        #expect(model.edits[draftID]?.body == "Unsent local words")
+        #expect(model.draftError == nil)
+        model.clearSelection()
+        await model.openThread(threadID)
+        #expect(requests.snapshot.last?.value(forHTTPHeaderField: "If-None-Match") == nil)
+        model.resetConnection()
+    }
+
+    @Test(arguments: [true, false], [300, 1800])
+    func testUnchangedSnapshotRefreshReadsOnlyOnePage(versioned: Bool, count: Int) async throws {
+        let requests = EmailRequestRecorder()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems ?? []
+            let offset = Int(query.first { $0.name == "cursor" }?.value ?? "0")!
+            let rows = (offset..<min(offset + 100, count)).map { i in
+                self.threadJSON().replacingOccurrences(of: self.threadID.uuidString,
+                    with: String(format: "00000000-0000-0000-0000-%012d", 1000 + i))
+            }.joined(separator: ",")
+            let version = versioned ? ",\"snapshot_version\":\"stable\"" : ""
+            return (200, "{\"items\":[\(rows)],\"next_cursor\":\(offset + 100 < count ? "\"\(offset + 100)\"" : "null")\(version)}")
+        }
+        await model.reload()
+        for _ in 1..<(count / 100) { await model.loadMore() }
+        #expect(model.items.count == count)
+        let before = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
+        await model.reload(preserveOrder: true)
+        let after = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
+        #expect(after - before == (versioned ? 1 : count / 100))
+        #expect(model.items.count == count)
+        #expect(!model.hasMore)
+    }
+
+    @Test(arguments: [false, true])
+    func testChangedAndMixedSnapshotsRefreshEveryLoadedPage(mixed: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let server = AttachmentSaveServer()
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems ?? []
+            let offset = Int(query.first { $0.name == "cursor" }?.value ?? "0")!
+            let rows = (offset..<min(offset + 100, 300)).map { i in
+                self.threadJSON().replacingOccurrences(of: self.threadID.uuidString,
+                    with: String(format: "00000000-0000-0000-0000-%012d", 1000 + i))
+            }.joined(separator: ",")
+            let version = server.recovered ? (mixed && offset > 0 ? "third" : "second") : "first"
+            return (200, "{\"items\":[\(rows)],\"next_cursor\":\(offset < 200 ? "\"\(offset + 100)\"" : "null"),\"snapshot_version\":\"\(version)\"}")
+        }
+        await model.reload()
+        await model.loadMore()
+        await model.loadMore()
+        server.recover()
+        let before = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
+        await model.reload(preserveOrder: true)
+        let changed = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
+        #expect(changed - before == 3)
+        await model.reload(preserveOrder: true)
+        let after = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
+        #expect(after - changed == (mixed ? 3 : 1), "Mixed pages cannot establish a reusable snapshot")
+        #expect(model.items.count == 300)
+    }
+
+    @Test func testValidatedThreadRefreshStillClearsMailOnRevokedAccess() async throws {
+        let server = AttachmentSaveServer()
+        let model = try makeModel(responseHeaders: ["ETag": "W/\"private-thread\""]) { request in
+            if server.recovered { return (403, Self.error("forbidden", "Email access was revoked.")) }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "Unsent words")
+        server.recover()
+        await model.openThread(threadID, refreshOnly: true)
+        #expect(model.thread == nil)
+        #expect(model.edits.isEmpty)
+        #expect(model.draftError != nil)
+    }
+
     @Test func testExpandedInboxRefreshHonorsTheServerPageLimit() async throws {
         let model = try makeModel { request in
             if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
@@ -4239,9 +4413,13 @@ import SwiftUI
         now: @escaping () -> Date = Date.init,
         statusBackoff: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
         toasts: ToastCenter? = nil,
+        responseHeaders: [String: String] = [:],
         handler: @escaping (URLRequest) throws -> (Int, String)
     ) throws -> EmailViewModel {
-        let id = EmailTestURLProtocol.register(handler)
+        let id = EmailTestURLProtocol.register { request in
+            let (status, body) = try handler(request)
+            return (status, body, responseHeaders)
+        }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [EmailTestURLProtocol.self]
         configuration.httpAdditionalHeaders = ["X-Email-Test": id]
@@ -4447,9 +4625,9 @@ private final class AttachmentSaveServer: @unchecked Sendable {
 
 private final class EmailTestURLProtocol: URLProtocol {
     private static let lock = NSLock()
-    private static var handlers: [String: (URLRequest) throws -> (Int, String)] = [:]
+    private static var handlers: [String: (URLRequest) throws -> (Int, String, [String: String])] = [:]
     /// Allocates a distinct fixture host so concurrent tests cannot replace each other's routes.
-    static func register(_ handler: @escaping (URLRequest) throws -> (Int, String)) -> String {
+    static func register(_ handler: @escaping (URLRequest) throws -> (Int, String, [String: String])) -> String {
         let id = UUID().uuidString
         lock.withLock { handlers[id] = handler }
         return id
@@ -4461,8 +4639,8 @@ private final class EmailTestURLProtocol: URLProtocol {
         guard let id = request.value(forHTTPHeaderField: "X-Email-Test"),
             let handler = Self.lock.withLock({ Self.handlers[id] }) else { return }
         do {
-            let (status, body) = try handler(request)
-            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+            let (status, body, headers) = try handler(request)
+            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers.merging(["Content-Type": "application/json"]) { current, _ in current })!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: Data(body.utf8))
             client?.urlProtocolDidFinishLoading(self)
