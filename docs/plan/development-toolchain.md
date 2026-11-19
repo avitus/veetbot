@@ -619,11 +619,10 @@ step-only `apple-ios` job passes once both have; `IOS_UI_DEVICES` names the
 devices a run builds for, boots, and tests, and defaults to both. Each device
 job runs on two executors, and `IOS_UI_SHARD=INDEX/TOTAL` makes each run every
 second enumerated case (`scripts/ios_ui_shard.py`, ADR-0230). Running both
-devices on one executor made two cases fail on hit-testing (ADR-0257). The Apple jobs
-key their exact-run record on their inputs alone: `clients/apple`, the
-`Makefile`, this configuration, and the shard script. Nothing else reaches
-the Apple suites, so a change outside those paths halts them right after
-checkout. The macOS cases synthesize real pointer and
+devices on one executor made two cases fail on hit-testing (ADR-0257). The Apple
+jobs include `clients/apple`, `Makefile`, the CI configuration and the shard
+script in their verification keys. The macOS job also includes `cockpit` and
+`scripts/install_website.mjs` because its hosted-board tests load the built runtime. The macOS cases synthesize real pointer and
 keyboard input, so locally `make test-apple-ui` runs them inside a Tart macOS
 VM with `make test-apple-ui-macos-vm`, then runs the simulator target, never
 both at once. `scripts/run_apple_ui_macos_vm.sh` boots the VM

@@ -3025,7 +3025,9 @@ def test_apple_ui_overflow_destinations_are_tapped_at_a_point() -> None:
     helper = _swift_functions(source)["openSidebarDestination"]
 
     assert "XCTAssertTrue(destination.waitForExistence(timeout: 5))" in helper
-    assert "XCTAssertTrue(destination.isHittable)" in helper
+    assert (
+        r"XCTAssertTrue(destination.wait(for: \.isHittable, toEqual: true, timeout: 10))" in helper
+    )
     assert "let window = app.windows.firstMatch" in helper
     assert 'let toolbarMore = window.buttons["chat.more"]' in helper
     assert 'let compactMore = window.buttons["sidebar.more"]' in helper
