@@ -34,16 +34,11 @@ def read_server(metadata: dict[str, Any], account_id: str) -> str:
     return "bland_read"
 
 
+READ_TOOLS = frozenset({"mcp.bland_read.get_call", "mcp.bland_read.list_calls"})
+
+
 def source_tool(name: object, server: str | None) -> bool:
-    return (
-        server == "bland_read"
-        and isinstance(name, str)
-        and name
-        in {
-            "mcp.bland_read.get_call",
-            "mcp.bland_read.list_calls",
-        }
-    )
+    return server == "bland_read" and isinstance(name, str) and name in READ_TOOLS
 
 
 def erase_result(

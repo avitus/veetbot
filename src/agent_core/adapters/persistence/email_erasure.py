@@ -352,10 +352,7 @@ async def erase_postgres_source(
     thread_id: str,
     message_ids: frozenset[str],
     erased_at: datetime,
-    *,
-    calling: bool = False,
 ) -> dict[str, int]:
-    read_server, source_tool, erase_result, source_present = _erasure_operations(calling)
     # The application appends the separate immutable erasure audit event.
     owned = list(
         (
@@ -413,14 +410,6 @@ async def erase_postgres_source(
         }
         for sid in affected_sessions
     }
-    if calling:
-        # Later turns may paraphrase a call without retaining its source identifier.
-        for row in event_rows:
-            source_ids = source_sequences.get(row.session_id)
-            if source_ids and row.sequence >= min(source_ids) and row.actor_type != "principal":
-                source_ids.add(row.sequence)
-                if row.run_id is not None:
-                    affected_runs.add(row.run_id)
     protected = {
         str(identifier)
         for identifier in (
@@ -546,22 +535,17 @@ async def erase_postgres_source(
         )
     for trace_row, erased_trace in trace_changes:
         trace_row.trace = erased_trace
-    # Call erasure removes every file of the run, as it always has.
-    kept_files = (
-        frozenset()
-        if calling
-        else frozenset(
-            str(artifact.id)
-            for artifact in (
-                await session.scalars(
-                    select(ArtifactRow).where(
-                        ArtifactRow.run_id.in_(affected_runs),
-                        ArtifactRow.origin != "upload",
-                    )
+    kept_files = frozenset(
+        str(artifact.id)
+        for artifact in (
+            await session.scalars(
+                select(ArtifactRow).where(
+                    ArtifactRow.run_id.in_(affected_runs),
+                    ArtifactRow.origin != "upload",
                 )
-            ).all()
-            if outlives_source_erasure(artifact.metadata_json, message_ids)
-        )
+            )
+        ).all()
+        if outlives_source_erasure(artifact.metadata_json, message_ids)
     )
     for row in event_rows:
         payload = changes.get(row.id)
@@ -577,7 +561,7 @@ async def erase_postgres_source(
             payload = derived_payload(
                 row.payload,
                 row.event_type,
-                "[call source erased]" if calling else _ERASED,
+                _ERASED,
                 kept_files,
             )
         if row.actor_type != "principal":
@@ -596,21 +580,6 @@ async def erase_postgres_source(
         ).all()
     )
     for invocation in invocations:
-        if calling and invocation.run_id in affected_runs:
-            for field in (
-                "raw_arguments",
-                "arguments",
-                "result_item",
-                "structured_result",
-                "outcome",
-            ):
-                setattr(
-                    invocation,
-                    field,
-                    call_erasure.erase_derived({field: getattr(invocation, field)})[field],
-                )
-            counts["invocations"] += 1
-            continue
         changed = False
         for field in ("raw_arguments", "arguments"):
             value = getattr(invocation, field)
@@ -627,14 +596,12 @@ async def erase_postgres_source(
                     changed = True
         counts["invocations"] += int(changed)
     # The owner's decision stands; only the name its card showed is source content.
-    # A call has no saved files, and the call worker's role may not read approvals.
-    if not calling:
-        for approval in (
-            await session.scalars(
-                select(ApprovalRow).where(ApprovalRow.session_id.in_(affected_sessions))
-            )
-        ).all():
-            approval.request = erase_attachment_names(approval.request, message_ids)
+    for approval in (
+        await session.scalars(
+            select(ApprovalRow).where(ApprovalRow.session_id.in_(affected_sessions))
+        )
+    ).all():
+        approval.request = erase_attachment_names(approval.request, message_ids)
     checkpoint_ids = list(
         (
             await session.scalars(
@@ -667,9 +634,7 @@ async def erase_postgres_source(
             source_event = by_sequence.get(history.sequence)
             if source_event is None or source_event.actor_type == "principal":
                 continue
-            if calling and source_event.run_id in affected_runs:
-                history.item = call_erasure.erase_derived(history.item)
-            elif history.sequence in source_sequences.get(sid, set()):
+            if history.sequence in source_sequences.get(sid, set()):
                 history.item = erase_result(
                     history.item, thread_id, message_ids, account_id=account_id
                 )
@@ -693,9 +658,7 @@ async def erase_postgres_source(
             ).all()
         )
         for episode in episodes:
-            if set(episode.source_event_ids).intersection(
-                source_sequences.get(sid, set()) if calling else sequences
-            ):
+            if set(episode.source_event_ids).intersection(sequences):
                 await session.delete(episode)
                 counts["episodes"] += 1
     artifacts = [

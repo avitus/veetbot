@@ -29,6 +29,7 @@ from agent_core.adapters.persistence.people_erasure import (
     source_cleanup_receipts,
 )
 from agent_core.adapters.persistence.people_reference_index import reference_overlap
+from agent_core.adapters.persistence.postgres_call_erasure import erase_postgres_call
 from agent_core.adapters.persistence.reconsolidation_sources import erase_sources, lock_owner
 from agent_core.adapters.persistence.records import InMemoryRecordStore
 from agent_core.adapters.persistence.sqlalchemy_models import (
@@ -203,9 +204,7 @@ class PostgresSessionDeletionRepository:
     async def erase_call_source(
         self, principal: Principal, call_id: str, erased_at: datetime
     ) -> dict[str, int]:
-        return await erase_postgres_source(
-            self._session, principal, "", call_id, frozenset(), erased_at, calling=True
-        )
+        return await erase_postgres_call(self._session, principal, call_id, erased_at)
 
     async def erase_email_source(
         self,
