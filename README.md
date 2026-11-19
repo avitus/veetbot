@@ -35,8 +35,9 @@ box.
 - **Keep you in control.** Deterministic policy rules, scoped credentials,
   isolated execution, and approval prompts guard consequential actions.
 - **Work with your mail and the people in it.** The optional Gmail integration
-  searches, triages, and drafts, sends only what you approve, and can help you
-  unsubscribe from bulk senders; People memory keeps track of who you know and
+  searches and triages messages, prepares replies with matching files, and
+  sends the message and attachments you approve. Save incoming files in the
+  email conversation or ask to unsubscribe from bulk senders; People memory keeps track of who you know and
   write to, with the evidence behind each fact.
 - **Handle work while you are away.** Durable schedules, offline results, and
   notifications let useful work continue beyond an open chat window.

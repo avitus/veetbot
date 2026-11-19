@@ -1180,8 +1180,7 @@ class FakeCeremonyPage:
         """Return the challenge fields; a hidden password input stays in the DOM."""
         if selector in {"h1,h2,h3,h4,h5,h6,[role=heading]", "a,button,[role=link],[role=button]"}:
             prompts = Mock(spec=Locator)
-            prompts.filter.return_value = prompts
-            prompts.count = AsyncMock(return_value=0)
+            prompts.evaluate_all = AsyncMock(return_value=False)
             return prompts
         assert "input[type=password]" in selector
         field = Mock(spec=Locator)
@@ -1348,6 +1347,20 @@ async def test_text_sent_while_no_challenge_is_visible_is_not_sign_in_evidence()
 
     assert status is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
     page.keyboard.type.assert_awaited_once_with("synthetic-entry")
+
+
+async def test_navigation_during_sign_in_inspection_waits_for_a_fresh_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = FakeCeremonyPage("https://www.duolingo.com/")
+    runtime = ceremony_runtime(page)
+    runtime._sign_in_entered = True
+    inspect = AsyncMock(side_effect=PlaywrightError("Execution context was destroyed"))
+    monkeypatch.setattr(runtime, "_sign_in_challenge_visible", inspect)
+
+    assert (
+        await runtime.authentication_status() is BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED
+    )
 
 
 async def test_once_sign_in_entry_is_recorded_later_keys_skip_the_page_scan(

@@ -6,10 +6,10 @@ three-grant bootstrap ceremony, secure production installation, activation,
 the required real-mailbox smoke, rollback, and milestone-close evidence.
 
 The governing design remains [Email Integration](plan/email-integration.md)
-and [ADR-0071](adr/0071-milestone-18-email-integration.md). This runbook does
-not widen that contract: the three designed Google scopes for each connected
-account, no attachment download, no permanent deletion, and explicit approval
-for every write and send. The Milestone 26
+and [ADR-0071](adr/0071-milestone-18-email-integration.md). Each account grants three separate scopes. Saving a file to its email chat
+requires the owner's Save gesture or approval in Chat. Draft preparation can
+privately stage matching files. Sending requires approval of the message and
+its exact files. Gmail messages can be moved to Trash. The Milestone 26
 [Email mode](#milestone-26-activate-email-mode) and the Milestone 31
 [unsubscribe assistance](#milestone-31-activate-and-smoke-unsubscribe-assistance)
 build on the same credentials and are activated in their own sections below.

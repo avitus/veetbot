@@ -15,11 +15,14 @@ SECURITY_CHALLENGE_HEADINGS = "h1,h2,h3,h4,h5,h6,[role=heading]"
 REMEMBERED_SIGN_IN_CONTROLS = "a,button,[role=link],[role=button]"
 
 NAMED_CHALLENGE_SCRIPT = (
-    "(node, pattern) => {"
+    "(nodes, pattern) => {"
     + PAGE_TEXT_HELPERS
     + """
-    const value = summary(node, 512, false, null, false, true);
-    return !value.text_truncated && new RegExp(pattern, 'i').test(value.text);
+    const expression = new RegExp(pattern, 'i');
+    return nodes.some(node => {
+        const value = summary(node, 512, false, null, false, true);
+        return !value.text_truncated && expression.test(value.text);
+    });
 }"""
 )
 

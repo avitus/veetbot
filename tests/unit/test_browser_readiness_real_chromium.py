@@ -91,16 +91,15 @@ async def test_background_polling_does_not_consume_the_whole_readiness_budget() 
 
     async with browsing([Route("/", home), Route("/poll", poll)]) as (site, runtime):
         with collect_browser_diagnostics(clock=asyncio.get_running_loop().time) as collector:
-            started = monotonic()
             observation = await runtime.navigate(site.url("/"))
-            elapsed = monotonic() - started
-        assert elapsed < 1.8, "background network activity exhausted the two-second settle budget"
-        assert observation.model_dump().get("readiness") == "dom_quiet"
-        assert [phase.phase for phase in collector.snapshot().phases] == [
+        phases = collector.snapshot().phases
+        assert observation.readiness == "dom_quiet"
+        assert [phase.phase for phase in phases] == [
             "readiness",
             "observation",
             "navigation",
         ]
+        assert phases[0].elapsed_ms < 1_800, "polling exhausted the readiness budget"
 
 
 async def test_continuously_changing_dom_reports_expired_readiness_bound() -> None:
@@ -387,8 +386,11 @@ async def test_initial_data_finishes_before_dom_quiet_despite_later_polling() ->
         site,
         runtime,
     ):
-        started = monotonic()
-        observation = await runtime.navigate(site.url("/"))
+        with collect_browser_diagnostics(clock=asyncio.get_running_loop().time) as collector:
+            observation = await runtime.navigate(site.url("/"))
         assert observation.text == "Exercise loaded"
         assert observation.readiness == "dom_quiet"
-        assert monotonic() - started < 1.8
+        readiness = next(
+            phase for phase in collector.snapshot().phases if phase.phase == "readiness"
+        )
+        assert readiness.elapsed_ms < 1_800

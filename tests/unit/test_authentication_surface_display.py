@@ -6,33 +6,17 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import pytest
 from playwright.async_api import Browser, Page, Route, async_playwright
 
 from agent_core.browser_control_plane.api import _AUTHENTICATION_HTML, _AUTHENTICATION_SCRIPT
+from tests.real_browser_support import require_real_browser
 
 ORIGIN = "https://profiles.surface.test"
 CEREMONY_PATH = "/authentication/00000000-0000-4000-8000-000000000002"
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
-
-
-def _chromium_installed() -> bool:
-    async def probe() -> str:
-        async with async_playwright() as playwright:
-            return playwright.chromium.executable_path
-
-    try:
-        return Path(asyncio.run(probe())).exists()
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(
-    not _chromium_installed(), reason="Playwright Chromium is not installed"
-)
 
 
 @dataclass
@@ -50,6 +34,7 @@ Opener = Callable[..., Awaitable[tuple[Page, SurfaceTraffic]]]
 
 @pytest.fixture
 async def browser() -> AsyncIterator[Browser]:
+    require_real_browser()
     async with async_playwright() as playwright:
         launched = await playwright.chromium.launch()
         try:

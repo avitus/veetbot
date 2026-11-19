@@ -4169,10 +4169,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(destination.waitForExistence(timeout: 5))
         // Menu elements appear before their presentation becomes interactive.
         waitForSettledFrame(of: destination, stableFor: 3)
-        let destinationReady = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "hittable == true"), object: destination)
-        XCTAssertEqual(XCTWaiter.wait(for: [destinationReady], timeout: 10), .completed)
-        XCTAssertTrue(destination.isHittable)
+        XCTAssertTrue(destination.wait(for: \.isHittable, toEqual: true, timeout: 10))
         // iOS 27.0 can synthesize a menu-element coordinate tap with a zero-size
         // parent window. Anchor the observed target point to the actual window;
         // require the menu to close before treating the navigation as complete.

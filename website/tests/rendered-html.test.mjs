@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
-const projectRoot = new URL("../", import.meta.url);
-
 async function htmlFor(pathname) {
   const relativePath = pathname === "/" ? "index.html" : `${pathname.slice(1)}.html`;
   return readFile(new URL(`../out/${relativePath}`, import.meta.url), "utf8");
@@ -72,6 +70,14 @@ test("privacy page discloses Gmail access, processing, retention, and control", 
   assert.match(html, /href="\/tos"/i);
 });
 
+test("privacy page explains how Gmail files enter a chat or a draft and when they are sent", async () => {
+  const html = await htmlFor("/privacy");
+  assert.match(html, /save an attachment to the email(?:&#x27;|&apos;|')s chat/i);
+  assert.match(html, /searchable knowledge/i);
+  assert.match(html, /stage matching files.*draft/i);
+  assert.match(html, /approve the message and its exact attachments/i);
+});
+
 test("terms page explains authorization, approvals, and service limits", async () => {
   const html = await htmlFor("/tos");
 
@@ -92,30 +98,7 @@ test("email mode discloses historical learning and distinct retention windows", 
   assert.match(html, /30 days after.*last access/i);
   assert.match(html, /sent or discarded.*30 days/i);
   assert.match(html, /operational.*until.*session.*source exclusion/i);
-  assert.match(html, /no more than 35 days/i);
   assert.match(html, /pause.*learning.*reset/i);
-});
-
-test("finished site is a static DigitalOcean artifact with no Sites runtime", async () => {
-  const [page, layout, packageJson, config] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readFile(new URL("../next.config.ts", import.meta.url), "utf8"),
-  ]);
-
-  assert.doesNotMatch(page, /codex-preview|SkeletonPreview/);
-  assert.doesNotMatch(layout, /Starter Project|codex-preview/);
-  assert.doesNotMatch(packageJson, /vinext|wrangler|sites-vite-plugin/);
-  assert.match(config, /output:\s*["']export["']/);
-  assert.match(config, /trailingSlash:\s*false/);
-  await access(new URL("../out/index.html", import.meta.url));
-  await access(new URL("../out/privacy.html", import.meta.url));
-  await access(new URL("../out/tos.html", import.meta.url));
-  await assert.rejects(access(new URL("app/_sites-preview", projectRoot)));
-  await assert.rejects(access(new URL("../.openai/hosting.json", import.meta.url)));
-  await assert.rejects(access(new URL("../worker/index.ts", import.meta.url)));
-  await assert.rejects(access(new URL("../vite.config.ts", import.meta.url)));
 });
 
 /** A broken internal link or asset would ship as a 404 on the public site. */

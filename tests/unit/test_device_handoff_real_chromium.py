@@ -734,7 +734,9 @@ async def test_verification_waits_for_the_sites_delayed_session_decision(
             hand_off(service, cookie=await signed_in_cookie(members), confirmed_path="/learn")
         )
         try:
-            async with asyncio.timeout(10):
+            # Allow browser startup and the delayed page handler their share of
+            # the verification deadline before checking the six-second hold.
+            async with asyncio.timeout(verification_seconds - 6):
                 await checking_session.wait()
             completed, _ = await asyncio.wait({checking}, timeout=6)
             assert not completed, "The verifier decided before the site's session check finished"

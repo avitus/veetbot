@@ -12,8 +12,16 @@ import pytest
 
 from tests import conftest
 from tests.browser_host import HOST_OVERRIDE, ROUTE_SETTING, host_browser_refusal
+from tests.browser_partition import BROWSER_MODULES
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_direct_browser_launches_belong_to_the_required_browser_partition() -> None:
+    for path in (ROOT / "tests").rglob("test_*.py"):
+        source = path.read_text(encoding="utf-8")
+        if any(f".{engine}.launch(" in source for engine in ("chromium", "firefox", "webkit")):
+            assert path.name in BROWSER_MODULES, f"{path.name} would miss required browser CI"
 
 
 def test_a_mac_host_refuses_real_browser_cases_and_names_the_sidecar_route() -> None:
@@ -139,7 +147,7 @@ def test_the_local_container_is_linux_x86_64_with_a_private_display() -> None:
     assert "uv.lock" in script
     assert "playwright install --with-deps chromium" in image
     assert "xvfb" in image
-    assert "uv==0.8.6" in image
+    assert "uv==0.13.9" in image
 
 
 def test_browser_dry_run_is_independent_of_parent_make_settings(

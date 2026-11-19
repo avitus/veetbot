@@ -184,7 +184,8 @@ For a manifest account the operator supplies its durable routing label:
 python -m gmail_mcp bootstrap --account-id work --output-directory /private/path/work
 ```
 
-The label is written into all three documents. It does not verify the Google
+The operator can put `--account-id` before or after `bootstrap`. Conflicting
+values stop setup before consent. The label is written into all three documents. It does not verify the Google
 address selected in the browser, so the operator selects the same account for
 all three consents and confirms it with the real-mailbox smoke. At runtime the
 server receives the label as non-secret configuration and rejects an absent or
@@ -418,7 +419,7 @@ threshold-of-one row (tool-system.md:928). This is the rule
 [tool-system.md](tool-system.md) already applies to a mid-session 401 arriving
 after the watermark (tool-system.md:2076-2078) and the one
 [browser-automation.md](browser-automation.md) reached for the same reason
-(browser-automation.md:1481-1485), generalized from those two cases to every
+(browser-automation.md:1486-1490), generalized from those two cases to every
 failure a dispatched non-idempotent MCP call can return. It lands as an
 amendment to [tool-system.md](tool-system.md) in the change that implements
 it, keyed on the declared idempotency class rather than on any `gmail_*` name,

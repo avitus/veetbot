@@ -50,5 +50,5 @@ def test_the_image_holds_named_source_and_never_the_whole_build_context() -> Non
         assert not {".", "./", "*"} & set(sources), sources
         assert not any(source == ".venv" or source.endswith(".env") for source in sources)
     assert "FROM python:3.12-slim-bookworm@sha256:" in "\n".join(lines)
-    assert "FROM node:22.23.1-bookworm-slim@sha256:" in "\n".join(lines)
+    assert "FROM node:22.23.5-bookworm-slim@sha256:" in "\n".join(lines)
     assert "USER 65534:65534" in lines

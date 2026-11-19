@@ -108,9 +108,9 @@ checks it per commit; no trailer means lane A.
 
 ## Verification
 
-Always run development tests in the local sandbox. Follow the target-specific commands in
-`docs/plan/development-toolchain.md#local-test-sandboxes` for Apple, Linux, database and Docker tests.
-If unavailable, report the blocker. Never test on the host desktop. Use Chunk only at the owner's request.
+Run Apple, Linux, database and Docker tests in the [local sandboxes](docs/plan/development-toolchain.md#local-test-sandboxes).
+Report an unavailable sandbox. Never test on the host desktop. Use Chunk only at the owner's request.
+Register real-browser modules in `tests/browser_partition.py` for required CI.
 
 Run focused tests, lint, typecheck and docs-check while iterating. Run full hosted CI once on the final head
 before merging (step 4, ADR-0257). Keep `make check` as the fallback. Never run sidecar `make check` while iterating.

@@ -1,11 +1,12 @@
-FROM python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
+FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 
 # The glibc image supports the pinned plotting wheels on amd64 and arm64.
 # Install at image build, never from a model's network-denied runtime.
 RUN apt-get update && apt-get install -y --no-install-recommends graphviz fonts-dejavu-core tini \
     && rm -rf /var/lib/apt/lists/*
 COPY execution/visualization-requirements.txt /opt/agent/visualization-requirements.txt
-RUN pip install --no-cache-dir --require-hashes --only-binary=:all: \
+RUN python -m pip install --no-cache-dir pip==26.3 \
+    && pip install --no-cache-dir --require-hashes --only-binary=:all: \
     -r /opt/agent/visualization-requirements.txt
 
 RUN mkdir -p /opt/agent/agent_core/execution

@@ -9,4 +9,6 @@ RUN apk add --no-cache build-base curl \
     && make -C /tmp/pgvector-0.8.7 with_llvm=no DESTDIR=/vector install
 
 FROM postgres:16-alpine
+# Use Alpine's security-maintained build for the entrypoint privilege drop.
+RUN apk add --no-cache gosu && rm /usr/local/bin/gosu
 COPY --from=vector-build /vector/usr/local/ /usr/local/

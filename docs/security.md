@@ -170,6 +170,9 @@ the exact data, user-requested feature, hosted AI processors, provider-retention
 boundary, prohibited uses, Veetbot retention, deletion controls, and public
 privacy policy. The three refresh tokens remain separated into owner-only
 credential files, and read, write, and send authority remain independent.
+A file saved from Gmail belongs to its email conversation. Research can stage
+files privately for a draft. Send approval covers the exact attachment set
+along with the recipients and body.
 Every Gmail result enters the context as `EXTERNAL_UNTRUSTED`: mail content
 cannot authorize an action or bypass policy, and a write or send proposed after
 reading mail cannot receive a plain allow. The public policy applies the same
@@ -263,6 +266,12 @@ site is its only public HTTP entry point. The server serializes releases with
 `flock`, keeps dependencies and the sandbox image revision-specific until
 promotion, and requires the health probe to report the same release identity
 locally and through the public TLS endpoint.
+
+The Python and Node base images in the execution and browser Dockerfiles are
+pinned by digest. Audit the built images as well as the application lockfiles.
+The PostgreSQL entrypoint uses Alpine’s packaged privilege helper. The
+production Cockpit builder and code sandbox discard npm after installing their
+locked dependencies. The browser test image retains npm to run its test suites.
 
 Application services run without Docker-group membership or a container-runtime
 socket. The separate `veetbot-execution` systemd service, running as
