@@ -417,8 +417,9 @@ Body line"""
 
 
 def test_signature_delimiter_does_not_turn_the_sign_off_into_a_heading() -> None:
-    result = reading_body("Thanks,\nJamie\n--\nJamie Example")
-    assert result == "Thanks,\\\nJamie\n\n--\\\nJamie Example"
+    # Text after the block means it is not a signature, so it stays as written.
+    result = reading_body("Thanks,\nJamie\n--\nJamie Example\n\nP.S. Bring the deck.")
+    assert result == "Thanks,\\\nJamie\n\n--\\\nJamie Example\n\nP.S. Bring the deck."
 
 
 def test_code_fences_keep_their_lines_untouched() -> None:
@@ -925,3 +926,213 @@ def test_html_column_spans_preserve_financial_table_grid() -> None:
     assert "| Metric | Quarter |  |\n| --- | --- | --- |" in result
     assert "| Revenue | Actual | Plan |" in result
     assert "| Total | $42 |  |" in result
+
+
+# A Gmail reply as its two MIME alternatives. The HTML marks each signature; the
+# plain part marks nothing, and only a writer who set one has the `-- ` delimiter.
+GMAIL_REPLY_HTML = (
+    '<div dir="ltr">Here is the deck<div><br></div>'
+    '<div><a href="https://files.example/deck/42">https://files.example/deck/42</a></div>'
+    '<div><div><div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">'
+    '<div dir="ltr"><div>Riley Example</div>'
+    '<div>Partner, <a href="https://www.example.com/">Example</a></div>'
+    "<div>650.555.0100</div>"
+    '<div><a href="mailto:riley@example.com">riley@example.com</a></div>'
+    '<div><a href="https://www.example.com/team/riley-example">Bio</a>|'
+    '<a href="https://www.linkedin.example/in/rileyexample/">LinkedIn</a></div>'
+    "</div></div></div></div></div><br>"
+    '<div class="gmail_quote gmail_quote_container"><div dir="ltr" class="gmail_attr">'
+    "On Fri, Nov 20, 2026 at 6:13 AM Sam Example &lt;"
+    '<a href="mailto:sam@example.com">sam@example.com</a>&gt; wrote:<br></div>'
+    '<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex">'
+    '<div dir="ltr">And the summary: '
+    '<a href="https://docs.example/d/7">https://docs.example/d/7</a><div><br></div>'
+    '<span class="gmail_signature_prefix">-- </span><br>'
+    '<div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">'
+    '<div dir="ltr">Sam Example<div>Partner, <a href="https://www.example.com/">Example</a></div>'
+    '<div><a href="https://www.example.com/blog/post">Latest Post: A Framework</a></div>'
+    "</div></div></div></blockquote></div>"
+)
+GMAIL_REPLY_PLAIN = "\r\n".join(
+    [
+        "Here is the deck",
+        "",
+        "https://files.example/deck/42",
+        "Riley Example",
+        "Partner, Example <https://www.example.com/>",
+        "650.555.0100",
+        "riley@example.com",
+        "Bio <https://www.example.com/team/riley-example>|LinkedIn",
+        "<https://www.linkedin.example/in/rileyexample/>",
+        "",
+        "",
+        "On Fri, Nov 20, 2026 at 6:13 AM Sam Example <sam@example.com> wrote:",
+        "",
+        "> And the summary:",
+        "> https://docs.example/d/7",
+        ">",
+        "> -- ",
+        "> Sam Example",
+        "> Partner, Example <https://www.example.com/>",
+        "> Latest Post: A Framework",
+        "> <https://www.example.com/blog/post>",
+        ">",
+        "",
+    ]
+)
+RILEY = '"Riley Example" <riley@example.com>'
+
+
+def test_marked_html_signature_is_omitted_at_every_quote_level() -> None:
+    result = reading_body(GMAIL_REPLY_HTML)
+    assert "Here is the deck" in result and "And the summary:" in result
+    for gone in ["Riley Example", "650.555.0100", "Partner", "Latest Post", "--"]:
+        assert gone not in result
+    # The merge still needs the whole alternative to recognize the plain copy.
+    kept = reading_body(GMAIL_REPLY_HTML, keep_signatures=True)
+    assert "650.555.0100" in kept and "Latest Post" in kept
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        'class="mail gmail_signature"',
+        'data-smartmail="gmail_signature"',
+        'id="Signature"',
+        'id="ms-outlook-mobile-signature"',
+        'id="AppleMailSignature"',
+    ],
+)
+def test_each_mailer_signature_marker_is_recognized(marker: str) -> None:
+    html = (
+        f"<div>See you there.</div><div {marker}><p>Jamie Example</p>"
+        "<p>555 0100</p></div><p>After.</p>"
+    )
+    assert reading_body(html) == "See you there.\n\nAfter."
+
+
+def test_delimited_signature_goes_when_only_history_follows_it() -> None:
+    source = (
+        "See you there.\n\n-- \nJamie Example\nDirector, Example\n555 0100\n\n"
+        "On Fri, Nov 20, 2026 at 6:13 AM Sam Example <sam@example.com> wrote:\n\n"
+        "> Are you coming?\n>\n> -- \n> Sam Example\n> Example Inc\n"
+    )
+    result = reading_body(source)
+    assert result.startswith("See you there.\n\nOn Fri, Nov 20, 2026 at 6:13 AM Sam Example")
+    assert "> Are you coming?" in result
+    for gone in ["Jamie Example", "Director", "555 0100", "Example Inc", "--"]:
+        assert gone not in result
+
+
+def test_a_delimiter_that_does_not_end_its_text_is_not_a_signature() -> None:
+    separated = "Agenda\n\n--\nFirst item\nSecond item\n\nPlease read both before Monday."
+    assert "First item" in reading_body(separated)
+    long_block = "Notes\n\n--\n" + "\n".join(f"Row {index}" for index in range(13))
+    assert "Row 12" in reading_body(long_block)
+
+
+def test_block_under_the_writers_own_name_goes_when_it_ends_the_message() -> None:
+    result = reading_body(GMAIL_REPLY_PLAIN, sender=RILEY)
+    assert result.startswith(
+        "Here is the deck\n\n[files.example](https://files.example/deck/42)\n\nOn Fri, Nov 20"
+    )
+    for gone in ["Riley Example", "650.555.0100", "riley@example.com", "Bio", "Latest Post"]:
+        assert gone not in result
+    # Nothing marks the block without the writer's name, so it stays.
+    assert "650.555.0100" in reading_body(GMAIL_REPLY_PLAIN)
+    # Each line of an HTML signature is its own paragraph.
+    html = (
+        "<div>Here is the deck</div><div>--</div><div><b>Riley Example</b></div><div>Partner</div>"
+        "<div>650.555.0100</div><div>On Fri, Nov 20, 2026 at 6:13 AM Sam wrote:</div>"
+        "<blockquote>Thanks.</blockquote>"
+    )
+    assert reading_body(html, sender=RILEY) == (
+        "Here is the deck\n\nOn Fri, Nov 20, 2026 at 6:13 AM Sam wrote:\n\nThanks."
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # A sign-off is the writer's own words, not a signature.
+        "See you there.\n\nRiley Example",
+        # Prose and a postscript under the name are the message.
+        "Riley Example\nwill present first, and the full discussion follows after lunch today.",
+        "Thanks.\n\nRiley Example\nPartner\n\nP.S. Bring the printed deck.",
+        # A list the name belongs to, and more lines than a signature has.
+        "Attending:\nRiley Example\nSam Example\nJamie Example",
+        "Riley Example\n" + "\n".join(f"Guest {index}" for index in range(13)),
+    ],
+)
+def test_the_writers_name_alone_does_not_make_a_signature(body: str) -> None:
+    assert reading_body(body, sender=RILEY) == reading_body(body)
+    # Another writer's name, or an address without one, names nobody.
+    signed = "See you there.\n\nRiley Example\nPartner\n650.555.0100"
+    assert "Partner" in reading_body(signed, sender="Sam Example <sam@example.com>")
+    assert "Partner" in reading_body(signed, sender="riley@example.com")
+    assert reading_body(signed, sender=RILEY) == "See you there."
+
+
+def test_reply_alternatives_are_compared_line_by_line() -> None:
+    """A link the reader labelled by host, or a repeat shown once, is not missing prose."""
+    from agent_core.application.email_reader import merge_image_body
+
+    html_text = (
+        "Here is the deck\n\n[https://files.example/deck/42](https://files.example/deck/42)\n\n"
+        "And the summary: [https://docs.example/d/7](https://docs.example/d/7)\n\n"
+        "Sam Example\n\n[Latest Post](https://www.example.com/blog/post)\n\nSam Example"
+    )
+    plain = (
+        "[files.example](https://files.example/deck/42)\n\n"
+        "> [And the summary:](https://docs.example/d/7)\n>\n> Sam Example\\\n"
+        "> Latest Post\\\n> [www.example.com](https://www.example.com/blog/post)"
+    )
+    assert merge_image_body(plain, html_text, html_text) == html_text
+    # A link only the plain part carries is still prose the HTML lacks.
+    only_plain = "[other.example](https://other.example/a)"
+    assert merge_image_body(only_plain, html_text, html_text) == only_plain + "\n\n" + html_text
+    assert merge_image_body("> Sam Example\n> Not in the HTML.", html_text, html_text).startswith(
+        "> Sam Example\n> Not in the HTML.\n\n"
+    )
+
+
+async def test_gmail_reply_reads_as_its_note_without_signature_or_duplicate() -> None:
+    """The retained body keeps the signature; only the reading text leaves it out."""
+    async with email_client() as (app, client):
+        thread, _ = await seed_mail(app)
+        async with app.uow_factory() as uow:
+            record = await uow.email.get(app.principal, "thread", str(thread.id))
+            assert record is not None
+            payload = dict(record.payload)
+            messages = [dict(item) for item in cast(list[dict[str, object]], payload["messages"])]
+            messages[0].update(sender=RILEY, body=GMAIL_REPLY_PLAIN, reader_html=GMAIL_REPLY_HTML)
+            payload["messages"] = messages
+            await uow.email.put(
+                record.model_copy(update={"revision": 2, "payload": payload}), expected_revision=1
+            )
+        message = (await client.get(f"/v1/email/threads/{thread.id}")).json()["messages"][0]
+        assert message["body"] == GMAIL_REPLY_PLAIN
+        reader = message["reader_body"]
+        assert reader.startswith(
+            "Here is the deck\n\n"
+            "[https://files.example/deck/42](https://files.example/deck/42)\n\nOn Fri, Nov 20"
+        )
+        assert reader.count("Here is the deck") == 1
+        assert reader.count("And the summary:") == 1
+        assert ">" not in reader.replace("\\<sam@example.com>", "")
+        for gone in ["Riley Example", "650.555.0100", "Partner", "Latest Post", "--"]:
+            assert gone not in reader
+
+
+async def test_reader_validator_changes_with_the_reader_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A client holding text from an older reader must not be told it is current."""
+    import agent_core.api.email as api
+
+    async with email_client() as (app, client):
+        thread, _ = await seed_mail(app)
+        path = f"/v1/email/threads/{thread.id}"
+        tag = (await client.get(path)).headers["etag"]
+        monkeypatch.setattr(api, "READER_VERSION", "email-reader@next")
+        assert (await client.get(path, headers={"If-None-Match": tag})).status_code == 200

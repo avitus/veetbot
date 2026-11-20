@@ -178,8 +178,11 @@ padding and recognizable promotional controls, collapses a forwarded envelope to
 its source attribution, embeds source URLs as labeled links, and restores article
 headings and paragraph flow. A retained HTML alternative supplies the reading
 structure when it represents source prose, with plain-text paragraphs absent
-from it preserved before it. An unrelated image/footer alternative leaves the
-text reader intact.
+from it preserved before it. A paragraph is absent when one of its lines has
+words the HTML lacks, so a reply's quoted history is not judged missing for a
+repeat the plain reader showed once. A link the plain reader could label only by
+its host is present when the HTML links the same destination. An unrelated
+image/footer alternative leaves the text reader intact.
 Rectangular tables with at least two rows and columns become inert Markdown
 tables; the first row is the heading. Column spans keep their text in the first
 column and reserve empty cells for the rest. Layout wrappers, row spans and
@@ -202,6 +205,27 @@ A message containing a code fence keeps its lines as they are. A block of three 
 more lines that repeats an earlier block of the same message, however it wrapped,
 is shown once, which is how a signature quoted at every level appears. No other
 prose is removed for repeating.
+
+A sender's signature is left out of the reading text, at every quote level, and
+stays in the retained body that **Show original** shows and that People and
+memory formation read. Three signs identify one, and nothing else does:
+
+- The mailer's own mark in the HTML: Gmail's `gmail_signature` and
+  `gmail_signature_prefix` classes or `data-smartmail="gmail_signature"`, and the
+  `Signature`, `ms-outlook-mobile-signature` and `AppleMailSignature` ids.
+- In a plain-text part, a `-- ` delimiter line and the unbroken lines under it,
+  at most 12, when only blank lines, the end of that quote level, or the reply or
+  forward it was written above follow. This also removes a mailing-list footer
+  written the same way. A delimiter with more of the message below it stays.
+- In the writer's own text, a line that is exactly the sender's display name of
+  two or more words, with the lines under it, when those lines run to the end of
+  the text or to the reply or forward below. Each must be at most 100 characters,
+  there are at most 12, and none is a postscript or a sentence of more than eight
+  words. The name alone is a sign-off and stays, as does a name that follows a
+  line ending in a colon.
+
+The comparison of the two alternatives above uses the HTML with its signature, so
+the plain part's copy is never preserved as missing prose.
 
 Native text renders the result across the available Mac reader width, keeping
 its edge padding; iPhone and iPad retain their bounded reading width. External
@@ -313,6 +337,8 @@ after one page. Mixed-version pages cannot establish a reusable snapshot.
 Query, connection and mutation invalidation discard the version with its rows.
 Thread detail accepts `If-None-Match` after current authorization, retention,
 draft and operation checks; a match returns 304 without preparing reader text.
+The validator includes a reader version, raised whenever the same retained
+source would read differently, so a client never keeps an older reader's text.
 Both responses retain `private, no-store`. Reader preparation runs outside the
 API event loop. No body, permission, retention or draft checks are bypassed.
 Native message and conversation parsing runs off the UI thread. Conversation
