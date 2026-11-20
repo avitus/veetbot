@@ -697,7 +697,9 @@ ran), `expand` (identity scoping and merge candidates), `rank` (scoring, fusion
 and ordering), `pack` (budgeted admission and rendering) and `total`. The
 stages are disjoint, so their sum never exceeds `total`; the remainder is
 unattributed. A recall that skipped the candidate query records neither sparse
-arm.
+arm. Because the timings name stages as well as arms, a reader never iterates
+or sums them: the trace answers `arms_ran` and `recall_latency_ms`, and the
+probe report takes its arms and latency from those.
 
 `ranked_candidates` is every scored candidate of a question-led recall, best
 first, before duplicate and per-subject collapse, to a bound above what recall

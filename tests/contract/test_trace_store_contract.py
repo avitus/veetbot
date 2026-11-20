@@ -275,3 +275,30 @@ async def people_trace_scope_erasure_contract(store: TraceStore) -> None:
 
 async def test_people_trace_erasure_includes_query_only_identity() -> None:
     await people_trace_scope_erasure_contract(InMemoryTraceStore())
+
+
+def test_a_trace_reports_its_arms_and_whole_latency_apart_from_its_stages() -> None:
+    """Readers ask the trace; summing every timing would count the total twice."""
+
+    staged = trace().model_copy(
+        update={
+            "arm_latencies_ms": {
+                "structured": 0,
+                "lexical": 4,
+                "semantic": 40,
+                "lock": 1,
+                "expand": 2,
+                "rank": 3,
+                "pack": 5,
+                "total": 57,
+            }
+        }
+    )
+    # A trace recorded before stages were timed carries only its arms.
+    legacy = trace().model_copy(
+        update={"arm_latencies_ms": {"structured": 0, "lexical": 0, "semantic": 40}}
+    )
+    assert getattr(staged, "arms_ran", None) == ("structured", "lexical", "semantic")
+    assert getattr(staged, "recall_latency_ms", None) == 57
+    assert getattr(legacy, "recall_latency_ms", None) == 40
+    assert getattr(trace(), "recall_latency_ms", 0) is None

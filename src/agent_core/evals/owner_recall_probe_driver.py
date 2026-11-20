@@ -200,8 +200,8 @@ async def _observe_path(
         for text in probe.delivered_must_contain
     )
     answer = run.final_message if script is None else None
-    arms = tuple(sorted({arm for trace in traces for arm in trace.arm_latencies_ms}))
-    recall_latency = max((sum(trace.arm_latencies_ms.values()) for trace in traces), default=0)
+    arms = tuple(sorted({arm for trace in traces for arm in trace.arms_ran}))
+    recall_latency = max((trace.recall_latency_ms or 0 for trace in traces), default=0)
     within = None
     if probe.latency_ceiling_ms is not None:
         within = recall_latency <= probe.latency_ceiling_ms

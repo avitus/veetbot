@@ -238,9 +238,6 @@ WHERE expiring.id IN (
 """
 
 
-_RECALL_ARMS = ("structured", "lexical", "semantic")
-
-
 def trace_summary(trace: RecallTrace) -> dict[str, Any]:
     """The identifier-free figures the health report reads instead of the trace.
 
@@ -258,9 +255,8 @@ def trace_summary(trace: RecallTrace) -> dict[str, Any]:
         "returned": returned.model_dump(mode="json"),
         "dropped": dropped.model_dump(mode="json"),
     }
-    arms = [arm for arm in _RECALL_ARMS if arm in trace.arm_latencies_ms]
-    if arms:
-        summary["arms"] = arms
+    if trace.arms_ran:
+        summary["arms"] = list(trace.arms_ran)
     if "total" in trace.arm_latencies_ms:
         summary["latency_ms"] = trace.arm_latencies_ms["total"]
     return summary

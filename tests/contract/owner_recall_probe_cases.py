@@ -280,6 +280,10 @@ def assert_delivery_report(report: ProbeReport, car: MemoryRecord) -> None:
         assert path.run_id is not None and path.trace_ids
         assert path.run_status == "COMPLETED"
         assert path.elapsed_ms >= 0 and path.within_latency_ceiling is True
+        # A trace also times its stages; those are not arms and must not be
+        # reported as arms or added to the recall's latency a second time.
+        assert "lexical" in path.arms
+        assert set(path.arms) <= {"structured", "lexical", "semantic"}
         (evidence,) = path.evidence
         assert evidence.belief_id == car.id
         assert evidence.stage == "delivered"

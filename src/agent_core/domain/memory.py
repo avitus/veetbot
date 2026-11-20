@@ -1348,6 +1348,10 @@ TRACE_BELIEF_ID_FIELDS: tuple[str, ...] = (
 )
 # A trace keeps at most this many ranked candidates; recall fetches fewer.
 RANKED_CANDIDATES_LIMIT = 512
+# The arms a recall can run. A trace's timings also name its stages and its
+# total, so a reader asks the trace for `arms_ran` and `recall_latency_ms`
+# instead of iterating or summing the timings.
+RECALL_ARMS: tuple[str, ...] = ("structured", "lexical", "semantic")
 
 
 class RecallClassCounts(BaseModel):
@@ -1438,6 +1442,26 @@ class RecallTrace(BaseModel):
             or self.dropped_for_budget
             or self.ranked_candidates
         )
+
+    @property
+    def arms_ran(self) -> tuple[str, ...]:
+        """The recall arms this trace timed, without its stages or its total."""
+
+        return tuple(arm for arm in RECALL_ARMS if arm in self.arm_latencies_ms)
+
+    @property
+    def recall_latency_ms(self) -> int | None:
+        """The whole recall's time, or None once the operator tier has expired.
+
+        A trace recorded before stages were timed has no total; its arms'
+        sum is the only figure it ever held.
+        """
+
+        if not self.arm_latencies_ms:
+            return None
+        if "total" in self.arm_latencies_ms:
+            return self.arm_latencies_ms["total"]
+        return sum(self.arm_latencies_ms[arm] for arm in self.arms_ran)
 
     @property
     def considered_not_shown(self) -> int:
