@@ -38,8 +38,13 @@ revision instruction. Never invent decisions, availability, promises or reviewed
 attachment contents. requires_attachments must be true when the reply needs files.
 Return research queries with an empty body while facts/files are missing. When
 ready, return a concise body and the selected candidate ids, with all query lists
-empty. A preparation_issue reports missing/ambiguous required material to the owner;
-it is not text to send. Do not pretend a failed or incomplete read proves absence.
+empty. A preparation_issue reports a required file or source that remains missing
+or ambiguous after research. It blocks the reply and is not text to send; keep it
+null while requesting research and whenever you return a body. A decision,
+preference, approval or availability only the owner can give is never a
+preparation_issue. Still write the reply: answer what the evidence supports and
+leave that point open, saying the owner will confirm it, or ask the correspondent
+when they can settle it. Do not pretend a failed or incomplete read proves absence.
 You have at most two research rounds, three mail queries, five source threads, two
 calendar windows and ten total read calls including staging. Use targeted queries.
 research_budget reports remaining reads. Each selected file needs one staging read.
@@ -546,13 +551,23 @@ class DraftResearch:
                 plan = result
                 self.state["plans"].append(plan.model_dump(mode="json"))
                 await checkpoint(c, "email_research_planned")
-            if plan.preparation_issue:
+            researching = bool(
+                plan.mail_queries or plan.calendar_queries or plan.memory_queries or plan.source_ids
+            )
+            # A reported missing file or source blocks. A note beside further read
+            # requests, or beside a finished reply that needs no files, does not:
+            # research has not ended, or the owner reviews that reply as written.
+            if (
+                plan.preparation_issue
+                and (round_number == 2 or not researching)
+                and (not plan.body.strip() or plan.requires_attachments or plan.attachment_ids)
+            ):
                 # Model-authored private diagnostics are not durable exception text.
                 raise DraftPreparationError(
                     "Required reply materials are missing or ambiguous. "
                     "Existing edits are preserved."
                 )
-            if plan.mail_queries or plan.calendar_queries or plan.memory_queries or plan.source_ids:
+            if researching:
                 if round_number == 2:
                     raise DraftPreparationError(
                         "Reply research reached its planning limit. Existing edits are preserved."

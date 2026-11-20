@@ -886,6 +886,117 @@ async def test_missing_or_ambiguous_materials_preserve_existing_owner_draft(
             assert await uow.invocations.list_for_run(operation.run_id, app.principal) == []
 
 
+async def test_note_beside_a_ready_text_reply_keeps_the_reply() -> None:
+    """A finished reply that needs no files is not discarded for the planner's note."""
+    plan = {
+        "body": "Thank you, I have received this.",
+        "preparation_issue": "Acknowledgment only. A preference on meeting is not established.",
+    }
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(turns=[ScriptedTurn(text=json.dumps(plan))]),
+        mcp_client_factory=await _mailbox_factory([]),
+    ) as app:
+        service = await prepare(app)
+        thread = await service.import_thread(app.principal, "work", observation(), uuid4())
+        operation = await service.submit_task(app.principal, kind="draft", thread_id=thread.id)
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        detail = cast(dict[str, Any], await service.thread(app.principal, thread.id))
+        assert detail["draft"]["body"] == plan["body"]
+        assert detail["preparation_issue"] is None
+
+
+async def test_issue_beside_research_requests_does_not_end_research() -> None:
+    """A plan that still asks for reads has not yet shown that anything is missing."""
+    source = observation(body="The Cedar board meeting is January 4. No files are needed.")
+    source["thread_id"] = "meeting-source"
+    source["messages"][0].update(id="meeting-message", thread_id="meeting-source")
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                text=json.dumps(
+                    {
+                        "mail_queries": [
+                            {
+                                "account_id": "work",
+                                "query": "Cedar board",
+                                "reason": "Find the meeting date",
+                            }
+                        ],
+                        "preparation_issue": "The meeting date must be checked first.",
+                    }
+                )
+            ),
+            ScriptedTurn(text='{"body":"The Cedar board meeting is January 4."}'),
+        ]
+    )
+    factory = await _mailbox_factory(
+        [
+            ("get_profile", {"email_address": "owner@example.com"}),
+            ("search_threads", {"threads": [{"thread_id": "meeting-source"}]}),
+            ("get_thread_page", source),
+        ]
+    )
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=script,
+        mcp_client_factory=factory,
+    ) as app:
+        service = await prepare(app)
+        thread = await service.import_thread(
+            app.principal, "work", observation(body="When is the Cedar board meeting?"), uuid4()
+        )
+        operation = await service.submit_task(app.principal, kind="draft", thread_id=thread.id)
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        detail = cast(dict[str, Any], await service.thread(app.principal, thread.id))
+        assert detail["draft"]["body"] == "The Cedar board meeting is January 4."
+
+
+async def test_issue_beside_a_reply_that_needs_files_still_blocks() -> None:
+    """A reported missing file blocks even when the planner also wrote a body."""
+    plan = {
+        "body": "Two of the three decks are attached.",
+        "requires_attachments": True,
+        "preparation_issue": "The third deck was not found.",
+    }
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(turns=[ScriptedTurn(text=json.dumps(plan))]),
+        mcp_client_factory=await _mailbox_factory([]),
+    ) as app:
+        service = await prepare(app)
+        thread = await service.import_thread(app.principal, "work", observation(), uuid4())
+        operation = await service.submit_task(app.principal, kind="draft", thread_id=thread.id)
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.FAILED
+        detail = cast(dict[str, Any], await service.thread(app.principal, thread.id))
+        assert detail["draft"] is None
+        assert detail["preparation_issue"].startswith(
+            "Required reply materials are missing or ambiguous."
+        )
+
+
+async def test_planner_is_told_an_owner_decision_is_not_a_preparation_issue() -> None:
+    """The planner drafts around a decision only the owner can make (email-experience.md)."""
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=FakeModelScript(turns=[ScriptedTurn(text='{"body":"Let me come back to you."}')]),
+        mcp_client_factory=await _mailbox_factory([]),
+    ) as app:
+        service = await prepare(app)
+        thread = await service.import_thread(app.principal, "work", observation(), uuid4())
+        operation = await service.submit_task(app.principal, kind="draft", thread_id=thread.id)
+        assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
+        provider = app.executor._model_provider
+        assert isinstance(provider, FakeModelProvider)
+        request = provider.requests[0]
+        sent = " ".join(request.model_dump_json().replace("\\n", " ").split())
+        assert "only the owner can give is never a preparation_issue" in sent
+        assert "Still write the reply" in sent
+        assert request.response_schema is not None
+        field = request.response_schema["properties"]["preparation_issue"]
+        assert "null whenever body is set" in field["description"]
+
+
 async def test_research_stops_at_three_mail_queries_without_saving_partial_reply() -> None:
     queries = [
         {"account_id": "work", "query": f"board version {n}", "reason": "Find the current deck"}

@@ -829,6 +829,13 @@ supplements within budget; describe exactly the materials attached without claim
 an unverified complete packet. An explicitly requested or otherwise essential
 missing document still blocks preparation, as does an unfinished required source.
 
+A planner-reported preparation issue names only a required file or source. It
+blocks when the plan has no reply text or the reply needs files, and not while the
+plan still requests reads with a planning round remaining. A decision only the
+owner can give is not a preparation issue: the reply is still drafted and leaves
+that point open without inventing it. A note beside a finished reply that needs
+no files does not discard that reply.
+
 Set `AGENT_EMAIL_OWNER_TIMEZONE` to the owner’s IANA zone for planning, including
 mail-only preparation. When unset, selected-calendar metadata supplies the zone
 before the first planning call; if neither is available, the zone remains explicitly
