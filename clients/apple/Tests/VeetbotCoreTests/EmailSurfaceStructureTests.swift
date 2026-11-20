@@ -122,7 +122,11 @@ import Testing
         #expect(source.contains("private func draftWell("))
         #expect(source.contains("envelopeRow(\"From\")"))
         #expect(!source.contains("Text(\"From: \\(accountDescription("))
-        #expect(source.contains(".stroke(AppTheme.hairlineStrong)\n                .allowsHitTesting(false)"))
+        let editor = try #require(source.components(separatedBy: "private func draftWell(").last?.components(separatedBy: "private func draftActions(").first)
+        #expect(!editor.contains("RoundedRectangle"))
+        #expect(source.contains("sendUndoUntil"))
+        #expect(!source.contains("Button(\"Save & close\")"))
+        #expect(!source.contains("You can still take it back for"))
         #expect(source.contains(".menuIndicator(.hidden)"))
         for identifier in [
             "email.draft-to", "email.draft-envelope", "email.draft-history", "email.endorse-style",

@@ -1244,7 +1244,12 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(app.buttons["email.keyboard-done"])
         #endif
         activate(app.buttons["email.save-close"])
-        XCTAssertTrue(app.buttons["email.send-undo"].waitForExistence(timeout: 5))
+        let undo = app.buttons["email.send-undo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertEqual(undo.label, "Undo")
+        activate(undo)
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertEqual(editor.value as? String, "My reply.")
     }
 
     /// Exercises the same native controls with a deterministic dark appearance.
@@ -1314,6 +1319,10 @@ final class ConversationNavigationUITests: XCTestCase {
         if app.launchArguments.contains("--ui-testing-email-no-draft") {
             XCTAssertFalse(app.textViews["email.draft-body"].exists, "The regression starts without a draft")
         }
+        let aiDraft = app.buttons["email.draft-with-veetbot"]
+        XCTAssertTrue(aiDraft.isHittable, "The two composition choices stay side by side")
+        XCTAssertLessThan(aiDraft.frame.height, 80)
+        XCTAssertEqual(reply.frame.midY, aiDraft.frame.midY, accuracy: 2)
         activate(reply)
         let editor = app.textViews["email.draft-body"]
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
@@ -1321,10 +1330,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(editor.value as? String, "", "Reply must never insert an AI suggestion")
         attachEmailScreenshot("Reply composer")
         XCTAssertFalse(app.buttons["email.send"].isEnabled, "An empty reply cannot be sent")
-        let aiDraft = app.buttons["email.draft-with-veetbot"]
-        XCTAssertTrue(aiDraft.isHittable, "The two composition choices stay side by side")
-        XCTAssertLessThan(aiDraft.frame.height, 80)
-        XCTAssertEqual(reply.frame.midY, aiDraft.frame.midY, accuracy: 2)
+        XCTAssertFalse(aiDraft.exists)
         // Reply focuses the body: typing goes straight into the manual composer.
         app.typeText("My own reply.")
         XCTAssertEqual(editor.value as? String, "My own reply.")
@@ -1332,9 +1338,13 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(app.buttons["email.keyboard-done"])
         #endif
         XCTAssertTrue(app.buttons["email.send"].isHittable)
+        activate(app.buttons["email.save-close"])
+        XCTAssertTrue(aiDraft.waitForExistence(timeout: 5))
         activate(aiDraft)
-        XCTAssertTrue(app.staticTexts["Veetbot draft"].waitForExistence(timeout: 5))
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
         XCTAssertEqual(editor.value as? String, "Thanks, Alex. I'll review the agenda.")
+        activate(app.buttons["email.save-close"])
+        XCTAssertTrue(reply.waitForExistence(timeout: 5))
         XCTAssertTrue(NSPredicate(format: "enabled == true").evaluate(with: reply)
             || XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: reply)], timeout: 5) == .completed)
         activate(reply)
@@ -1345,6 +1355,7 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(app.buttons["email.keyboard-done"])
         #endif
         let saveClose = app.buttons["email.save-close"]
+        XCTAssertEqual(saveClose.label, "Close draft")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "enabled == true"), object: saveClose)], timeout: 5), .completed)
         activate(saveClose)
