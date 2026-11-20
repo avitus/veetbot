@@ -3,8 +3,9 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, Field
+from pydantic import AwareDatetime, Field, model_validator
 
+from agent_core.domain.email_signature import SIGNATURE_NAMESPACE
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.people import (
     PeopleCommitment,
@@ -33,6 +34,13 @@ class AddPersonAlias(PeopleValue):
     namespace: str = Field(default="owner", min_length=1, max_length=100)
     context: str = Field(default="owner", max_length=200)
     valid_from: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def owner_namespace(self) -> "AddPersonAlias":
+        if self.namespace == SIGNATURE_NAMESPACE:
+            # ADR-0336: only a sender's own signature writes there.
+            raise ValueError("the signature namespace is reserved")
+        return self
 
 
 class EndPersonAlias(PeopleValue):

@@ -42,6 +42,8 @@ def email_people_implementation_digest() -> str:
         "memory/email_people.py",
         "memory/email_people_evidence.py",
         "memory/people_correspondence.py",
+        "memory/people_signatures.py",
+        "domain/email_signature.py",
         "memory/email_semantics.py",
         "runtime/email_tasks.py",
         "runtime/email_assessment.py",

@@ -6,12 +6,14 @@ survives; the client always offers the unchanged retained source alongside this 
 
 import re
 from dataclasses import dataclass, field
-from email.utils import parseaddr
 from html import unescape
 from html.parser import HTMLParser
 from itertools import groupby
 from urllib.parse import urlsplit
 
+from agent_core.domain.email_signature import HISTORY as _HISTORY
+from agent_core.domain.email_signature import SIGNATURE_LINES as _SIGNATURE_LINES
+from agent_core.domain.email_signature import named_signature, sender_name
 from agent_core.domain.web import is_public_https_url
 
 _INVISIBLE = str.maketrans("", "", "\u00ad\u034f\u200b\ufeff")
@@ -42,14 +44,6 @@ _REPEATED_BLOCK_LINES = 3
 # How Gmail, Outlook and Apple Mail mark the signature they insert.
 _SIGNATURE_CLASSES = frozenset({"gmail_signature", "gmail_signature_prefix"})
 _SIGNATURE_IDS = frozenset({"signature", "ms-outlook-mobile-signature", "applemailsignature"})
-# A longer block under a delimiter or a name is the message, not a signature.
-_SIGNATURE_LINES = 12
-_SIGNATURE_LINE_WIDTH = 100
-# What may follow a signature: the reply or forward it was written above.
-_HISTORY = re.compile(
-    r"On\s.*(?:\d{4}|wrote:)|-{2,}.*|_{5,}|From:\s.*|Begin forwarded message:.*", re.I
-)
-_POSTSCRIPT = re.compile(r"P\.?\s?S\b", re.I)
 _DESTINATION = re.compile(r"\]\(https?://[^\s)]*\)")
 _HOST_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)\\?")
 
@@ -221,47 +215,19 @@ def _without_named_signature(lines: list[str], sender: str) -> list[str]:
 
     The name alone is a sign-off and stays. Prose, a postscript or a long block
     under it is the message, and so is anything followed by more than history.
+    People reads the same block for a sender's contact details (ADR-0336).
     """
-    name = " ".join(parseaddr(sender)[0].split()).casefold()
-    if len(name.split()) < 2:
+    name = sender_name(sender)
+    found = named_signature(lines, name, visible=_visible) if name else None
+    if found is None:
         return lines
-    for index, line in enumerate(lines):
-        # A cheap bound first: the scan must stay linear on a hostile long line.
-        if line.startswith(">") or not len(name) <= len(line) <= len(name) + 8:
-            continue
-        if _visible(line).casefold() != name:
-            continue
-        if index and lines[index - 1].rstrip("\\").endswith(":"):
-            # A line ending in a colon introduces a list the name belongs to.
-            continue
-        end = index + 1
-        block = 0
-        while end < len(lines):
-            following = lines[end]
-            if following.startswith(">") or (
-                len(following) < 400 and _HISTORY.match(following) and following.strip("-_ ")
-            ):
-                break
-            if following:
-                text = "" if len(following) > 2000 else _visible(following)
-                block += 1
-                if (
-                    block > _SIGNATURE_LINES
-                    or not 0 < len(text) <= _SIGNATURE_LINE_WIDTH
-                    or _POSTSCRIPT.match(text)
-                    or (len(text.split()) > 8 and text[-1] in ".?!")
-                ):
-                    block = 0
-                    break
-            end += 1
-        if block:
-            # An HTML signature's delimiter is its own paragraph above the name.
-            start = index
-            while start and not lines[start - 1]:
-                start -= 1
-            start = start - 1 if start and lines[start - 1].rstrip("\\") == "--" else index
-            return [*lines[:start], *[""] * (end - start), *lines[end:]]
-    return lines
+    index, end = found
+    # An HTML signature's delimiter is its own paragraph above the name.
+    start = index
+    while start and not lines[start - 1]:
+        start -= 1
+    start = start - 1 if start and lines[start - 1].rstrip("\\") == "--" else index
+    return [*lines[:start], *[""] * (end - start), *lines[end:]]
 
 
 def _with_line_breaks(lines: list[str], flowing: set[int]) -> list[str]:

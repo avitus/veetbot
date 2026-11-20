@@ -1,3 +1,8 @@
+# ADR-0336: On 2026-11-20 the owner asked that an email signature update the
+# sender's contact details in People. A DMARC-passing sender already in People
+# gains the phone numbers and title line of their own signature as contextual
+# rows in a reserved namespace that never identify or merge anyone. Offline
+# tests only; no real mailbox run. Proposed; no milestone or gate moves.
 # ADR-0335: On 2026-11-20 the owner asked for GPT-6.2 Astra as a chat model
 # choice and a prefix-aware integration. The `astra-6-2` policy is selectable
 # (ADR-0119); event-sourced items keep their envelope nonce at any position so

@@ -167,7 +167,7 @@ number. Mutable resources have positive revisions and optimistic concurrency.
 | Value or table | Core fields and responsibility |
 | --- | --- |
 | `Person` | UUID, owner scope, display label, state (`provisional`, `active`, `merged`), revision, created/updated times. Identity presence is separate from confidence in individual facts. |
-| `PersonIdentifier` | Person, kind, provider namespace, normalized value, sensitivity, source support, assignment interval, and verification state. Names are search aliases; addresses and handles are contact identifiers. |
+| `PersonIdentifier` | Person, kind, provider namespace, normalized value, sensitivity, source support, assignment interval, and verification state. Names are search aliases; addresses and handles are contact identifiers. The `signature` namespace holds what a sender's own email signature states and is display only (ADR-0336). |
 | `PersonMention` | Source reference, exact span or validated header location, contextual role, proposed/resolved person, ambiguity state, and resolver version. Can exist without creating a directory entry. |
 | `PersonMemoryLink` | Person, existing belief ID, semantic role (`subject`, `object`, `speaker`, `mentioned`), source support, and revision. One belief can link several people. |
 | `RelationshipAssertion` | Backing belief ID, typed source and target references, predicate, directed roles, effective interval with precision, and assertion revision. Authority and sensitivity come from the backing evidence, not a separate confidence score. |
@@ -301,6 +301,59 @@ Possessives alone ("My sister met Jules") do not establish owner participation.
 Unresolved endpoints do not bypass commitment source and terminal-state
 validation; the atomic fact can remain without a People projection.
 
+### Contact details from a sender's signature
+
+A sender's own email signature updates that sender's contact details
+([ADR-0336](../adr/0336-sender-signatures-update-people-contact-details.md)).
+It is the sender's claim about themselves, so it is shown and never used to
+identify anyone. No model is involved.
+
+**What is read.** The block is the one the Email reader leaves out by its
+third sign ([email-experience.md](email-experience.md)): in the retained plain
+body, a line that is exactly the From display name of two or more words, with
+the short lines under it. For People that name line must also sit above the
+first quoted line, reply header or forward header, so a signature inside
+quoted history or a forward is never read. Two details are taken:
+
+- each phone number, written with a `+` or in the ten-digit North American
+  shape, at most four, skipping one written after a fax label;
+- the line directly under the name, such as "Partner, Scale", unless it holds
+  a digit, an address or a link, or begins "Sent from".
+
+Organisations, links and postal addresses are not taken, and no relationship,
+organization reference or belief is formed from a signature.
+
+**When it is read.** Only for received mail whose `sender_check` is `pass`,
+whose thread page holds the complete body, and whose From address resolves at
+its sent time to one person already in People whose assignment the owner has
+not ended. Role mailboxes, the owner's own mail, drafts and senders not yet in
+People contribute nothing. The person is chosen by the authenticated address,
+never by the display name.
+
+**What is stored.** One `PersonIdentifier` per detail per message, with that
+message as its only source: kind `phone` or `role`, namespace `signature`,
+context "email signature", verification `contextual`, valid from the
+message's sent time. The value is the exact text of the retained body. A
+number is never converted to E.164, because a signature gives no country;
+inside the namespace two spellings of one number compare by their digits.
+
+**What it can never do.** The `signature` namespace is reserved and display
+only. Identity resolution refuses it, the duplicate pass ignores it, and it
+never selects Chat context, so a shared office number neither merges two
+people nor attributes a text or a call. A model-proposed mention or an owner
+alias naming the namespace is refused. The owner makes a number an identifier
+by adding it to the person, as before.
+
+**Change and removal.** These rows do not take the thirty-day horizon of
+mail-formed facts; they last while their source mail supports them. Titles and
+phone numbers are replaced separately: a later message that states a different
+title ends the earlier one at its sent time, and a later message that states
+numbers ends an earlier number it omits. A signature without a title, or
+without numbers, ends nothing. The rule compares sent times, so the current
+details are the same whatever order mail is processed in. A detail the owner
+ended is never added again. Erasing or excluding a message removes its copies, and a detail that
+other retained messages also stated remains on theirs.
+
 ### Merge and split
 
 Owner-confirmed merge is an atomic, revision-checked operation with a preview
@@ -433,7 +486,7 @@ observed communications have visibly different attribution.
 | Source | Admission and attribution |
 | --- | --- |
 | Owner Chat and authenticated paired-surface messages | Owner assertions under existing identity and formation gates. “Maya told me…” remains an owner report of Maya's statement, not direct evidence of its truth. A named person joins People only when the claim ties them to the owner (ADR-0121). |
-| First-party Gmail received/Sent evidence | Existing account-qualified contracts, exact message spans, sender/recipient roles, quoted/forwarded attribution, and semantic-policy activation. Sent placement alone does not prove personal authorship. Bulk mail is not a source: a thread the unsubscribe census indexes, or one the assessment marks `bulk`, registers no source, forms nothing, projects no correspondence, and creates no provisional person (ADR-0116). Mail forms facts, not identities: a name in a message body links to someone already in People or stays an unresolved mention, and correspondence adds only the named recipients of mail the owner sent (ADR-0121). Each correspondence record carries a short summary generated from its verified message passage (ADR-0126). |
+| First-party Gmail received/Sent evidence | Existing account-qualified contracts, exact message spans, sender/recipient roles, quoted/forwarded attribution, and semantic-policy activation. Sent placement alone does not prove personal authorship. Bulk mail is not a source: a thread the unsubscribe census indexes, or one the assessment marks `bulk`, registers no source, forms nothing, projects no correspondence, and creates no provisional person (ADR-0116). Mail forms facts, not identities: a name in a message body links to someone already in People or stays an unresolved mention, and correspondence adds only the named recipients of mail the owner sent (ADR-0121). Each correspondence record carries a short summary generated from its verified message passage (ADR-0126). A known sender's own signature adds their phone numbers and title line as display-only contact details (ADR-0336). |
 | Device SMS | Existing admitted receipt/channel metadata. Rich body-derived facts require a separately evaluated amendment to the current metadata-only memory adapter; do not duplicate the SMS body into another event. |
 | Existing memories and integrated episodes | Deterministic indexing of valid support; re-extraction of old source text only through the explicit bounded replay/import contract. Summaries are not new independent evidence. |
 | Calendar, contacts, arbitrary web/MCP, public callers, assistant output | No new admission. Milestone 27 call-derived memory remains excluded. Generated drafts and Veetbot's own person summaries never corroborate themselves. |

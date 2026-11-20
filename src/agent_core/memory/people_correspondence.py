@@ -31,6 +31,7 @@ from agent_core.domain.people import (
 )
 from agent_core.memory.people import resolve_identity
 from agent_core.memory.people_formation import _Common, email_source_id
+from agent_core.memory.people_signatures import project_signature
 from agent_core.ports.persistence import RepositoryUnitOfWork
 
 # The most unattached endpoints a first reply adopts into a person's history,
@@ -490,6 +491,9 @@ async def project_correspondence(
             )
         if person_id is None:
             continue
+        if not outgoing and found.ends is None and not is_role_mailbox(address):
+            # ADR-0336: the sender's own signature updates their contact details.
+            await project_signature(uow, principal, source, header, person_id, sid, now, common)
         if found.adoptable:
             # Mail received before the owner first wrote to this person joins their history.
             await _adopt_received_history(

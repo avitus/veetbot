@@ -227,6 +227,12 @@ memory formation read. Three signs identify one, and nothing else does:
 The comparison of the two alternatives above uses the HTML with its signature, so
 the plain part's copy is never preserved as missing prose.
 
+People reads the third sign's block from the retained plain body to update a
+known sender's contact details
+([ADR-0336](../adr/0336-sender-signatures-update-people-contact-details.md));
+the rule and its limits are in
+[people-and-relationships.md](people-and-relationships.md#contact-details-from-a-senders-signature).
+
 Native text renders the result across the available Mac reader width, keeping
 its edge padding; iPhone and iPad retain their bounded reading width. External
 HTTP(S) links open only by a user gesture, with a **Show original** toggle for
