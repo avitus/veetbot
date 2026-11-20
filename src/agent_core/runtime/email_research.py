@@ -47,7 +47,8 @@ leave that point open, saying the owner will confirm it, or ask the corresponden
 when they can settle it. Do not pretend a failed or incomplete read proves absence.
 You have at most two research rounds, three mail queries, five source threads, two
 calendar windows and ten total read calls including staging. Use targeted queries.
-research_budget reports remaining reads. Each selected file needs one staging read.
+research_budget reports remaining reads and source threads; with no source threads
+left, no further match can be read. Each selected file needs one staging read.
 Search reads yield after finding a file-bearing source so you can select the needed
 files before spending their allowance on unrelated results. unread_sources contains
 observed search matches you may read by source_ids; choose by organization, date and
@@ -71,6 +72,13 @@ application selects recipients and saves an internal proposal; nothing is sent."
 
 class _ResearchReadLimitError(DraftPreparationError):
     """Discovery yields to planning; required file staging still fails closed."""
+
+
+class _ResearchSourceLimitError(DraftPreparationError):
+    """Matches beyond the source-thread allowance stay unread; planning decides the rest."""
+
+
+SOURCE_THREAD_LIMIT = 5
 
 
 class DraftResearch:
@@ -234,6 +242,9 @@ class DraftResearch:
                     "source_date": message.sent_at.isoformat(),
                 }
 
+    def sources_remaining(self) -> int:
+        return max(0, SOURCE_THREAD_LIMIT - len(self.state.get("admitted_sources", [])))
+
     def admit(self, category: str, key: str, limit: int) -> None:
         """Retries reuse admissions rather than exhausting a second allowance."""
         keys = self.state.setdefault("admitted_" + category, [])
@@ -294,6 +305,29 @@ class DraftResearch:
                     self.state["evidence"].append(
                         {"kind": "calendar", "available": True, "result": calendar_result}
                     )
+        try:
+            await self._gather_mail(plan, round_number)
+        except _ResearchSourceLimitError:
+            self.state["evidence"].append(
+                {
+                    "kind": "research_budget",
+                    "complete": False,
+                    "issue": "The source thread allowance is spent; remaining matches are unread.",
+                }
+            )
+        for index, memory_query in enumerate(plan.memory_queries):
+            if not memory_query.strip() or len(memory_query) > 1024:
+                raise DraftPreparationError("The memory research query is invalid.")
+            result = await self.call(
+                None,
+                "memory.search",
+                {"text": memory_query, "scope": "general"},
+                f"{round_number}:memory:{index}",
+            )
+            self.state["evidence"].append({"kind": "memory", "result": result})
+
+    async def _gather_mail(self, plan: DraftResearchPlan, round_number: int) -> None:
+        """Selected sources, then searches; a spent source allowance ends both."""
         for identifier in dict.fromkeys(plan.source_ids):
             offered = self.state.get("offered_sources", {}).get(identifier)
             if offered is None:
@@ -343,24 +377,20 @@ class DraftResearch:
                     break
             if found_files:
                 break
-        for index, memory_query in enumerate(plan.memory_queries):
-            if not memory_query.strip() or len(memory_query) > 1024:
-                raise DraftPreparationError("The memory research query is invalid.")
-            result = await self.call(
-                None,
-                "memory.search",
-                {"text": memory_query, "scope": "general"},
-                f"{round_number}:memory:{index}",
-            )
-            self.state["evidence"].append({"kind": "memory", "result": result})
 
     async def read_source(self, account: str, provider_id: str) -> bool:
         """Read one observed source completely before offering any of its files."""
         source_key = f"{account}:{provider_id}"
         if source_key in self.state.get("seen_sources", []):
             return False
+        if (
+            source_key not in self.state.get("admitted_sources", [])
+            and not self.sources_remaining()
+        ):
+            # Checked before the mailbox read below, so a refused source costs no read.
+            raise _ResearchSourceLimitError("Reply research reached its sources limit.")
         server = await self.verify_account(account)
-        self.admit("sources", source_key, 5)
+        self.admit("sources", source_key, SOURCE_THREAD_LIMIT)
         observed = await self.call(
             server,
             "get_thread_page",
@@ -536,6 +566,7 @@ class DraftResearch:
                 "calendar_available": "mcp.calendar_read.use" in c.principal.scopes,
                 "research_budget": {
                     "reads_remaining": max(0, 10 - len(self.state["reads"])),
+                    "sources_remaining": self.sources_remaining(),
                     "staging_reads_reserved": self.state.get("staging_reserve", 0)
                     + len(self.reserved_accounts()),
                 },

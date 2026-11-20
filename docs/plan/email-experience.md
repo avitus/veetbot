@@ -822,6 +822,9 @@ remaining reads and observed unread search matches, and may select those matches
 by opaque IDs in the next round. Reserve reads for selected files, and for verifying
 any mailbox of theirs not yet verified, before optional further discovery; identical governed reads reuse durable results. Admit the whole
 selected staging set before downloading any of it. All existing caps remain.
+Reaching the five-source cap ends that round's mail discovery without failing
+preparation: later matches stay unread, the evidence says so, and planning receives
+the remaining source allowance and decides whether the reply can be written.
 A general request for meeting materials refers to the relevant documents actually
 circulated. A source's promise of a future supplement alone does not establish
 that it was circulated or that the requester requires it. Search for relevant
