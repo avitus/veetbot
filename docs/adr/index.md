@@ -8,7 +8,7 @@ title: Architecture Decisions
 - [ADR-0333: Readiness checks before reviewed browser actions (Accepted)](0333-browser-workflow-action-readiness.md)
 - [ADR-0334: Explicit evidence requirements for workflow extraction (Accepted)](0334-browser-workflow-extraction-requirements.md)
 - [ADR-0335: An item read from the event log keeps its envelope nonce at any position (Proposed)](0335-event-sourced-envelope-nonces.md)
-- [ADR-0336: A sender's own signature updates their contact details in People (Proposed)](0336-sender-signatures-update-people-contact-details.md)
+- [ADR-0336: A sender's own signature updates their contact details in People (Accepted)](0336-sender-signatures-update-people-contact-details.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the

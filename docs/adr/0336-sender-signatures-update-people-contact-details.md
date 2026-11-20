@@ -1,6 +1,6 @@
 # ADR-0336: A sender's own signature updates their contact details in People
 
-- Status: Proposed (owner-requested, 2026-11-20)
+- Status: Accepted (owner, 2026-11-20)
 - Date: 2026-11-20
 - Related: ADR-0100, ADR-0116, ADR-0121, ADR-0125, ADR-0126, ADR-0165; Sections
   4, 5, 7 and 10 of `docs/plan/people-and-relationships.md`
