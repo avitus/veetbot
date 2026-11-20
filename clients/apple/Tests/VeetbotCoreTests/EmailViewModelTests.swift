@@ -1028,6 +1028,48 @@ import SwiftUI
         #expect(requests.snapshot.filter { $0.httpMethod == "POST" }.count == 1)
     }
 
+    /// A pending archive keeps every count on screen, less the conversation it hid.
+    @Test(arguments: ["completed", "failed"])
+    func testCollectionCountsStayVisibleWhileArchivePending(outcome: String) async throws {
+        let requests = EmailRequestRecorder()
+        let statusRead = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), nil) }
+            let requested = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
+            let archived = requested && outcome == "completed"
+            let row = self.archiveThreadJSON(inInbox: !archived, status: requested ? outcome : nil)
+            if request.url!.path.hasSuffix("threads") {
+                let counts = archived
+                    ? "{\"priority\":6,\"inbox\":22,\"needs_you\":8,\"handled\":4,\"suspected_spam\":2}"
+                    : "{\"priority\":7,\"inbox\":23,\"needs_you\":9,\"handled\":4,\"suspected_spam\":2}"
+                return (200, "{\"items\":[\(archived ? "" : row)],\"next_cursor\":null,"
+                    + "\"collection_counts\":\(counts),\"total_count\":\(archived ? 6 : 7)}", nil)
+            }
+            return (200, row, requested ? statusRead : nil)
+        }
+        defer { statusRead.release(); model.resetConnection() }
+        await model.reload()
+        #expect(model.collectionCounts?.inbox == 23)
+        #expect(model.listTotal == 7)
+        let row = try #require(model.items.first)
+        let archiving = Task { await model.setThreadArchived(row, archived: true) }
+        try await waitForEmailTestCondition { statusRead.isWaiting }
+        #expect(model.items.isEmpty)
+        // The hidden row was Important, in Inbox and awaiting a reply; it was neither handled nor suspected spam.
+        #expect(model.collectionCounts == EmailCollectionCounts(
+            inbox: 22, needsYou: 8, handled: 4, priority: 6, suspectedSpam: 2))
+        #expect(model.listTotal == 6)
+        statusRead.release()
+        await archiving.value
+        let restored = outcome == "failed"
+        #expect(model.collectionCounts == EmailCollectionCounts(
+            inbox: restored ? 23 : 22, needsYou: restored ? 9 : 8, handled: 4,
+            priority: restored ? 7 : 6, suspectedSpam: 2))
+        #expect(model.listTotal == (restored ? 7 : 6))
+    }
+
     /// A clearly labelled archive gesture must reach the originating thread's remote command.
     @Test(arguments: ["personal", "work"])
     func testArchiveUsesAccountBoundCommandAndPreservesDraft(account: String) async throws {

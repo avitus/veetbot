@@ -145,12 +145,50 @@ public final class EmailViewModel: ObservableObject {
         projectionGeneration = UUID()
     }
     @Published private var loadedCollectionCounts: EmailCollectionCounts?
-    /// A pending optimistic mailbox change makes the last confirmed counts stale.
+    /// Inbox conversations the confirmed counts include although a pending archive may hide them.
+    @Published private var countedPendingArchives: [UUID: EmailThreadView] = [:]
+    /// The last confirmed counts, less each conversation a pending archive has hidden,
+    /// so the totals match the rows on screen instead of vanishing until Gmail confirms.
     public var collectionCounts: EmailCollectionCounts? {
-        archiveHiddenThreads.isEmpty ? loadedCollectionCounts : nil
+        guard let counts = loadedCollectionCounts else { return nil }
+        return EmailCollectionCounts(
+            inbox: withoutHiddenArchives(counts.inbox, in: EmailCollection.inbox.rawValue),
+            needsYou: withoutHiddenArchives(counts.needsYou, in: EmailCollection.needsYou.rawValue),
+            handled: withoutHiddenArchives(counts.handled, in: EmailCollection.handled.rawValue),
+            priority: counts.priority.map { withoutHiddenArchives($0, in: "priority") },
+            suspectedSpam: counts.suspectedSpam.map { withoutHiddenArchives($0, in: "suspected_spam") })
     }
     @Published private var loadedListTotal: Int?
-    var listTotal: Int? { archiveHiddenThreads.isEmpty ? loadedListTotal : nil }
+    var listTotal: Int? { loadedListTotal.map { withoutHiddenArchives($0, in: queryListView) } }
+
+    private func withoutHiddenArchives(_ count: Int, in view: String) -> Int {
+        let hidden = countedPendingArchives.values.filter {
+            archiveHiddenThreads.contains($0.id) && archiveErrors[$0.id] == nil && Self.isCounted($0, in: view)
+        }
+        return max(0, count - hidden.count)
+    }
+
+    /// Whether the server counts an Inbox conversation in a view. The two thresholds mirror
+    /// its Important relevance threshold and Inbox relevance floor (ADR-0329).
+    private static func isCounted(_ row: EmailThreadView, in view: String) -> Bool {
+        switch view {
+        case "priority": return row.priority >= 0.7 && !row.isHandled
+        case EmailCollection.inbox.rawValue: return row.priority >= 0.1
+        case "suspected_spam", EmailCollection.needsYou.rawValue, EmailCollection.handled.rawValue:
+            return staysListed(row, in: view)
+        default: return false
+        }
+    }
+
+    /// Remembers which rows of a confirmed read the server still counted in the Inbox.
+    private func recordCountedArchives(_ rows: [EmailThreadView], replacing: Bool) {
+        if replacing { countedPendingArchives = [:] }
+        for row in rows {
+            let counted = !row.isArchived && !row.isInSpam
+                && (archiveHiddenThreads.contains(row.id) || row.archiveOperation != nil)
+            countedPendingArchives[row.id] = counted ? row : nil
+        }
+    }
     @Published private(set) var pagingFailed = false
     /// The visible Mac row, independent of the conversation open in the reader.
     var scrollAnchor: UUID?
@@ -455,6 +493,7 @@ public final class EmailViewModel: ObservableObject {
         // admitted must not become a second copy. A finished save removes its own entry.
         archiveSubmitting = []
         archiveHiddenThreads = []
+        countedPendingArchives = [:]
         archiveUnsupportedAccounts = []
         archiveUnavailableThreads = []
         archiveReadErrors = []
@@ -530,6 +569,7 @@ public final class EmailViewModel: ObservableObject {
         loadedCollectionCounts = cached?.counts
         loadedListTotal = cached?.total
         loadedListVersion = cached?.version
+        recordCountedArchives(cached?.rows ?? [], replacing: true)
         nextCursor = cached?.cursor
         seenCursors = cached?.seenCursors ?? []
         hasMore = nextCursor != nil
@@ -628,6 +668,7 @@ public final class EmailViewModel: ObservableObject {
                 let loadedThreads = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
                 loadedCollectionCounts = page.collectionCounts
                 loadedListTotal = page.totalCount
+                recordCountedArchives(page.items, replacing: true)
                 pagingFailed = false
                 seenCursors = []
                 nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
@@ -738,6 +779,7 @@ public final class EmailViewModel: ObservableObject {
             if loadedListVersion != page.snapshotVersion { loadedListVersion = nil }
             loadedCollectionCounts = page.collectionCounts
             loadedListTotal = page.totalCount
+            recordCountedArchives(page.items, replacing: false)
             var ids = Set(inboxItems.map(\.id))
             let loaded = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
             inboxItems.append(contentsOf: loaded.filter { ids.insert($0.id).inserted })
@@ -1766,7 +1808,13 @@ public final class EmailViewModel: ObservableObject {
         let visible = items
         // Advancing clears the detail, which may hold newer confirmed mailbox state than its row.
         let detail = self.thread?.id == thread.id ? self.thread : nil
-        if request.archived { archiveHiddenThreads.insert(thread.id) }
+        if request.archived {
+            archiveHiddenThreads.insert(thread.id)
+            // Only a row of the confirmed list is known to be inside the confirmed counts.
+            if let row = inboxItems.first(where: { $0.id == thread.id }), !row.isArchived, !row.isInSpam {
+                countedPendingArchives[thread.id] = row
+            }
+        }
         if request.archived, selectedThreadID == thread.id {
             let next: EmailThreadView?
             if let index = visible.firstIndex(where: { $0.id == thread.id }) {
