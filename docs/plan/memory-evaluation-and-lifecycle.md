@@ -915,10 +915,33 @@ before-and-after measure. It holds real questions the owner asked and the
 stored facts each should reach, split once into a development file a change
 may be tuned against and a held-out file it may not. A change to candidate
 selection, ranking, packing or the semantic index is run against both, at its
-base revision and at the change, before it reaches `dev`. The files are
-owner-private, live beside the incident probes outside Git, and change only by
-owner review under a new version number. Like the probes, their reports are
-not activation or release evidence.
+base revision and at the change, before it reaches `dev`. Like the probes, its
+reports are not activation or release evidence.
+
+The set lives in the database (ADR-0339): `recall_questions` holds one row per
+question and `recall_question_revisions` every state it has held, both
+owner-scoped under forced row security. A question has a key, which is its
+probe identifier, one of the probe families, the facts it should reach (text a
+memory contains, or one pinned memory, each required or optional), names the
+delivered recall must show, words the answer must or must not contain, and
+memory text that must not be recalled. A question that names none of these is
+refused, since a run of it could neither pass nor fail. Its half is chosen when
+it is created and nothing moves it: no route accepts a new half, an import
+refuses a key that exists in the other half, and the store never rewrites the
+column. A write names the revision it read; a stale write is a conflict and a
+repeated write returns what is stored. A question is retired, not deleted, and
+a retired question is left out of runs.
+
+`agent memory probe --questions development|holdout|all` runs the stored
+active questions of the database it is pointed at, which is always a clone, so
+it runs the set as it stood when the clone was taken; the report's digest
+binds it to that exact set. `agent memory questions record --report` writes
+each question's outcome back to production as its latest result: per path, the
+furthest stage each fact reached and the counts, never text. A recorded result
+is not an edit and moves no revision. `agent memory questions import` and
+`export` read and write the probe file format; an export is created readable
+by its owner alone. A question is owner-written test content: it may quote a
+memory, and forgetting that memory does not rewrite the question.
 
 ## The recall delta and correction lines
 

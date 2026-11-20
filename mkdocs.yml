@@ -477,4 +477,5 @@ nav:
       - "ADR-0336: Sender signatures update People contact details": adr/0336-sender-signatures-update-people-contact-details.md
       - "ADR-0337: Own reply keeps an Inbox gesture current": adr/0337-own-reply-keeps-an-inbox-gesture-current.md
       - "ADR-0338 — Recall trace summary and stage timings": adr/0338-recall-trace-summary-and-stage-timings.md
+      - "ADR-0339 — Recall question page": adr/0339-recall-question-page.md
   - Changelog: changelog.md

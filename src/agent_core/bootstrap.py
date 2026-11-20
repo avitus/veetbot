@@ -210,6 +210,10 @@ from agent_core.adapters.persistence.projections import (
     PostgresTrajectoryProjectionRepository,
 )
 from agent_core.adapters.persistence.queue import PostgresRunQueue
+from agent_core.adapters.persistence.recall_questions import (
+    InMemoryRecallQuestionStore,
+    PostgresRecallQuestionStore,
+)
 from agent_core.adapters.persistence.reconsolidation import PostgresReconsolidationStore
 from agent_core.adapters.persistence.records import InMemoryRecordStore, PostgresRecordStore
 from agent_core.adapters.persistence.reliability_monitor import check_reliability
@@ -394,6 +398,7 @@ from agent_core.application.public_services import (
     PublicRunService,
     PublicSessionService,
 )
+from agent_core.application.recall_questions import PublicRecallQuestionService
 from agent_core.application.reconsolidation import PublicReconsolidationService
 from agent_core.application.records import RecordsService
 from agent_core.application.run_service import RunService
@@ -436,6 +441,9 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     PersonaService as PublicPersonaServiceContract,
+)
+from agent_core.application.services import (
+    RecallQuestionService as PublicRecallQuestionServiceContract,
 )
 from agent_core.application.services import (
     ReconsolidationService,
@@ -973,6 +981,8 @@ class ApplicationServices:
     calls: CallService | None = None
     people: PublicPeopleServiceContract | None = None
     model_settings: PublicModelSettingsServiceContract | None = None
+    # ADR-0339: present only when AGENT_RECALL_QUESTIONS_ENABLED is set.
+    recall_questions: PublicRecallQuestionServiceContract | None = None
     # ADR-0129: present only when BROWSER_TASK_GRANTS_ENABLED is set.
     browser_task_grants: PublicBrowserTaskGrantServiceContract | None = None
     # ADR-0225 part B: absent when drafts are off or titles use no routed model.
@@ -1907,6 +1917,7 @@ def _memory_uow_repositories(
     artifacts = InMemoryArtifactRepository()
     browser_task_grants = InMemoryBrowserTaskGrantRepository()
     records = InMemoryRecordStore()
+    recall_questions = InMemoryRecallQuestionStore()
     session_deletions = InMemorySessionDeletionRepository(
         sessions=sessions,
         runs=runs,
@@ -1969,6 +1980,7 @@ def _memory_uow_repositories(
         calls=InMemoryCallStore(),
         people=people,
         records=records,
+        recall_questions=recall_questions,
         integration_secrets=InMemoryIntegrationSecretStore(),
         jobs=InMemoryJobStore(),
         code_drafts=InMemoryCodeDraftRepository(),
@@ -2023,6 +2035,7 @@ def _postgres_repository_factory(
         episodes = PostgresIntegratedEpisodeStore(session)
         people = PostgresPeopleStore(session, clock)
         records = PostgresRecordStore(session, clock)
+        recall_questions = PostgresRecallQuestionStore(session)
         memories.bind_people(people)
         reconsolidation = PostgresReconsolidationStore(
             session,
@@ -2080,6 +2093,7 @@ def _postgres_repository_factory(
             calls=PostgresCallStore(session),
             people=people,
             records=records,
+            recall_questions=recall_questions,
             integration_secrets=PostgresIntegrationSecretStore(session),
             jobs=PostgresJobStore(session),
             code_drafts=PostgresCodeDraftRepository(session),
@@ -6273,6 +6287,11 @@ async def _compose(
                 uow_factory=uow_factory, clock=clock, ids=ids, catalog=model_settings_catalog
             ),
             folders=PublicFolderService(uow_factory=uow_factory, clock=clock, ids=ids),
+            recall_questions=(
+                PublicRecallQuestionService(uow_factory=uow_factory, clock=clock, ids=ids)
+                if settings.recall_questions_enabled
+                else None
+            ),
             browser_task_grants=(
                 PublicBrowserTaskGrantService(uow_factory=uow_factory, clock=clock)
                 if task_grants_enabled

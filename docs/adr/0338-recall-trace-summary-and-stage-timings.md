@@ -3,6 +3,7 @@
 - Status: Proposed — owner approved the measurement repair on 2026-11-20
 - Date: 2026-11-20
 - Related: ADR-0247, ADR-0249, ADR-0282, ADR-0290
+- Amended by: ADR-0339 (decision 7: the question set moved from files to the database)
 - Detailed design: `docs/plan/memory-evaluation-and-lifecycle.md`, `docs/plan/memory-retrieval-and-ranking.md`
 
 ## Context

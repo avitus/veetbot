@@ -82,8 +82,16 @@ class RequestBoundaryMiddleware:
         is_secret = path == "/v1/integration-secrets" or path.startswith("/v1/integration-secrets/")
         if (
             is_secret
-            or path in {"/v1/email", "/v1/dreaming", "/v1/memory-reconsolidations"}
-            or path.startswith(("/v1/email/", "/v1/dreaming/", "/v1/memory-reconsolidations/"))
+            or path
+            in {"/v1/email", "/v1/dreaming", "/v1/memory-reconsolidations", "/v1/recall-questions"}
+            or path.startswith(
+                (
+                    "/v1/email/",
+                    "/v1/dreaming/",
+                    "/v1/memory-reconsolidations/",
+                    "/v1/recall-questions/",
+                )
+            )
         ):
             downstream_send = send
 

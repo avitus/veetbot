@@ -1701,6 +1701,14 @@ def test_reconsolidation_processing_requires_separate_explicit_configuration() -
     assert not settings.memory_reconsolidation_api_enabled
 
 
+def test_recall_questions_are_off_until_the_owner_enables_them() -> None:
+    assert not load_settings(base_environment()).recall_questions_enabled
+    settings = load_settings({**base_environment(), "AGENT_RECALL_QUESTIONS_ENABLED": "1"})
+    assert settings.recall_questions_enabled
+    with pytest.raises(ConfigurationError):
+        load_settings({**base_environment(), "AGENT_RECALL_QUESTIONS_ENABLED": "maybe"})
+
+
 def test_reviewed_dreaming_flag_is_explicit_and_does_not_enable_unattended_mode() -> None:
     assert not load_settings(base_environment()).memory_dreaming_review_enabled
     settings = load_settings({**base_environment(), "AGENT_MEMORY_DREAMING_REVIEW_ENABLED": "1"})

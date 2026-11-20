@@ -11,6 +11,7 @@ title: Architecture Decisions
 - [ADR-0336: A sender's own signature updates their contact details in People (Accepted)](0336-sender-signatures-update-people-contact-details.md)
 - [ADR-0337: The owner's own synced reply keeps an Inbox gesture current (Accepted)](0337-own-reply-keeps-an-inbox-gesture-current.md)
 - [ADR-0338: The recall health report reads a per-trace summary; traces time every stage and keep the candidate ranking (Proposed)](0338-recall-trace-summary-and-stage-timings.md)
+- [ADR-0339: The owner keeps the recall question set on a signed-in page, stored in the database (Proposed)](0339-recall-question-page.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the

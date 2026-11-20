@@ -114,6 +114,13 @@
 # saved jobs. Each schedule names its servers, the approval lists them, and a
 # job's grant names what it may read. Implemented, not yet delivered: the schedule
 # environment must mirror AGENT_SVP_ENABLED first. No milestone or gate moves.
+# ADR-0339 (Proposed, 2026-11-20): the owner asked for a page on the server to
+# keep the recall question set current. The set moves from two files to the
+# database with full history; a default-off signed-in page and routes maintain
+# it; a question's development or held-out half is fixed at creation; the probe
+# tool runs the stored set and records each question's latest result.
+# Implemented on the recall-questions branch, not yet delivered. No milestone or
+# gate moves.
 # ADR-0338 (Proposed, 2026-11-20): `agent memory health` timed out on
 # production because its aggregates read whole trace documents (24,862 traces,
 # 413 MB). Each trace now carries an identifier-free summary the report reads

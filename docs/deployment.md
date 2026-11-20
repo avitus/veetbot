@@ -2154,18 +2154,41 @@ latencies only. Without `--live-model` the answer is scripted, so the Used stage
 and answer correctness are not judged; with it the configured model answers and
 costs apply.
 
-The owner question set (ADR-0338) is the standing measure for a recall change.
-It is two files in the same directory and format, drawn from questions the
-owner asked and facts the owner stated: `owner-questions.v1.dev.jsonl`, which a
-change may be tuned against, and `owner-questions.v1.holdout.jsonl`, which is
-run and read but never tuned against. Before a change to candidate selection,
-ranking, packing or the semantic index reaches `dev`, run both files on a fresh
-clone at the base revision and at the change, and keep the two summaries with
-the change: expected evidence delivered, facts missed, and the furthest stage
-each missed fact reached. An expected text that matches no stored belief
-reports `not_stored`, which is a formation finding, not a recall one. The files
-change only by owner review and under a new version number, so two runs of one
-version stay comparable.
+The owner question set (ADR-0338, ADR-0339) is the standing measure for a recall
+change: questions the owner asked, each with the stored facts it should reach,
+split once into a development half a change may be tuned against and a held-out
+half that is run and read but never tuned against. Before a change to candidate
+selection, ranking, packing or the semantic index reaches `dev`, run both halves
+on a fresh clone at the base revision and at the change, and keep the two
+summaries with the change: expected evidence delivered, facts missed, and the
+furthest stage each missed fact reached. An expected text that matches no stored
+belief reports `not_stored`, which is a formation finding, not a recall one.
+
+The set lives in the database once `AGENT_RECALL_QUESTIONS_ENABLED=1` is set for
+the API (and for the operator environment that runs the commands below); the
+default is off. The owner keeps it at `https://api.veetbot.com/recall-questions`,
+connecting with the owner token, which needs `memory.read` and `memory.write`.
+Do not place a token in a URL. No proxy change is needed. The first version was
+placed as two probe files beside the incident probes on 2026-11-20; load them
+once, naming the half each joins:
+
+```sh
+agent memory questions import --probes /etc/veetbot/recall/probes/owner-questions.v1.dev.jsonl --split development
+agent memory questions import --probes /etc/veetbot/recall/probes/owner-questions.v1.holdout.jsonl --split holdout
+```
+
+An import adds or updates by key, all of the file or none of it, and refuses a
+key that already exists in the other half. To measure a change, run the stored
+set on a clone and record the outcome on production, where the page then shows
+each question as passed or missed:
+
+```sh
+agent memory probe --questions all --output /var/tmp/question-run.json   # on the clone
+agent memory questions record --report /var/tmp/question-run.json         # on production
+```
+
+`agent memory questions export --split holdout --output PATH` writes a half back
+out as a probe file readable by its owner alone.
 
 ### Conflict reconciliation (ADR-0248)
 

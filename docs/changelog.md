@@ -4,6 +4,19 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-20 — A page for the recall test questions (ADR-0339)
+
+- The questions Veetbot's memory is tested on now live in the database, and you
+  keep them on a private page at `/recall-questions`: add, edit, retire and
+  restore questions, pick the facts each should reach by searching your
+  memories, and see every earlier version.
+- Each question is in the development half or the held-out half, chosen when it
+  is added. Nothing moves it afterwards.
+- After a test run is recorded, each question shows whether it passed or which
+  stage lost the fact.
+- Off by default. Turning it on needs `AGENT_RECALL_QUESTIONS_ENABLED=1`; the
+  page asks for your access token each time it is opened.
+
 ## 2026-11-20 — Recall health can be measured again (ADR-0338)
 
 - `agent memory health` had stopped working on production: it timed out on

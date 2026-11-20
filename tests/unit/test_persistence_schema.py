@@ -696,3 +696,39 @@ def test_cockpit_tables_are_owner_scoped_under_forced_tenant_isolation() -> None
     for nullable in ("bundle", "bundle_sha256", "kit_api", "commit_sha", "origin_run_id"):
         assert revisions.columns[nullable].nullable
     assert "Cockpit data must be exported and erased before downgrade" in migration_sql
+
+
+def test_recall_question_tables_are_owner_scoped_under_forced_tenant_isolation() -> None:
+    questions = Base.metadata.tables["recall_questions"]
+    revisions = Base.metadata.tables["recall_question_revisions"]
+    assert questions.primary_key.name == "pk_recall_questions"
+    assert {c.name for c in questions.primary_key.columns} == {"tenant_id", "principal_id", "id"}
+    assert set(questions.columns.keys()) == {
+        "tenant_id",
+        "principal_id",
+        "id",
+        "key",
+        "split",
+        "status",
+        "content",
+        "revision",
+        "latest_result",
+        "created_at",
+        "updated_at",
+    }
+    assert {c.name for c in revisions.primary_key.columns} == {
+        "tenant_id",
+        "principal_id",
+        "question_id",
+        "revision",
+    }
+    assert questions.columns["latest_result"].nullable
+    # The history goes with its question; nothing else points at either table.
+    (foreign_key,) = revisions.foreign_key_constraints
+    assert foreign_key.ondelete == "CASCADE"
+
+    migration = next((ROOT / "migrations" / "versions").glob("*_recall_questions.py"))
+    migration_sql = migration.read_text(encoding="utf-8")
+    for table in ("recall_questions", "recall_question_revisions"):
+        assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY" in migration_sql
+        assert f"{table}_tenant_isolation" in migration_sql
