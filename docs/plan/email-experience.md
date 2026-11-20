@@ -1237,7 +1237,12 @@ writes, so that change must not block an immediate move back to Inbox. The
 command applies to the entire conversation, including mail that Gmail knows
 about but the client has not yet loaded, just as Gmail's conversation archive
 does. Expected local content revision is still checked before admission and
-dispatch; a concurrent local update invalidates that gesture. Never replace
+dispatch; a concurrent local update invalidates that gesture, with one
+exception (ADR-0337). A revision that only adds messages the owner sent keeps
+the gesture current, so archiving straight after a reply survives the refresh
+that syncs that reply. The conversation records the earliest such revision
+internally; new mail from anyone else, or any change to an earlier message,
+clears it. A confirmed result then updates Inbox state on that newer revision. Never replace
 cached source or draft content with a partial archive preflight. Exact-content
 freshness for sending remains unchanged.
 

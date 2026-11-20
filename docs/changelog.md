@@ -4,6 +4,13 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-20 — Archiving right after a reply no longer fails
+
+- Archiving a conversation shortly after replying to it showed "Inbox state
+  could not be changed. Try again." The refresh that synced the sent reply
+  staled the archive. The owner's own sent reply now keeps the archive
+  current; new mail from anyone else still stops it (ADR-0337).
+
 ## 2026-11-20 — GPT-6.2 Astra is a chat model choice
 
 - Settings → Models offers GPT-6.2 Astra for Chat beside GPT-6 Astra, Claude

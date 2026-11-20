@@ -69,6 +69,7 @@ from agent_core.domain.email import (
     body_cutoff,
     draft_expired,
     feedback_matches,
+    own_reply_floor,
     retained_thread,
     send_arguments_digest,
     send_gesture,
@@ -257,6 +258,7 @@ def thread_summary(thread: EmailThread) -> dict[str, object]:
             "provider_thread_id",
             "source_fingerprint",
             "last_accessed_at",
+            "own_reply_floor",
         },
     )
 
@@ -608,7 +610,7 @@ class EmailExperienceService:
             selected = apply_feedback(
                 thread, await self._feedback(uow.email, principal), now=self.clock.now()
             )
-            result = selected.model_dump(mode="json")
+            result = selected.model_dump(mode="json", exclude={"own_reply_floor"})
             draft = (
                 None
                 if thread.draft_id is None
@@ -1455,7 +1457,8 @@ class EmailExperienceService:
                 if (
                     thread is None
                     or type(archived) is not bool
-                    or expected_revision != thread.revision
+                    or type(expected_revision) is not int
+                    or not thread.inbox_gesture_current(expected_revision)
                 ):
                     raise ConflictError("the thread changed; review it before changing Inbox state")
                 thread = await self._reconcile_archive_in(uow, principal, thread)
@@ -1665,7 +1668,10 @@ class EmailExperienceService:
                         provider_thread_id=thread.provider_thread_id,
                         read_server_id=self.account_servers[thread.account_id]["read"],
                         write_server_id=self.account_servers[thread.account_id]["write"],
-                        expected_revision=thread.revision,
+                        # The revision the owner was looking at (ADR-0337).
+                        expected_revision=thread.revision
+                        if expected_revision is None
+                        else expected_revision,
                         archived=archived,
                         expires_at=now + timedelta(seconds=120),
                         spam=spam,
@@ -2380,7 +2386,7 @@ class EmailExperienceService:
                 or task.account_ids != [consent.account_id]
                 or task.expected_revision != consent.expected_revision
                 or consent.expires_at <= self.clock.now()
-                or thread.revision != consent.expected_revision
+                or not thread.inbox_gesture_current(consent.expected_revision)
                 or thread.account_id != consent.account_id
                 or thread.provider_thread_id != consent.provider_thread_id
                 or self.account_servers[consent.account_id].get("read") != consent.read_server_id
@@ -2527,7 +2533,11 @@ class EmailExperienceService:
         update: dict[str, Any] = {
             "archive_operation": operation.model_copy(update={"status": status, "error": error})
         }
-        if status == "completed" and thread.revision == task.expected_revision:
+        if (
+            status == "completed"
+            and task.expected_revision is not None
+            and thread.inbox_gesture_current(task.expected_revision)
+        ):
             archived = operation.target_archived
             arrives, leaves = ("SPAM", "INBOX") if archived else ("INBOX", "SPAM")
 
@@ -3226,6 +3236,9 @@ class EmailExperienceService:
                 ),
                 updated_at=max((message.sent_at for message in messages), default=now),
                 revision=1 if previous is None else previous.revision + 1,
+                own_reply_floor=None
+                if previous is None
+                else own_reply_floor(previous, messages, complete),
                 draft_id=None if previous is None else previous.draft_id,
                 session_id=None if previous is None else previous.session_id,
                 complete=complete,

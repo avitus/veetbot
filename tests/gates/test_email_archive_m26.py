@@ -634,7 +634,7 @@ async def test_archive_completion_does_not_overwrite_a_newer_source_projection()
             result = await original(name, arguments)
             if name == "modify_labels":
                 await app.services.email.import_thread(
-                    app.principal, "default", _page(changed=True), thread.source_session_ids[0]
+                    app.principal, "default", _page_with_incoming(), thread.source_session_ids[0]
                 )
             return result
 
@@ -653,6 +653,87 @@ async def test_archive_completion_does_not_overwrite_a_newer_source_projection()
         assert latest["revision"] == 2 and latest["in_inbox"] is True
         assert (await app.services.email.draft(app.principal, draft.id)).stale
         assert len(writes) == 1
+
+
+def _page_with_incoming() -> dict[str, Any]:
+    """The conversation after a correspondent wrote again: mail the owner has not seen."""
+    value = _page(changed=True)
+    value["messages"][1].update(
+        {
+            "from": "Colleague <colleague@example.test>",
+            "direction": "received",
+            "label_ids": ["INBOX"],
+            "body": "One more thing before you file this.",
+        }
+    )
+    return value
+
+
+@pytest.mark.parametrize("arrives", ["before_admission", "during_run"])
+@pytest.mark.parametrize("author", ["owner", "correspondent"])
+async def test_archive_survives_only_the_owners_own_synced_reply(arrives: str, author: str) -> None:
+    """ADR-0337: syncing the owner's sent reply keeps the gesture; unseen mail still stales it."""
+    from agent_core.domain.errors import ConflictError
+
+    writes: list[dict[str, Any]] = []
+    base = await _archive_factory(writes)
+    newer = _page(changed=True) if author == "owner" else _page_with_incoming()
+    synced = False
+
+    async def sync() -> None:
+        nonlocal synced
+        if not synced:
+            synced = True
+            await app.services.email.import_thread(
+                app.principal, "default", newer, thread.source_session_ids[0]
+            )
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        client = base(config, credential, environment)
+        original = client.call_tool
+
+        async def call_tool(name: str, arguments: dict[str, Any]) -> MCPCallResult:
+            if name == "get_profile" and arrives == "during_run":
+                # The post-reply refresh saves the conversation after admission.
+                await sync()
+            return await original(name, arguments)
+
+        vars(client)["call_tool"] = call_tool
+        return client
+
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+    ) as app:
+        thread, _ = await _seed_draft(app)
+        if arrives == "before_admission":
+            await sync()
+
+        async def archive() -> None:
+            # The client still holds the revision the owner was looking at.
+            await app.services.email.archive(
+                app.principal, thread.id, 1, archived=True, idempotency_key="own-reply-race"
+            )
+
+        if author == "correspondent" and arrives == "before_admission":
+            with pytest.raises(ConflictError):
+                await archive()
+        else:
+            await archive()
+        latest = await app.services.email.thread(app.principal, thread.id)
+        assert latest["revision"] == 2 and "own_reply_floor" not in latest
+        if author == "owner":
+            assert _archive_status(latest) == "completed"
+            assert latest["in_inbox"] is False
+            assert writes == [
+                {"thread_ids": ["thread-1"], "add_label_ids": None, "remove_label_ids": ["INBOX"]}
+            ]
+        else:
+            assert latest["in_inbox"] is True
+            assert writes == []
+            if arrives == "during_run":
+                assert _archive_status(latest) == "failed"
 
 
 async def test_archive_list_reconciliation_does_not_persist_feedback_projection() -> None:

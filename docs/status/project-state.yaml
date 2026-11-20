@@ -1,3 +1,8 @@
+# ADR-0337: On 2026-11-20 an archive made 38 seconds after a reply failed in
+# production because the refresh that synced the owner's sent message staled
+# the gesture. The owner asked for the repair: an Inbox gesture stays current
+# across revisions that only add the owner's own sent messages. Offline tests
+# only; no real mailbox run. No milestone or gate moves.
 # ADR-0336: On 2026-11-20 the owner asked that an email signature update the
 # sender's contact details in People. A DMARC-passing sender already in People
 # gains the phone numbers and title line of their own signature as contextual

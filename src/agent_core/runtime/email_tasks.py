@@ -1609,6 +1609,7 @@ class _TaskIO:
                     "messages": messages,
                     "complete": complete,
                     "revision": thread.revision + 1,
+                    "own_reply_floor": None,
                     "source_fingerprint": fingerprint,
                     "in_inbox": any("INBOX" in message.labels for message in messages),
                     "in_spam": any("SPAM" in message.labels for message in messages),
