@@ -7,6 +7,7 @@ title: Architecture Decisions
 - [ADR-0332: Email refresh reuses unchanged projections (Accepted)](0332-email-refresh-reuses-unchanged-projections.md)
 - [ADR-0333: Readiness checks before reviewed browser actions (Accepted)](0333-browser-workflow-action-readiness.md)
 - [ADR-0334: Explicit evidence requirements for workflow extraction (Accepted)](0334-browser-workflow-extraction-requirements.md)
+- [ADR-0335: An item read from the event log keeps its envelope nonce at any position (Proposed)](0335-event-sourced-envelope-nonces.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the

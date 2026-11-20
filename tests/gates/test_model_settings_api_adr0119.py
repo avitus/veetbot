@@ -137,9 +137,18 @@ async def test_unsaved_settings_show_the_deployment_defaults_and_every_choice() 
     assert view["memory"] == {"model_policy": "balanced", "reasoning_effort": None}
     assert [option["model_policy"] for option in view["chat_options"]] == [
         "astra",
+        "astra-6-2",
         "fable",
         "balanced",
     ]
+    assert view["chat_options"][1] == {
+        "model_policy": "astra-6-2",
+        "display_name": "GPT-6.2 Astra",
+        "provider": "openai",
+        "model": "gpt-6.2-astra",
+        "reasoning_efforts": EFFORTS,
+        "default_reasoning_effort": "high",
+    }
     astra = view["chat_options"][0]
     assert astra == {
         "model_policy": "astra",
@@ -167,7 +176,11 @@ async def test_a_model_whose_provider_has_no_credential_is_not_offered() -> None
     ):
         view = (await client.get("/v1/settings/models")).json()
 
-    assert [option["model_policy"] for option in view["chat_options"]] == ["astra", "balanced"]
+    assert [option["model_policy"] for option in view["chat_options"]] == [
+        "astra",
+        "astra-6-2",
+        "balanced",
+    ]
 
 
 async def test_a_save_versions_the_settings_and_records_a_content_free_event() -> None:

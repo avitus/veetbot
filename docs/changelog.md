@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-20 — GPT-6.2 Astra is a chat model choice
+
+- Settings → Models offers GPT-6.2 Astra for Chat beside GPT-6 Astra, Claude
+  Fable 5.1 and GPT-5.6 Sol, when the deployment has an OpenAI key. It applies
+  to new app chats (ADR-0119); the default chat model and the memory model are
+  unchanged.
+- GPT-6.2 discards a step's reasoning when anything before it in the request
+  was rewritten. Messages and tool results now render identically wherever they
+  sit in a request, so a tool loop keeps its reasoning from step to step
+  (ADR-0335). The first message of a chat after the update may cost slightly
+  more while the provider cache refills.
+- Deploying: the model registry version changes, so drain active and suspended
+  runs first, as for any registry change.
+
 ## 2026-11-18 — Email attachments
 
 A researched reply can now carry up to ten files totaling 25 MB. Review the files with the message before sending. To keep an incoming file separately, press Save on the attachment in Email to add it to that conversation.

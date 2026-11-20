@@ -336,6 +336,17 @@ Anthropic adapter's default five-minute TTL. Astra retains the 272,000-token
 window required by ADR-0039's single-tier pricing rule; Fable uses 1,000,000
 tokens, and both allow up to 128,000 output tokens.
 
+The owner may also choose `astra-6-2`, OpenAI `gpt-6.2-astra`, for new app
+chats in Settings (ADR-0119); it needs the same `VEETBOT_OPENAI_KEY` and changes
+no default. Its standard prices were verified on 2026-11-20 in the
+[OpenAI model documentation](https://developers.openai.com/api/docs/models/gpt-6.2-astra):
+USD 8 input, USD 0.40 cached input, USD 10 cache write and USD 40 output per
+million tokens. It keeps the same 272,000-token window, because OpenAI prices a
+request above 272,000 input tokens at a higher tier, and allows up to 128,000
+output tokens. That page states only that reasoning effort `none` is rejected;
+the profile lists the five efforts `gpt-6-astra` accepts, which a live request
+has not yet confirmed.
+
 Changing these profiles changes the registry version. Drain active and
 suspended runs before deploying: existing provider pins fail closed when
 their registry version is unavailable. Provider-assisted memory also requires

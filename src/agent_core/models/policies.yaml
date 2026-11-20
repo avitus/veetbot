@@ -10,6 +10,9 @@ model_policies:
   astra:
     provider: openai
     model: gpt-6-astra
+  astra-6-2:
+    provider: openai
+    model: gpt-6.2-astra
   fable:
     provider: anthropic
     model: claude-fable-5-1
@@ -17,7 +20,7 @@ model_policies:
     provider: ollama
     model: local-small
 # The chat models the owner may choose in the client (ADR-0119).
-selectable_chat_policies: [astra, fable, balanced]
+selectable_chat_policies: [astra, astra-6-2, fable, balanced]
 request_defaults:
   timeout_seconds: 600
   stream_idle_seconds: 60

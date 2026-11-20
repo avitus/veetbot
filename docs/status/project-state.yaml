@@ -1,3 +1,8 @@
+# ADR-0335: On 2026-11-20 the owner asked for GPT-6.2 Astra as a chat model
+# choice and a prefix-aware integration. The `astra-6-2` policy is selectable
+# (ADR-0119); event-sourced items keep their envelope nonce at any position so
+# GPT-6.2 keeps replayed reasoning. Offline tests only; no live GPT-6.2 request.
+# Proposed; no milestone or gate moves.
 # ADR-0334: Owner-authorized W3/W6 continuation adds reviewed extraction row
 # and completeness requirements. Insufficient evidence cannot advance to later
 # actions. No public schema, deployed recipe, milestone or gate moves.
