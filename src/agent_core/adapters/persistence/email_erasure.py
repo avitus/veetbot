@@ -32,6 +32,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 from agent_core.domain.agents import Principal
 from agent_core.domain.artifacts import EMAIL_SOURCE_METADATA_KEY, outlives_source_erasure
 from agent_core.domain.errors import ConflictError
+from agent_core.domain.memory import TRACE_BELIEF_ID_FIELDS
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.domain.sessions import SESSION_EMAIL_ACCOUNT_SERVERS_METADATA_KEY
 from agent_core.mcp.configuration import is_email_attachment_tool
@@ -219,7 +220,7 @@ def erase_trace(value: dict[str, Any], belief_ids: set[str]) -> dict[str, Any] |
         "rendered": "",
         "rendered_sha256": hashlib.sha256(b"").hexdigest(),
     }
-    for field in ("returned", "cited", "carried_in", "blocked", "dropped_for_budget"):
+    for field in TRACE_BELIEF_ID_FIELDS:
         result[field] = [item for item in result.get(field, []) if str(item) not in doomed]
     return result
 

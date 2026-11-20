@@ -18,6 +18,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 )
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import ConflictError
+from agent_core.domain.memory import TRACE_BELIEF_ID_FIELDS
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 
 _BATCH = 64
@@ -366,7 +367,7 @@ def _trace_candidates(trace: dict[str, Any]) -> set[str]:
     candidates.update(
         str(i) for b in items if isinstance(b, dict) for i in b.get("support_ids", [])
     )
-    for field in ("returned", "cited", "carried_in", "blocked", "dropped_for_budget"):
+    for field in TRACE_BELIEF_ID_FIELDS:
         candidates.update(str(item) for item in trace.get(field, []))
     return candidates
 

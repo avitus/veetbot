@@ -148,6 +148,7 @@ async def test_expire_operator_fields_nulls_only_expired_operator_tier() -> None
         "returned": [kept.belief_id],
         "cited": [kept.belief_id],
         "dropped_for_budget": [UUID(int=642)],
+        "ranked_candidates": [kept.belief_id, UUID(int=642)],
     }
     oldest = trace().model_copy(
         update={**operator_tier, "operator_fields_expire_at": NOW - timedelta(days=2)}
@@ -176,6 +177,7 @@ async def test_expire_operator_fields_nulls_only_expired_operator_tier() -> None
     assert swept.candidates == 0
     assert swept.dropped_for_budget == []
     assert swept.dropped_for_budget_count == 1
+    assert swept.model_dump().get("ranked_candidates") == []
     assert swept.beliefs == [kept]
     assert swept.returned == [kept.belief_id]
     assert swept.cited == [kept.belief_id]

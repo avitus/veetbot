@@ -114,6 +114,14 @@
 # saved jobs. Each schedule names its servers, the approval lists them, and a
 # job's grant names what it may read. Implemented, not yet delivered: the schedule
 # environment must mirror AGENT_SVP_ENABLED first. No milestone or gate moves.
+# ADR-0338 (Proposed, 2026-11-20): `agent memory health` timed out on
+# production because its aggregates read whole trace documents (24,862 traces,
+# 413 MB). Each trace now carries an identifier-free summary the report reads
+# instead; traces time every recall stage and keep the candidate ranking of a
+# question-led recall. Ranking and rendering are unchanged. The same review
+# read the production selection audit: formation@11 (People default) is
+# selected, not formation@9, and has no quality evidence. Implemented on a
+# branch, not yet delivered. No milestone or gate moves.
 # ADR-0290: On 2026-11-03 the owner directed that semantic retrieval be
 # activated and stay on ("turned on and off for many months now and we are
 # failing to make progress"). A standing owner admission
@@ -2189,7 +2197,7 @@ milestones:
       - >-
         Run hosted CI and the CodeRabbit review loop on the final head
       - >-
-        Verify from a production selection audit that the deploy selects formation@9 for the production tuple; the refreshed evidence reached main in pull request 156 on 2026-10-10
+        Supply quality evidence for the formation policy production runs: the 2026-11-20 selection audit names formation@11 (People default), not formation@9, so either evaluate formation@11 on the distillation corpora or pin formation@9; an owner decision
       - >-
         Memory formation temporarily remains on GPT-5.6 Sol under ADR-0093;
         audit scorer semantics and compare Sol/Astra under controlled reasoning

@@ -33,7 +33,7 @@ activation.
 | --- | --- | --- | --- | --- |
 | 15 Operational hardening | In progress | 0/16 | All sixteen gates; the ADR-0205 reliability repair is delivered | Engineering, then owner |
 | 18 Email integration | In progress | 17/17 | Mailbox smokes and reviewed bootstrap repair | Owner; engineering |
-| 21 Memory distillation | In progress | 31/31 | Final-head review; production formation@9 selection audit; Sol/Astra study | Engineering; owner |
+| 21 Memory distillation | In progress | 31/31 | Final-head review; evidence for formation@11, which production selects; Sol/Astra study | Engineering; owner |
 | 24 SMS | In progress | 12/12 | Physical-iPhone verification | Owner |
 | 25 WhatsApp | In progress | 12/12 | Meta ceremony, live smoke | Owner |
 | 26 Email experience | In progress | 28/33 | Private evaluations, cost calibration, two-account acceptance | Owner with engineering |
@@ -186,11 +186,15 @@ a 0.75 holdout precision floor) and gating over three pooled repeats; the run
 at `0e3ca2f` passed and its `formation@9` artifact is bundled. It reached
 `main` in pull request 104 and was first deployed by the next merge; the
 artifact stays bound to the unchanged shipped policy, and the 2026-10-09
-policy-bound refresh reached `main` in pull request 156 (2026-10-10), but no
-production selection audit naming `formation@9` has been recorded since. Remaining:
+policy-bound refresh reached `main` in pull request 156 (2026-10-10). Production
+does not select it: with People enabled and no pin, startup selects `formation@11`
+without reading evidence (ADR-0101), and the production selection audit read on
+2026-11-20 names `formation@11` with reason `people_default` at the startups of
+2026-11-04, 2026-11-11 and 2026-11-17.
+`formation@11` has no quality evidence of its own. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
-- [ ] Verify from a production selection audit that the deploy selects formation@9 for the production tuple; the refreshed evidence reached main in pull request 156 on 2026-10-10
+- [ ] Supply quality evidence for the formation policy production runs: the 2026-11-20 selection audit names formation@11 (People default), not formation@9, so either evaluate formation@11 on the distillation corpora or pin formation@9; an owner decision
 - [ ] Memory formation temporarily remains on GPT-5.6 Sol under ADR-0093; audit scorer semantics and compare Sol/Astra under controlled reasoning settings before changing the memory tuple with new activation evidence.
 
 ### Milestone 24 — SMS through the owner's iPhone

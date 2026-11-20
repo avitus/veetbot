@@ -2133,8 +2133,11 @@ are separate from branch implementation; neither is implied by passing tests.
 `agent memory health --hours 336 --json`, run from the protected owner operator
 environment like the reliability report, reads only the database and prints
 content-free recall aggregates: runs with delivered recall and with citations,
-returned and dropped-for-budget items by class, recall latency, store
-composition, lifecycle events by authority, and semantic index coverage. Read it
+returned and dropped-for-budget items by class as of each recall, the whole
+recall's latency, store composition, lifecycle events by authority, and semantic
+index coverage. It reads each trace's stored summary, never the trace document
+(ADR-0338); `summarized_traces` below `traces` means the window reaches back
+before the summary existed, and those older traces add nothing else. Read it
 before and after a retrieval change and after a deploy; a citation rate of zero
 with delivered runs above zero means the model is not emitting the citation
 form, and a dropped-for-budget share dominated by one class names the ranking
@@ -2150,6 +2153,19 @@ never in Git; the report it writes holds identifiers, stages, ranks and
 latencies only. Without `--live-model` the answer is scripted, so the Used stage
 and answer correctness are not judged; with it the configured model answers and
 costs apply.
+
+The owner question set (ADR-0338) is the standing measure for a recall change.
+It is two files in the same directory and format, drawn from questions the
+owner asked and facts the owner stated: `owner-questions.v1.dev.jsonl`, which a
+change may be tuned against, and `owner-questions.v1.holdout.jsonl`, which is
+run and read but never tuned against. Before a change to candidate selection,
+ranking, packing or the semantic index reaches `dev`, run both files on a fresh
+clone at the base revision and at the change, and keep the two summaries with
+the change: expected evidence delivered, facts missed, and the furthest stage
+each missed fact reached. An expected text that matches no stored belief
+reports `not_stored`, which is a formation finding, not a recall one. The files
+change only by owner review and under a new version number, so two runs of one
+version stay comparable.
 
 ### Conflict reconciliation (ADR-0248)
 

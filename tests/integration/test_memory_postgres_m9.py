@@ -15,6 +15,7 @@ import hashlib
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -22,6 +23,7 @@ import pytest
 from agent_core.adapters.memory.in_memory import InMemoryMemoryStore
 from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
 from agent_core.adapters.memory.transactions import MemoryTransaction
+from agent_core.adapters.persistence.sqlalchemy_models import RecallTraceRow
 from agent_core.bootstrap import Composition, build
 from agent_core.config import Settings
 from agent_core.domain.errors import ConflictError, NotFoundError
@@ -1199,6 +1201,13 @@ async def test_postgres_changed_rejection_links_belief_and_replacement(
         assert [item.belief_id for item in recalled.items] == [replacement.id]
 
 
+async def _trace_summary(composition: Any, trace_id: UUID) -> dict[str, Any]:
+    async with composition.uow_factory() as uow:
+        row = await uow.session.get(RecallTraceRow, trace_id)
+    assert row is not None and row.summary is not None
+    return dict(row.summary)
+
+
 async def test_postgres_expires_operator_trace_fields_and_keeps_the_user_view(
     tmp_path: Path,
 ) -> None:
@@ -1232,10 +1241,19 @@ async def test_postgres_expires_operator_trace_fields_and_keeps_the_user_view(
         async with composition.uow_factory() as uow:
             recorded = await uow.traces.get(result.trace_id, composition.principal)
         assert len(recorded.dropped_for_budget) == 1
+        assert recorded.ranked_candidates[0] == first.id and len(recorded.ranked_candidates) == 2
+        before = await _trace_summary(composition, result.trace_id)
+        assert before["arms"] == ["structured", "lexical"] and before["latency_ms"] >= 0
+        assert before["returned"]["total"] == 1 and before["dropped"]["total"] == 1
 
         expiry = recorded.operator_fields_expire_at + timedelta(seconds=1)
         async with composition.uow_factory() as uow:
             assert await uow.traces.expire_operator_fields(expiry, 10) == 1
+        # The sweep takes the summary's timings with the operator tier and
+        # leaves its counts, which name no belief.
+        after = await _trace_summary(composition, result.trace_id)
+        assert "latency_ms" not in after and "arms" not in after
+        assert after["returned"] == before["returned"] and after["dropped"] == before["dropped"]
         async with composition.uow_factory() as uow:
             swept = await uow.traces.get(result.trace_id, composition.principal)
             view = await uow.traces.user_view(
@@ -1246,6 +1264,7 @@ async def test_postgres_expires_operator_trace_fields_and_keeps_the_user_view(
         assert swept.candidates == 0
         assert swept.dropped_for_budget == []
         assert swept.dropped_for_budget_count == 1
+        assert swept.ranked_candidates == []
         assert swept.returned == recorded.returned
         assert swept.beliefs == recorded.beliefs
         assert swept.rendered == recorded.rendered

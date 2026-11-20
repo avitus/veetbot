@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -1335,6 +1335,57 @@ class PeopleRecallDependencies(BaseModel):
     selection_belief_ids: tuple[UUID, ...] = Field(default=(), max_length=1000)
 
 
+# Every trace field that is a plain list of belief identifiers. The erasure
+# paths scrub exactly these, so a new identifier list belongs here or it would
+# outlive the belief it names.
+TRACE_BELIEF_ID_FIELDS: tuple[str, ...] = (
+    "returned",
+    "cited",
+    "carried_in",
+    "blocked",
+    "dropped_for_budget",
+    "ranked_candidates",
+)
+# A trace keeps at most this many ranked candidates; recall fetches fewer.
+RANKED_CANDIDATES_LIMIT = 512
+
+
+class RecallClassCounts(BaseModel):
+    """How many recalled items fell into each review class when recall ran."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    total: int = Field(default=0, ge=0)
+    flagged: int = Field(default=0, ge=0)
+    provisional: int = Field(default=0, ge=0)
+    source_learned: int = Field(default=0, ge=0)
+    owner_authority: int = Field(default=0, ge=0)
+
+
+def recall_class_counts(
+    identifiers: Iterable[UUID], records: Mapping[UUID, MemoryRecord]
+) -> RecallClassCounts:
+    """Count identifiers by the class their record held when recall ran.
+
+    An identifier with no belief record (a People line, a summary) counts in
+    the total alone, which is what a join against the store would report.
+    """
+
+    listed = list(identifiers)
+    found = [records[identifier] for identifier in listed if identifier in records]
+    return RecallClassCounts(
+        total=len(listed),
+        flagged=sum(record.flagged_for_review for record in found),
+        provisional=sum(record.status is MemoryStatus.PROVISIONAL for record in found),
+        source_learned=sum(
+            record.consolidation_policy_version.startswith("owner-source-learning@")
+            for record in found
+        ),
+        owner_authority=sum(
+            record.authority in (MemoryAuthority.USER, MemoryAuthority.AFFIRMED) for record in found
+        ),
+    )
+
+
 class RecallTrace(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1358,6 +1409,15 @@ class RecallTrace(BaseModel):
     # The operator sweep nulls the identifiers above and leaves this count, so
     # the user-safe projection can still say how many beliefs were considered.
     dropped_for_budget_count: int = Field(default=0, ge=0)
+    # Operator tier: every scored candidate of a question-led recall, best
+    # first, before duplicates and the per-subject cap are collapsed. With
+    # `returned` and `dropped_for_budget` it says whether a missing belief was
+    # never a candidate, ranked too low, or lost its slot to a budget.
+    ranked_candidates: list[UUID] = Field(default_factory=list, max_length=RANKED_CANDIDATES_LIMIT)
+    # Counts by class as of the recall. They name no belief, so they survive
+    # the operator expiry and need no erasure.
+    returned_classes: RecallClassCounts | None = None
+    dropped_classes: RecallClassCounts | None = None
     blocked: list[UUID] = Field(default_factory=list)
     carried_in: list[UUID] = Field(default_factory=list)
     beliefs: list[RecalledItem] = Field(default_factory=list)
@@ -1372,7 +1432,12 @@ class RecallTrace(BaseModel):
     def has_operator_fields(self) -> bool:
         """Whether the operator tier still holds anything an expiry would null."""
 
-        return bool(self.arm_latencies_ms or self.candidates or self.dropped_for_budget)
+        return bool(
+            self.arm_latencies_ms
+            or self.candidates
+            or self.dropped_for_budget
+            or self.ranked_candidates
+        )
 
     @property
     def considered_not_shown(self) -> int:

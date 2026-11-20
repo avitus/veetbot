@@ -171,6 +171,10 @@ title: Current Milestone
   version-three trial requires its own authorized release; recall is not enabled
   by that direction. Missing review expires the trial after 24 hours, within a
   fixed seven-day maximum, with all other safety and release gates preserved.
+  Both trials lapsed. On 2026-11-03 the owner directed that semantic recall be
+  activated and stay on (ADR-0290): a standing admission with no expiry, bound to
+  the local encoder, has run it on interactive owner chats since, with the
+  relevance rerank. It moves no gate and does not relabel the failed comparison.
   [General memory recall](general-memory-recall.md) registers twelve gates for
   cross-category evaluation, relevance before candidate limits, measured semantic
   retrieval, task-aware queries, governed source recovery and release evidence.

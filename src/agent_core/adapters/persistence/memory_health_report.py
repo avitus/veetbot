@@ -39,41 +39,34 @@ select count(distinct e.run_id) filter (where e.event_type = 'memory.recalled') 
          filter (where e.event_type = 'memory.cited'), 0) as ambiguous
 from {_EVENTS}
 """
-_TRACES = """
-with scoped as (
-  select t.trace,
-         (select coalesce(sum(value::numeric), 0)
-            from jsonb_each_text(coalesce(t.trace->'arm_latencies_ms', '{}'::jsonb))) as latency
-  from recall_traces t
-  where t.tenant_id = :tenant and t.principal_id = :principal
-    and t.created_at >= :since and t.created_at <= :until and not t.erasure_pending
-)
+_CLASSES = ("total", "flagged", "provisional", "source_learned", "owner_authority")
+
+
+def _class_sums(bucket: str) -> str:
+    return ",\n       ".join(
+        f"coalesce(sum((summary->'{bucket}'->>'{name}')::int), 0) as {bucket}_{name}"
+        for name in _CLASSES
+    )
+
+
+# The report reads each trace's small summary, never the trace document: a
+# document is tens of kilobytes and stored out of line, so an aggregate over
+# documents reads the whole table and cannot stay inside the statement bound.
+# A trace recorded before the summary existed has none and is counted apart.
+_TRACES = f"""
 select count(*) as traces,
-       count(*) filter (where trace->'arm_latencies_ms' ? 'lexical') as with_lexical,
-       count(*) filter (where trace->'arm_latencies_ms' ? 'structured') as with_structured,
-       count(*) filter (where trace->'arm_latencies_ms' ? 'semantic') as with_semantic,
-       percentile_cont(0.5) within group (order by latency) as p50,
-       percentile_cont(0.95) within group (order by latency) as p95,
-       count(*) filter (where latency > 1000) as slow
-from scoped
-"""
-
-
-def _class_share(column: str) -> str:
-    return f"""
-with ids as (
-  select (value)::uuid as belief_id
-  from recall_traces t, jsonb_array_elements_text(coalesce(t.trace->'{column}', '[]'::jsonb))
-  where t.tenant_id = :tenant and t.principal_id = :principal
-    and t.created_at >= :since and t.created_at <= :until and not t.erasure_pending
-)
-select count(*) as total,
-       count(*) filter (where m.flagged_for_review) as flagged,
-       count(*) filter (where m.status = 'provisional') as provisional,
-       count(*) filter (where m.consolidation_policy_version like 'owner-source-learning@%')
-         as source_learned,
-       count(*) filter (where m.authority in ('user', 'affirmed')) as owner_authority
-from ids left join memories m on m.id = ids.belief_id
+       count(*) filter (where summary is not null) as summarized,
+       count(*) filter (where summary->'arms' ? 'lexical') as with_lexical,
+       count(*) filter (where summary->'arms' ? 'structured') as with_structured,
+       count(*) filter (where summary->'arms' ? 'semantic') as with_semantic,
+       percentile_cont(0.5) within group (order by (summary->>'latency_ms')::numeric) as p50,
+       percentile_cont(0.95) within group (order by (summary->>'latency_ms')::numeric) as p95,
+       count(*) filter (where (summary->>'latency_ms')::numeric > 1000) as slow,
+       {_class_sums("returned")},
+       {_class_sums("dropped")}
+from recall_traces
+where tenant_id = :tenant and principal_id = :principal
+  and created_at >= :since and created_at <= :until and not erasure_pending
 """
 
 
@@ -136,8 +129,6 @@ async def read_memory_health_report(
 
     [usage] = await rows(_USAGE)
     [traces] = await rows(_TRACES)
-    [returned] = await rows(_class_share("returned"))
-    [dropped] = await rows(_class_share("dropped_for_budget"))
     [store] = await rows(_STORE)
     lifecycle = await rows(_LIFECYCLE)
     [index] = await rows(_INDEX)
@@ -156,14 +147,15 @@ async def read_memory_health_report(
         charged_beliefs=int(usage.charged_beliefs),
         ambiguous_citations=int(usage.ambiguous),
         traces=traces.traces,
+        summarized_traces=traces.summarized,
         traces_with_lexical=traces.with_lexical,
         traces_with_structured=traces.with_structured,
         traces_with_semantic=traces.with_semantic,
         p50_recall_latency_ms=None if traces.p50 is None else max(0.0, float(traces.p50)),
         p95_recall_latency_ms=None if traces.p95 is None else max(0.0, float(traces.p95)),
         slow_traces=traces.slow,
-        returned=_share(returned),
-        dropped_for_budget=_share(dropped),
+        returned=_share(traces, "returned"),
+        dropped_for_budget=_share(traces, "dropped"),
         live_beliefs=store.live,
         active_beliefs=store.active,
         provisional_beliefs=store.provisional,
@@ -189,14 +181,8 @@ async def read_memory_health_report(
     )
 
 
-def _share(row: Any) -> ClassShare:
-    return ClassShare(
-        total=row.total,
-        flagged=row.flagged,
-        provisional=row.provisional,
-        source_learned=row.source_learned,
-        owner_authority=row.owner_authority,
-    )
+def _share(row: Any, bucket: str) -> ClassShare:
+    return ClassShare(**{name: int(getattr(row, f"{bucket}_{name}")) for name in _CLASSES})
 
 
 async def memory_health_report(

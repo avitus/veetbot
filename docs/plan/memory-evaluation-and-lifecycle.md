@@ -20,7 +20,7 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:941), and formation precision and
+scenarios (memory-retrieval-and-ranking.md:970), and formation precision and
 recall of consequential facts (memory-formation-and-consolidation.md:861-863).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
@@ -28,10 +28,10 @@ therefore been argued from reading the diff.
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:358-360), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:983-986),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:1012-1015),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:102), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:978), and re-derivation
+resolved at read time (memory-retrieval-and-ranking.md:1007), and re-derivation
 that is opt-in per principal (memory-formation-and-consolidation.md:888) are
 all written down, and none of them runs.
 
@@ -851,7 +851,7 @@ first time they move; lifecycle decisions read these counters, never the legacy
 `utility`, which two months of per-run snapshot charges depressed and no wait can
 reset. The `memory.cited` payload names the delivered traces. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:983-986): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:1012-1015): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.
@@ -866,15 +866,28 @@ units of work with no external call inside a transaction.
 the store holds?" from the database alone, the way `agent run reliability`
 reports run outcomes: one read-only, repeatable-read transaction with a
 ten-second statement bound, scoped to the authenticated owner, over a window
-of at most ninety days. It reads recall traces, the `memory.recalled`,
+of at most ninety days. It reads recall-trace summaries, the `memory.recalled`,
 `memory.delivered` and `memory.cited` events, the lifecycle events, the
 memory rows and the semantic index tables, and reports counts, shares and
 latencies only: no statement, query or identifier leaves the database.
 
+The report never reads a trace document (ADR-0338). A document is tens of
+kilobytes and stored out of line, so an aggregate over documents reads the
+whole table and cannot hold the statement bound once automated sessions write
+thousands of traces a week. Each trace row instead carries a `summary` written
+with it: the recall's total time, the arms that ran, and returned and dropped
+counts by class as of the recall. The operator-field sweep removes the
+summary's timings and arms with the rest of the operator tier; the counts name
+no belief, so they stay and erasure does not rewrite them. A trace recorded
+before the summary existed has none: the report counts it in `traces`, leaves
+it out of `summarized_traces` and of every latency and class figure, and never
+falls back to its document.
+
 The report's primary signals are what reached the model and what did not:
 runs with recall, runs with a delivered block, returned and dropped-for-budget
-items by class (flagged, provisional, source-learned, owner-authority), p50
-and p95 recall latency and traces over one second, the store's composition
+items by class (flagged, provisional, source-learned, owner-authority) as they
+were classed when recall ran, p50 and p95 of the whole recall's latency and
+traces over one second, the store's composition
 (live, active, provisional, flagged, owner-authority, never used, with
 versioned counters), lifecycle events in the window by authority with the
 lowest confidence they touched, and the share of live beliefs the semantic
@@ -896,6 +909,16 @@ as People lines rather than one belief per person; the report keeps one flag
 per name, never the name. Probe files are never the frozen Milestone 16
 or 33 controls, their reports are not activation or release evidence, and the
 driver refuses production and any database not named for the purpose.
+
+The owner question set (ADR-0338) applies the same driver as a standing
+before-and-after measure. It holds real questions the owner asked and the
+stored facts each should reach, split once into a development file a change
+may be tuned against and a held-out file it may not. A change to candidate
+selection, ranking, packing or the semantic index is run against both, at its
+base revision and at the change, before it reaches `dev`. The files are
+owner-private, live beside the incident probes outside Git, and change only by
+owner review under a new version number. Like the probes, their reports are
+not activation or release evidence.
 
 ## The recall delta and correction lines
 

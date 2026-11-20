@@ -1351,6 +1351,7 @@ class RecallTraceRow(Base):
         Index("ix_recall_traces_turn", "turn_id", "created_at"),
         Index("ix_recall_traces_trace_gin", "trace", postgresql_using="gin"),
         Index("ix_recall_traces_operator_expiry", "operator_fields_expire_at"),
+        Index("ix_recall_traces_owner_created", "tenant_id", "principal_id", "created_at"),
         Index(
             "ix_traces_erasure_pending",
             "tenant_id",
@@ -1373,6 +1374,9 @@ class RecallTraceRow(Base):
     )
     turn_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     trace: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    # Identifier-free aggregates for the recall health report; null on traces
+    # recorded before the column existed.
+    summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     erasure_pending: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     operator_fields_expire_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -29,6 +29,7 @@ from agent_core.domain.memory import (
     LIVE_MEMORY_STATUSES,
     MEMORY_SUBJECT_MAX_LENGTH,
     SENSITIVITY_ORDER,
+    TRACE_BELIEF_ID_FIELDS,
     USAGE_ACCOUNTING_VERSION,
     BeliefRejection,
     BeliefType,
@@ -4194,7 +4195,7 @@ class GovernedMemoryService:
                 "rendered": "",
                 "rendered_sha256": hashlib.sha256(b"").hexdigest(),
             }
-            for field in ("returned", "cited", "carried_in", "blocked", "dropped_for_budget"):
+            for field in TRACE_BELIEF_ID_FIELDS:
                 update[field] = [key for key in getattr(trace, field) if key not in unavailable]
             return trace.model_copy(update=update)
 

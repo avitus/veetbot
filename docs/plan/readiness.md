@@ -2009,7 +2009,7 @@ gates remain pending. Recorded offline comparisons and owner judgments preserve
 failed precision and answer-lift results against frozen synthetic development
 and holdout corpora and unchanged M16 controls. Unattended activation stays off.
 ADR-0174 authorizes daily proposals and individually approved application; its
-supervised production deployment remains pending. Milestone 21's open evidence
+supervised production mode is deployed. Milestone 21's open evidence
 remains open and the verified ceiling stays 14.
 
 ## Milestone 33: General memory recall, authorized; implementation in progress

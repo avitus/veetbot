@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-20 — Recall health can be measured again (ADR-0338)
+
+- `agent memory health` had stopped working on production: it timed out on
+  every window. It now reads a small summary stored with each recall and
+  finishes whatever the size of the trace table. Recalls recorded before this
+  release have no summary and are counted separately.
+- Each recall now records how long every stage took, not only the vector
+  search, and a recall led by a question keeps the ranking of every candidate
+  it considered for thirty days, so a missed memory can be traced to the
+  stage that lost it.
+- What Chat recalls is unchanged.
+
 ## 2026-11-20 — Archiving right after a reply no longer fails
 
 - Archiving a conversation shortly after replying to it showed "Inbox state

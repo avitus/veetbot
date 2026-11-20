@@ -899,6 +899,7 @@ class InMemoryTraceStore:
                         "arm_latencies_ms": {},
                         "candidates": 0,
                         "dropped_for_budget": [],
+                        "ranked_candidates": [],
                         "dropped_for_budget_count": (
                             trace.dropped_for_budget_count + len(trace.dropped_for_budget)
                         ),

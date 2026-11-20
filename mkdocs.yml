@@ -476,4 +476,5 @@ nav:
       - "ADR-0335: Event-sourced envelope nonces": adr/0335-event-sourced-envelope-nonces.md
       - "ADR-0336: Sender signatures update People contact details": adr/0336-sender-signatures-update-people-contact-details.md
       - "ADR-0337: Own reply keeps an Inbox gesture current": adr/0337-own-reply-keeps-an-inbox-gesture-current.md
+      - "ADR-0338 — Recall trace summary and stage timings": adr/0338-recall-trace-summary-and-stage-timings.md
   - Changelog: changelog.md
