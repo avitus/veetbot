@@ -31,6 +31,7 @@ from agent_core.domain.memory import (
     Sensitivity,
 )
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+from agent_core.evals.owner_recall_probe_driver import _resolve
 from agent_core.evals.owner_recall_probes import evidence_stage, load_probes
 from tests.contract.owner_recall_probe_cases import (
     FakeWebProvider,
@@ -38,6 +39,7 @@ from tests.contract.owner_recall_probe_cases import (
     home_city_case,
     post_snapshot_home_case,
     save_case,
+    stated,
 )
 from tests.gates.test_memory_m16 import _START
 from tests.integration.m2_support import memory_settings
@@ -248,3 +250,37 @@ async def test_family_probe_checks_the_names_the_overview_delivers(tmp_path: Pat
         clock=FixedClock(_START),
     ) as app:
         await family_names_case(app, script)
+
+
+async def test_an_expected_text_is_found_however_many_beliefs_the_store_holds(
+    tmp_path: Path,
+) -> None:
+    """A text locator must search the whole store, not its first page.
+
+    The owner's store holds thousands of beliefs. A locator that read one page
+    reported an expected fact as never stored whenever it lay outside that
+    page, which blames formation for what recall did or did not do.
+    """
+
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=script,
+        clock=FixedClock(_START),
+    ) as app:
+        session_id = await app.sessions.create()
+        oldest = await stated(app, session_id, "User keeps bees at the allotment", "bees")
+        for number in range(205):
+            await stated(
+                app, session_id, f"User filed receipt number {number}", f"receipt {number}"
+            )
+        newest = await stated(app, session_id, "User plays the cello on Sundays", "cello")
+
+        found_oldest = await _resolve(app, None, "keeps bees")
+        found_newest = await _resolve(app, None, "plays the cello")
+        missing = await _resolve(app, None, "owns a submarine")
+
+    assert found_oldest is not None and found_oldest.id == oldest.id
+    assert found_newest is not None and found_newest.id == newest.id
+    assert missing is None

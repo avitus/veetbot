@@ -194,7 +194,7 @@ without reading evidence (ADR-0101), and the production selection audit read on
 `formation@11` has no quality evidence of its own. Remaining:
 
 - [ ] Run hosted CI and the CodeRabbit review loop on the final head
-- [ ] Supply quality evidence for the formation policy production runs: the 2026-11-20 selection audit names formation@11 (People default), not formation@9, so either evaluate formation@11 on the distillation corpora or pin formation@9; an owner decision
+- [ ] Supply quality evidence for the formation policy production runs: the 2026-11-20 selection audit names formation@11 (People default), not formation@9. The owner decided on 2026-11-20 to keep formation@11 for now and to revisit the choice by 2027-02-20; evaluating it on the distillation corpora, or pinning formation@9, stays open until then
 - [ ] Memory formation temporarily remains on GPT-5.6 Sol under ADR-0093; audit scorer semantics and compare Sol/Astra under controlled reasoning settings before changing the memory tuple with new activation evidence.
 
 ### Milestone 24 — SMS through the owner's iPhone
@@ -370,6 +370,7 @@ The staged implementation is in progress; optional channels remain evidence-gate
 
 - [ ] Verify the first authorized ADR-0274 release in production, including trial expiry, semantic role bindings, sparse fallback and jobs
 - [ ] Complete the staged implementation and comparative activation evidence
+- [ ] Owner decision on 2026-11-20: memory text may be sent to an outside embedding provider for recall, to be revisited by 2027-05-20. No provider is configured; measuring a stronger encoder against the owner question set needs its own decision record, since the standing admission binds the local encoder (ADR-0290)
 - [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
 
 ### Milestone 34 — Owner records

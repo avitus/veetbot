@@ -26,6 +26,7 @@ from uuid import UUID
 
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.memory import (
+    MemoryBrowseQuery,
     MemoryRecord,
     MemoryStatus,
     RecallResult,
@@ -49,6 +50,8 @@ from agent_core.evals.owner_recall_probes import (
 )
 
 _SHORT_ID = re.compile(r"\[m:([0-9a-f]{8})\]")
+# The store's largest browse page; the locator walks every page.
+_BROWSE_PAGE = 200
 SCRIPTED_ANSWER = "Answered from the delivered evidence."
 Finish = Callable[[Any, UUID], Awaitable[Run]]
 
@@ -294,9 +297,7 @@ async def _resolve(
     assert statement_contains is not None
     needle = statement_contains.casefold()
     matches = [
-        record
-        for record in await app.memory.list_memories(include_inactive=True, limit=200)
-        if needle in record.statement.casefold()
+        record for record in await _every_belief(app) if needle in record.statement.casefold()
     ]
     live = [
         record
@@ -306,7 +307,36 @@ async def _resolve(
     chosen = live or matches
     if not chosen:
         return None
-    return cast(MemoryRecord, max(chosen, key=lambda record: record.store_position))
+    return max(chosen, key=lambda record: record.store_position)
+
+
+async def _every_belief(app: Any) -> list[MemoryRecord]:
+    """Every belief the owner's store holds, in any status, read page by page.
+
+    One page is not the store: an expected text that matched a belief outside
+    the first page was reported as never stored, a formation finding the run
+    did not make.
+    """
+
+    records: list[MemoryRecord] = []
+    cursor: tuple[int, UUID] | None = None
+    async with app.uow_factory() as uow:
+        while True:
+            page = await uow.memories.browse(
+                MemoryBrowseQuery(
+                    tenant_id=app.principal.tenant_id,
+                    principal_id=app.principal.principal_id,
+                    ceiling=Sensitivity.RESTRICTED,
+                    statuses=tuple(MemoryStatus),
+                    limit=_BROWSE_PAGE,
+                    cursor=cursor,
+                )
+            )
+            records.extend(page[:_BROWSE_PAGE])
+            if len(page) <= _BROWSE_PAGE:
+                return records
+            last = page[_BROWSE_PAGE - 1]
+            cursor = (last.store_position, last.id)
 
 
 def _locate(
