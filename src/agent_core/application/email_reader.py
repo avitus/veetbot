@@ -12,8 +12,9 @@ from itertools import groupby
 from urllib.parse import urlsplit
 
 from agent_core.domain.email_signature import HISTORY as _HISTORY
+from agent_core.domain.email_signature import POSTSCRIPT as _POSTSCRIPT
 from agent_core.domain.email_signature import SIGNATURE_LINES as _SIGNATURE_LINES
-from agent_core.domain.email_signature import named_signature, says_something, sender_name
+from agent_core.domain.email_signature import named_signature, sender_name
 from agent_core.domain.web import is_public_https_url
 
 _INVISIBLE = str.maketrans("", "", "\u00ad\u034f\u200b\ufeff")
@@ -178,8 +179,9 @@ def _without_delimited_signatures(lines: list[str]) -> list[str]:
     """Blank a `-- ` delimiter and the unbroken lines under it, at each quote level.
 
     Only a block that ends its level's text is a signature or a list footer: a
-    rule between two sections has more of the message below it. A block that
-    holds a postscript or a sentence is the message too, and stays as written.
+    rule between two sections has more of the message below it. A postscript
+    line in the block is the message and stays. Any other sentence there goes
+    with the block: under a delimiter it is a disclaimer or a list footer.
     """
     result = list(lines)
     for index, line in enumerate(lines):
@@ -188,14 +190,12 @@ def _without_delimited_signatures(lines: list[str]) -> list[str]:
             continue
         depth = prefix.count(">")
         end = index + 1
-        said = False
         while end < len(lines) and end - index <= _SIGNATURE_LINES + 1:
             inner_prefix, inner = _quoted(lines[end])
             if not inner or inner_prefix.count(">") != depth:
                 break
-            said = said or says_something(inner.strip("*_ "))
             end += 1
-        if said or end == index + 1 or end - index > _SIGNATURE_LINES + 1:
+        if end == index + 1 or end - index > _SIGNATURE_LINES + 1:
             continue
         after = end
         while after < len(lines) and not _quoted(lines[after])[1]:
@@ -204,7 +204,10 @@ def _without_delimited_signatures(lines: list[str]) -> list[str]:
             next_prefix, following = _quoted(lines[after])
             if next_prefix.count(">") == depth and not _HISTORY.match(following):
                 continue
-        result[index:end] = [">" * depth] * (end - index)
+        result[index:end] = [
+            kept if _POSTSCRIPT.match(_quoted(kept)[1].strip("*_ ")) else ">" * depth
+            for kept in lines[index:end]
+        ]
     return result
 
 

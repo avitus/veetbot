@@ -215,8 +215,8 @@ memory formation read. Three signs identify one, and nothing else does:
   `Signature`, `ms-outlook-mobile-signature` and `AppleMailSignature` ids.
 - In a plain-text part, a `-- ` delimiter line and the unbroken lines under it,
   at most 12, when only blank lines, the end of that quote level, or the reply or
-  forward it was written above follow. A mailing-list footer of short lines goes the same way. A delimiter with more of the
-  message below it stays, and so does a block that holds a postscript or a sentence of more than eight words.
+  forward it was written above follow. This also removes a mailing-list footer written the same way. A delimiter with
+  more of the message below it stays. Of a removed block only a postscript line is kept; a disclaimer or other sentence there goes.
 - In the writer's own text, a line that is exactly the sender's display name of
   two or more words, with the lines under it, when those lines run to the end of
   the text or to the reply or forward below. Each must be at most 100 characters,

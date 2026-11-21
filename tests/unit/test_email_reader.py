@@ -1031,29 +1031,49 @@ def test_a_delimiter_that_does_not_end_its_text_is_not_a_signature() -> None:
     assert "Row 12" in reading_body(long_block)
 
 
-@pytest.mark.parametrize(
-    "said",
-    [
-        # A postscript is written under the signature, and is still the message.
-        "P.S. Bring the deck.",
-        "*PS:* the room moved.",
-        # So is a sentence of more than eight words.
-        "Please send the signed contract to Sam before Friday, not to me.",
-    ],
-)
-def test_a_delimited_block_holding_a_postscript_or_a_sentence_stays(said: str) -> None:
-    result = reading_body(f"Thanks.\n\n--\nJamie Example\n{said}")
-    assert said in result and "Jamie Example" in result
+@pytest.mark.parametrize("said", ["P.S. Bring the deck.", "*PS:* the room moved."])
+def test_only_a_postscript_under_a_signature_delimiter_stays(said: str) -> None:
+    """A postscript is written under the signature, and is still the message."""
+    assert reading_body(f"Thanks.\n\n--\nJamie Example\n{said}") == f"Thanks.\n\n{said}"
+    # The lines above it and below it are the signature, and still go.
+    around = f"Thanks.\n\n--\nJamie Example\nDirector, Example\n{said}\n555 0100"
+    assert reading_body(around) == f"Thanks.\n\n{said}"
     # At a quote level too, and above the reply it was written over.
     quoted = reading_body(f"Agreed.\n\n> Thanks.\n>\n> --\n> Jamie Example\n> {said}\n")
-    assert said in quoted
+    assert f"> {said}" in quoted and "Jamie Example" not in quoted and "--" not in quoted
     replied = reading_body(
         f"Thanks.\n\n--\nJamie Example\n{said}\n\n"
         "On Fri, Nov 20, 2026 at 6:13 AM Sam Example <sam@example.com> wrote:\n\n> Coming?\n"
     )
-    assert said in replied
-    # A short signature that holds neither still goes.
-    assert reading_body("Thanks.\n\n--\nJamie Example\nDirector, Example\n555 0100") == "Thanks."
+    assert replied.startswith(f"Thanks.\n\n{said}\n\nOn Fri, Nov 20, 2026 at 6:13 AM Sam Example")
+    assert "Jamie Example" not in replied
+
+
+def test_a_wrapped_postscript_under_a_signature_delimiter_stays_whole() -> None:
+    first = "P.S. Bring the printed deck and the adapter for the projector in the"
+    assert len(first) + len(" second") > 70
+    result = reading_body(f"Thanks.\n\n--\nJamie Example\n{first}\nsecond floor room.")
+    assert result == f"Thanks.\n\n{first} second floor room."
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        # A short signature.
+        "Jamie Example\nDirector, Example\n555 0100",
+        # A signature with a disclaimer: under the delimiter a sentence is not the message.
+        "Jamie Example\nThis message is confidential and meant only for the person it was sent to.",
+        # A mailing-list footer.
+        'You received this message because you are subscribed to the Google Groups "Example" '
+        "group.\nTo unsubscribe from this group and stop receiving emails from it, send an email "
+        "to example+unsubscribe@googlegroups.example.",
+    ],
+)
+def test_a_delimited_block_without_a_postscript_goes_whatever_it_says(block: str) -> None:
+    assert reading_body(f"Thanks.\n\n-- \n{block}") == "Thanks."
+    quoted = "\n".join(f"> {line}" for line in ["Thanks.", "", "-- ", *block.split("\n")])
+    shown = reading_body(f"Agreed.\n\n{quoted}\n").split("\n")
+    assert [line for line in shown if line.strip("> ")] == ["Agreed.", "> Thanks."]
 
 
 def test_block_under_the_writers_own_name_goes_when_it_ends_the_message() -> None:
