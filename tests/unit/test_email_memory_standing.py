@@ -42,6 +42,11 @@ from tests.contract.support import NOW, SESSION_ID, principal
 
 THREAD_ID = UUID(int=900)
 BODY = "The Atlas board vote moved to Friday."
+# The same fact in each sender's own words: a word-for-word repeat of an earlier
+# message's sentence is quoted text and renews nothing (ADR-0341).
+CONFIRMING = "Confirming the Atlas vote is now Friday."
+AGREEING = "Yes, Friday is right for the Atlas vote."
+SAM = "Sam <sam@example.test>"
 
 
 async def _put(factory: Any, kind: str, key: str, payload: dict[str, object]) -> None:
@@ -63,9 +68,11 @@ async def _put(factory: Any, kind: str, key: str, payload: dict[str, object]) ->
 
 
 def _message(source: Any, *, direction: str = "received", check: str = "none") -> EmailMessage:
+    """The message as the mailbox projection holds it, body included."""
     return EmailMessage(
         id=source.message_id,
         sender=source.sender,
+        body=source.body,
         sent_at=source.sent_at,
         direction=direction,  # type: ignore[arg-type]
         sender_check=check,  # type: ignore[arg-type]
@@ -249,23 +256,33 @@ def test_importance_is_the_saved_rating_after_the_owners_importance_feedback() -
             created_at=NOW,
         ).model_copy(update=updates)
 
-    assert thread_importance(thread, []) == (0.4, False)
+    # The rating, whether the owner marked the thread Important, and whether it is known.
+    assert thread_importance(thread, []) == (0.4, False, True)
     # A new message resets the stored rating; the last assessment still says what it was.
     reset = thread.model_copy(update={"priority": 0.0, "assessment_version": ""})
-    assert thread_importance(reset, []) == (None, False)
-    assert thread_importance(reset, [], {"priority": 0.7}) == (0.7, False)
+    assert thread_importance(reset, []) == (None, False, False)
+    assert thread_importance(reset, [], {"priority": 0.7}) == (0.7, False, True)
+    # A record saved before ratings were kept gives a floor, which is not a known rating.
     older_record = {"content_importance": 0.95, "relationship_importance": 0.9, "urgency": 0.6}
-    floor, _ = thread_importance(reset, [], older_record)
-    bulk_floor, _ = thread_importance(reset, [], {**older_record, "bulk": True})
-    assert floor == pytest.approx(0.915) and bulk_floor == pytest.approx(0.366)
-    assert thread_importance(reset, [feedback("important")]) == (1.0, True)
+    floor, _, known = thread_importance(reset, [], older_record)
+    bulk_floor, _, _ = thread_importance(reset, [], {**older_record, "bulk": True})
+    assert floor == pytest.approx(0.915) and bulk_floor == pytest.approx(0.366) and not known
+    # Neither is the rating an assessment saved when it abstained or only screened for junk.
+    ungrounded, grounded = {"priority": 0.4, "grounded": False}, {"priority": 0.4, "grounded": True}
+    assert thread_importance(thread, [], ungrounded) == (0.4, False, False)
+    assert thread_importance(thread, [], grounded) == (0.4, False, True)
+    assert thread_importance(reset, [], {**ungrounded, "priority": 0.7}) == (0.7, False, False)
+    # The owner's own judgment is always known.
+    assert thread_importance(reset, [feedback("important")]) == (1.0, True, True)
+    abstained = {"priority": 0.0, "grounded": False}
+    assert thread_importance(thread, [feedback("less_important")], abstained) == (0.0, False, True)
     # A rating that survived with its version cleared (an expired body cache) is still the rating.
     kept = thread.model_copy(update={"assessment_version": ""})
-    assert thread_importance(kept, [], {"priority": 0.9}) == (0.4, False)
-    assert thread_importance(thread, [feedback("important")]) == (1.0, True)
-    assert thread_importance(thread, [feedback("less_important")]) == (0.0, False)
-    assert thread_importance(thread, [feedback("important", undone_at=NOW)]) == (0.4, False)
-    assert thread_importance(thread, [feedback("needs_reply")]) == (0.4, False)
+    assert thread_importance(kept, [], {"priority": 0.9}) == (0.4, False, True)
+    assert thread_importance(thread, [feedback("important")]) == (1.0, True, True)
+    assert thread_importance(thread, [feedback("less_important")]) == (0.0, False, True)
+    assert thread_importance(thread, [feedback("important", undone_at=NOW)]) == (0.4, False, True)
+    assert thread_importance(thread, [feedback("needs_reply")]) == (0.4, False, True)
 
 
 async def test_unknown_sender_in_an_important_thread_is_kept_longer_and_stays_a_guess() -> None:
@@ -483,8 +500,11 @@ async def test_a_later_email_that_repeats_the_fact_renews_the_memory() -> None:
     factory, service = await correspondence_stack()
     await seed_account(factory)
     first = await mail(factory, message_id="m-1", sender=ALEX, body=BODY, days_ago=40)
-    later = await mail(factory, message_id="m-2", sender=ALEX, body=BODY, days_ago=2)
-    await seed_thread(factory, priority=0.4, messages=[_message(first), _message(later)])
+    later = await mail(factory, message_id="m-2", sender=ALEX, body=CONFIRMING, days_ago=2)
+    echo = await mail(factory, message_id="m-3", sender=SAM, body=f"Noted.\n\n{BODY}", days_ago=1)
+    await seed_thread(
+        factory, priority=0.4, messages=[_message(first), _message(later), _message(echo)]
+    )
     [memory] = await service.form(first, [fact_for(first)])
     assert memory.expires_at == first.sent_at + timedelta(days=90)
 
@@ -500,12 +520,16 @@ async def test_a_later_email_that_repeats_the_fact_renews_the_memory() -> None:
     # Reading either message again is the same evidence, not a new repeat.
     assert await service.form(later, [fact_for(later)]) == [renewed]
     assert await service.form(first, [fact_for(first)]) == [renewed]
+    # A reply that carries the first message's sentence word for word renews nothing.
+    quoted = fact_for(echo).model_copy(update={"quote": BODY})
+    assert await service.form(echo, [quoted]) == []
+    assert await stored(factory, memory) == renewed
 
 
 async def test_older_mail_processed_later_renews_nothing() -> None:
     factory, service = await correspondence_stack()
     await seed_account(factory)
-    newer = await mail(factory, message_id="m-new", sender=ALEX, body=BODY, days_ago=2)
+    newer = await mail(factory, message_id="m-new", sender=ALEX, body=CONFIRMING, days_ago=2)
     older = await mail(factory, message_id="m-old", sender=ALEX, body=BODY, days_ago=60)
     await seed_thread(factory, priority=0.4, messages=[_message(older), _message(newer)])
     [memory] = await service.form(newer, [fact_for(newer)])
@@ -690,10 +714,8 @@ async def test_a_repeat_from_a_known_sender_makes_a_first_class_memory_active() 
     factory, service = await correspondence_stack()
     await know_alex(factory, service)
     first = await mail(factory, message_id="m-1", sender=ALEX, body=BODY, days_ago=12)
-    stranger = await mail(
-        factory, message_id="m-2", sender="Sam <sam@example.test>", body=BODY, days_ago=6
-    )
-    later = await mail(factory, message_id="m-3", sender=ALEX, body=BODY, days_ago=2)
+    stranger = await mail(factory, message_id="m-2", sender=SAM, body=CONFIRMING, days_ago=6)
+    later = await mail(factory, message_id="m-3", sender=ALEX, body=AGREEING, days_ago=2)
     await seed_thread(
         factory,
         priority=0.7,
@@ -869,3 +891,188 @@ def test_the_rating_formula_is_one_function_shared_with_the_assessment() -> None
     assert assessment_priority(0.2, 0.9, 0.5, bulk=False) == pytest.approx(0.74)
     assert assessment_priority(1.0, 1.0, 1.0, bulk=False) == 1.0
     assert assessment_priority(0.5, 0.0, 0.0, bulk=True) == pytest.approx(0.18)
+
+
+async def test_a_floor_from_an_older_assessment_record_never_shortens_a_memory() -> None:
+    """An assessment saved before ratings were kept holds only the model's features. Their
+    content share is a floor: content 0.4 with relationship 1.0 rated 0.82, the floor is 0.36."""
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY)
+    await seed_thread(factory, priority=0.82, messages=[_message(source)])
+    [memory] = await service.form(source, [fact_for(source)])
+    assert memory.expires_at == source.sent_at + timedelta(days=365)
+
+    # A new message resets the stored rating; only the older record answers for it.
+    await seed_thread(factory, priority=0.0, messages=[_message(source)], assessed=False)
+    features: dict[str, object] = {
+        "content_importance": 0.4,
+        "relationship_importance": 1.0,
+        "urgency": 0,
+    }
+    await _put(factory, "assessment", str(THREAD_ID), features)
+    assert (await service.rerate_thread("work", "t-mail")).changed == 0
+    assert (await service.rerate_all(apply=True)).changed == 0
+    assert await stored(factory, memory) == memory
+
+    # The floor still lengthens: content 0.95 alone is enough for no expiry.
+    await _put(factory, "assessment", str(THREAD_ID), {**features, "content_importance": 0.95})
+    assert (await service.rerate_thread("work", "t-mail")).by_retention == {"no_expiry": 1}
+    # The rating itself, kept with every assessment saved since, does lower.
+    await _put(factory, "assessment", str(THREAD_ID), {**features, "priority": 0.36})
+    assert (await service.rerate_thread("work", "t-mail")).by_retention == {"90_days": 1}
+
+
+async def test_an_assessment_that_abstained_shortens_and_demotes_nothing() -> None:
+    """A rejected or ungrounded result is saved with zero features, and the thread's rating
+    with them. That zero is no reading of the thread."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY, days_ago=40)
+    await seed_thread(factory, priority=0.7, messages=[_message(source)])
+    [memory] = await service.form(source, [fact_for(source)])
+    assert memory.derivation is MemoryDerivation.DIRECT
+    assert memory.expires_at == source.sent_at + timedelta(days=365)
+
+    await seed_thread(factory, priority=0.0, messages=[_message(source)])
+    abstained: dict[str, object] = {
+        "priority": 0.0,
+        "content_importance": 0,
+        "urgency": 0,
+        "grounded": False,
+    }
+    await _put(factory, "assessment", str(THREAD_ID), abstained)
+    assert (await service.rerate_thread("work", "t-mail")).changed == 0
+    assert (await service.rerate_all(apply=True)).changed == 0
+    assert await stored(factory, memory) == memory
+
+    # The owner's mark still lengthens it while the assessment abstains.
+    await seed_feedback(factory, "important")
+    assert (await service.rerate_thread("work", "t-mail")).by_retention == {"no_expiry": 1}
+    await seed_feedback(factory, "important", undone=True)
+    # A grounded assessment that rates the thread low is a reading, and lowers it.
+    await _put(factory, "assessment", str(THREAD_ID), {**abstained, "grounded": True})
+    report = await service.rerate_thread("work", "t-mail")
+    assert (report.demoted, report.by_retention) == (1, {"30_days": 1})
+
+
+async def test_same_dated_mail_from_a_stranger_never_restands_a_known_senders_memory() -> None:
+    """A message governs the memories it formed or renewed, and is told apart by its own
+    identity: two messages can carry the same timestamp."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    first = await mail(factory, message_id="m-1", sender=ALEX, body=BODY, days_ago=5)
+    twin = await mail(factory, message_id="m-2", sender=SAM, body=CONFIRMING, days_ago=5)
+    assert first.sent_at == twin.sent_at
+    await seed_thread(factory, priority=0.7, messages=[_message(first), _message(twin)])
+    [memory] = await service.form(first, [fact_for(first)])
+    assert memory.derivation is MemoryDerivation.DIRECT
+    # The same-dated message finds the memory and changes nothing.
+    assert await service.form(twin, [fact_for(twin)]) == [memory]
+
+    assert (await service.rerate_thread("work", "t-mail")).changed == 0
+    assert (await service.rerate_all(apply=True)).changed == 0
+    current = await stored(factory, memory)
+    assert current == memory and "message m-2" not in current.statement
+
+
+async def test_a_preview_reports_the_standing_the_apply_will_leave() -> None:
+    """The message that formed a renewed memory sets its standing and the later one its
+    retention; a preview carries the first visit's outcome into the second, as a write does."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    first = await mail(factory, message_id="m-1", sender=ALEX, body=BODY, days_ago=40)
+    later = await mail(factory, message_id="m-2", sender=ALEX, body=CONFIRMING, days_ago=2)
+    await seed_thread(factory, priority=0.4, messages=[_message(first), _message(later)])
+    [guess] = await service.form(first, [fact_for(first)])
+    [renewed] = await service.form(later, [fact_for(later)])
+    assert renewed.id == guess.id and renewed.derivation is MemoryDerivation.HYPOTHESIS
+
+    await seed_feedback(factory, "important")
+    preview = await service.rerate_thread("work", "t-mail", apply=False)
+    assert await stored(factory, guess) == renewed
+    applied = await service.rerate_thread("work", "t-mail")
+    assert (applied.promoted, applied.first_class, applied.guesses) == (1, 1, 0)
+    assert preview.model_dump(exclude={"applied"}) == applied.model_dump(exclude={"applied"})
+
+
+async def test_the_owners_mark_between_two_pages_of_a_rerating_is_not_undone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The command commits a page of sources at a time. What it read for one page says
+    nothing about the next: the owner may have marked the thread Important in between."""
+    from contextlib import asynccontextmanager
+
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    one = await mail(factory, message_id="m-1", sender=ALEX, body=BODY, days_ago=4)
+    two = await mail(
+        factory, message_id="m-2", sender=ALEX, body="The diligence package is due Monday."
+    )
+    await seed_thread(factory, priority=0.2, messages=[_message(one), _message(two)])
+    [first] = await service.form(one, [fact_for(one)])
+    [second] = await service.form(
+        two, [fact_for(two, subject="Diligence package", predicate="is due", value="Monday")]
+    )
+    monkeypatch.setattr("agent_core.memory.email_people._RERATE_PAGE", 1)
+    hook = EmailPeopleFormationService(
+        factory, service._clock, service._ids, principal(), provider="fake", model="scripted"
+    )
+    transactions = 0
+
+    @asynccontextmanager
+    async def paged() -> Any:
+        nonlocal transactions
+        transactions += 1
+        if transactions == 2:
+            # Between the first page and the second: the owner's mark, and its hook.
+            await seed_feedback(factory, "important")
+            await hook.rerate_thread("work", "t-mail", cause="feedback")
+        async with factory() as uow:
+            yield uow
+
+    monkeypatch.setattr(service, "_uow_factory", paged)
+    await service.rerate_all(apply=True)
+    assert transactions == 3
+    assert (await stored(factory, first)).expires_at is None
+    assert (await stored(factory, second)).expires_at is None
+
+
+async def test_a_first_class_claim_never_upgrades_a_hypothesis_it_repeats() -> None:
+    """Only the owner's own statement promotes a guess, also when the claim is a duplicate."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY, days_ago=3)
+    statement = (
+        f"{ALEX} said by email on {source.sent_at.date().isoformat()} "
+        'that Atlas board vote moved to: "Friday".'
+    )
+    sequence = await user_event(factory, "Alex emailed about the Atlas board vote.")
+    hypothesis, _ = await _chat_memory(factory, service).remember_formation(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement=statement,
+        subject="Atlas board vote",
+        scope="general",
+        belief_type=BeliefType.FACT,
+        portability=Portability.CONTEXTUAL,
+        sensitivity=Sensitivity.INTERNAL,
+        source_event_ids=[sequence],
+        origin_trust=TrustLevel.USER,
+        explicit=False,
+        authority=MemoryAuthority.INFERRED,
+        polarity=Polarity.ASSERT,
+        confidence=0.3,
+        valid_from=NOW - timedelta(days=10),
+        expires_at=None,
+        trigger="test",
+        record_audit=False,
+        derivation=MemoryDerivation.HYPOTHESIS,
+        longevity=MemoryLongevity.TENTATIVE,
+        evidence_at=NOW - timedelta(days=10),
+    )
+    await seed_thread(factory, priority=0.9, messages=[_message(source)])
+    await service.form(source, [fact_for(source)])
+    kept = await stored(factory, hypothesis)
+    assert kept.derivation is MemoryDerivation.HYPOTHESIS
+    assert kept.longevity is MemoryLongevity.TENTATIVE

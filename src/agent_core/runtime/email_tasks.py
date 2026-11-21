@@ -1834,6 +1834,9 @@ class _TaskIO:
             except JunkPilotUnavailableError:
                 same_source = False
             else:
+                # ADR-0340: every saved assessment is followed by a re-rating.
+                if self.semantics.enabled and not learning.get("paused"):
+                    await self._rerate_memories(thread)
                 return
         receipt = (
             None
@@ -1886,6 +1889,10 @@ class _TaskIO:
             except JunkPilotUnavailableError:
                 pass
             else:
+                # The first pass reads no passage, so its zero rating shortens
+                # nothing; an owner reply or mark the thread now shows still counts.
+                if self.semantics.enabled and not learning.get("paused"):
+                    await self._rerate_memories(thread)
                 return
         cursor = int(str(previous.get("analysis_cursor", 0))) if same_source else 0
         segments = [
@@ -2025,6 +2032,9 @@ class _TaskIO:
         """Let the thread's memories follow the rating just saved (ADR-0340).
 
         A refused re-rating, such as an erased source, never ends the refresh.
+        A rating saved without a grounded reading (a rejected or ungrounded
+        result, or a junk first pass) lengthens on what the thread shows and
+        shortens nothing; the re-rating reads that from the saved assessment.
         """
         try:
             await self.semantics.rerate_thread(

@@ -998,7 +998,7 @@ The assessment prompt and revision are unchanged.
 Correspondent and historical Sent evidence remain attributed, inferred,
 sensitivity-governed, and unable to supersede an owner assertion. A claim from
 email that contradicts a belief formed from anything else is stored beside it
-and both are flagged; it never replaces that belief.
+and both are flagged; it never replaces that belief. A claim from email that repeats a stored guess never makes that guess direct or durable.
 
 Under the People policy an email memory is kept by its thread's importance and
 may be first-class (ADR-0340). The older evaluated policy keeps the thirty-day
@@ -1010,7 +1010,7 @@ horizon and the tentative construction.
   rule does not lower it.
   A new message resets the stored rating to zero until the thread is assessed
   again. That zero is read as unknown: the last saved assessment, which keeps
-  the rating it produced, answers instead.
+  the rating it produced, answers instead. Two figures are floors and not ratings: the content share of an assessment record saved before ratings were kept, and the rating an assessment saved without a grounded reading (a rejected or ungrounded result, or a junk first pass). A floor lengthens a memory and never shortens or demotes one.
 - **Retention**, measured from the memory's last evidence date:
 
   | Thread | Kept for |
@@ -1037,12 +1037,12 @@ horizon and the tentative construction.
   statement, the 0.4 cap, the hypothesis derivation, the tentative longevity
   and the review flag.
 - **Re-rating.** Retention and standing are recomputed after every saved
-  assessment of the thread, and at once when the owner gives or undoes feedback
-  on it. A re-rating lengthens or promotes on whatever the stored thread shows.
+  assessment of the thread, whichever path saved it, and at once when the owner gives or undoes feedback
+  on it. A retried feedback request or a repeated undo writes nothing and re-rates again. A re-rating lengthens or promotes on whatever the stored thread shows.
   It shortens only when the importance is known and the thread is held whole,
   changes standing only when the memory's message is among those held, and
   demotes only when that sender is no longer known or such a reading rates the
-  thread lower. It reaches a thread's memories through the index of every
+  thread lower. A known importance is a grounded assessment's rating or the owner's own feedback. It reaches a thread's memories through the index of every
   message observed, since a long thread stores only a window. These two hooks follow only a memory that already carries
   `email-retention@1`; a memory formed earlier is brought under the table by
   the command below. Only a live memory that is still inferred, still under this policy,
@@ -1054,13 +1054,13 @@ horizon and the tentative construction.
   confidence. Each applied change appends one content-free
   `email.memory.rerated` event. `agent memory rerate-email --owner
   TENANT/PRINCIPAL` re-rates every live email memory; it previews unless
-  `--confirm` is given, and its report holds counts only.
+  `--confirm` is given, and its report holds counts only. It commits two hundred sources at a time and reads feedback, threads and senders again for each, so the owner's mark given meanwhile is not undone.
 - **Renewal.** A later message with a strictly later date that states the same
   subject, predicate and value renews the existing memory: the evidence date
   moves and the expiry is recomputed and never shortened. A first-class memory
   becomes active when the later message is from a known sender too; a guess
   stays provisional. The message that formed a memory sets its standing; the
-  message that supplied its last evidence sets its retention. The owner's own
+  message that supplied its last evidence sets its retention. The retained source record says which messages formed and renewed each memory, so a message is told apart by itself and not by its timestamp. The owner's own
   statement about the same subject takes the memory over under the ordinary
   rules, and "Still true" replaces it at owner authority.
 - **One fact, one memory (ADR-0341).** A thread's analysis restarts when a
@@ -1068,8 +1068,8 @@ horizon and the tentative construction.
   proposed many times in different words.
   - A message forms one memory per fact: a proposal with the same subject,
     belief type and value as a memory the message already formed changes
-    nothing, whatever that memory's status. Values are compared without case
-    or punctuation.
+    nothing, whatever that memory's status. Values are compared without case,
+    spacing, surrounding quotation marks or a closing punctuation mark. Every other mark is part of the value: `-5 °C` is not `5 °C`.
   - A fact whose quote is quoted text forms nothing and renews nothing. Quoted
     text appears in the message only on lines marked `>`, or is a quote of at
     least six words that an earlier message of the stored thread already
@@ -1079,7 +1079,7 @@ horizon and the tentative construction.
   - `agent memory merge-email-duplicates --owner TENANT/PRINCIPAL` merges the
     copies already stored. Within a thread, live email memories that share a
     subject, a belief type and a value are one fact: the earliest evidence
-    stays and each copy is superseded by it. Copies under different subjects
+    stays and each copy is superseded by it. The memory kept takes its copies' latest evidence date and longest retention, and the message behind that evidence is linked to it for later re-rating. Copies under different subjects
     are counted and left. It previews unless `--confirm` is given, reports
     counts only, and appends one content-free `email.memory.merged` event per
     thread it changes.

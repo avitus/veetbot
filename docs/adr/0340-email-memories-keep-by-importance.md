@@ -71,6 +71,13 @@ outside the part held. One long thread accounted for most of each figure.
   saved before this change holds only the model's features, so the content
   share of the same formula stands in as a floor. With no assessment and no
   owner feedback, the importance is unknown.
+- **A floor and an abstention are not ratings either.** The content share of
+  an older record leaves out the relationship share, so the true rating may
+  have been higher. A rejected or ungrounded result, and a junk first pass,
+  save zero features and with them a zero rating that reads no part of the
+  thread; the assessment record says it was not grounded. Each of these may
+  lengthen a memory and never shortens or demotes one. A known rating is one a
+  grounded assessment saved, or the owner's own feedback.
 - **A long thread stores a window of its messages.** The owner's reply, or the
   message a memory came from, may be outside it. The thread index lists every
   message ever observed, and re-rating reaches a thread's memories through
@@ -133,18 +140,21 @@ No ranking code changes, so the `retrieval@7` label stays.
 ### 4. A memory follows its thread, and a repeat renews it
 
 - **Re-rating.** A memory's retention and standing are recomputed from the
-  current stored state: after every saved assessment of its thread, and at once
-  when the owner gives or undoes feedback on that thread. Person and topic
-  feedback reaches other threads when they are next assessed. A reply reaches
-  the memory when the sent message is synced.
+  current stored state: after every saved assessment of its thread, whichever
+  path saved it, and at once when the owner gives or undoes feedback on that
+  thread. The feedback commits first. A retry of the same request, or a
+  repeated undo, writes nothing and re-rates again, so a re-rating that did not
+  run is made up by the retry or by the thread's next assessment. Person and
+  topic feedback reaches other threads when they are next assessed. A reply
+  reaches the memory when the sent message is synced.
 - **Raising needs what is visible; lowering needs proof.** A re-rating
   lengthens a memory's retention, or promotes it, on whatever the stored
   thread shows. It shortens retention only on a reading whose importance is
   known and whose thread is held whole, so that "no owner reply" is a fact and
   not a gap. It changes standing only when the memory's message is among those
   held, and it demotes only when that sender is no longer known or such a
-  reading rates the thread lower. A reset rating, a partial thread, or a
-  message that left the window lowers nothing.
+  reading rates the thread lower. A reset rating, a floor, an abstention, a
+  partial thread, or a message that left the window lowers nothing.
 - **Older memories wait for the command.** The two hooks follow only a memory
   already under the table, one that carries `email-retention@1`. A memory
   formed before this change is brought under it only by the owner's command
@@ -177,7 +187,12 @@ No ranking code changes, so the `retrieval@7` label stays.
   nothing. Nobody can write a claim into the active set by sending it twice.
 - **Which message governs a renewed memory.** The message that formed it sets
   its standing and wording. The message that supplied its last evidence sets
-  its retention. For a memory nothing renewed these are the same message.
+  its retention. For a memory nothing renewed these are the same message. The
+  retained source record says, for each memory it lists, whether its message
+  formed it, renewed it or only found it. A message that only found a memory
+  governs nothing, even when it carries the same timestamp as the one that
+  formed it. Dates order the evidence; they identify a message only on a
+  record written before this was kept.
 - **A later chat.** The owner's own statement about the same subject takes the
   memory over under the ordinary formation rules, which this change leaves as
   they are: it promotes a guess in place with the owner's words, and it
@@ -201,8 +216,10 @@ revive what it formed. A citation never touches evidence (ADR-0247).
   test now reproduces that and holds the repair. A later email may supersede
   only a belief that is still a correspondent's attributed claim. A claim from
   email also never takes over a guess formed elsewhere by promotion: only the
-  owner's own statement promotes a guess. These rules sit in the shared
-  formation code, so they hold for `email-semantic@1` as well.
+  owner's own statement promotes a guess. A claim that repeats a stored guess
+  word for word counts as evidence for it and leaves it a tentative guess.
+  These rules sit in the shared formation code, so they hold for
+  `email-semantic@1` as well.
 - **Bulk mail forms nothing** (ADR-0116), and suspected spam forms nothing
   (ADR-0165).
 - **Attribution is always shown.** Both statement forms name the sender, the
@@ -244,10 +261,12 @@ record.
 applies with `--confirm`. It walks the retained email sources two hundred to a
 transaction, recomputes each live email memory's retention and standing by
 decisions 1 to 4, and reports counts only: examined, changed, promoted,
-returned, first-class, guesses, and memories by retention. Nothing is
-backfilled at deploy, and no later assessment or feedback changes a memory the
-command has not yet brought under the table. A memory that already expired is
-not revived.
+returned, first-class, guesses, and memories by retention. Each transaction
+reads feedback, threads and senders again, so a mark the owner gives while the
+command runs is not undone by what an earlier transaction read. The preview
+reports what applying would leave. Nothing is backfilled at deploy, and no
+later assessment or feedback changes a memory the command has not yet brought
+under the table. A memory that already expired is not revived.
 
 ### 9. Gates and evidence
 

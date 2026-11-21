@@ -7,6 +7,7 @@ message assessed again in different words, the rest from other messages.
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
@@ -14,7 +15,15 @@ from uuid import UUID
 import pytest
 
 from agent_core.domain.email import EmailMessage
-from agent_core.domain.email_memory import EmailMergeReport, quoted_text, stated_value
+from agent_core.domain.email_memory import (
+    EmailMergeReport,
+    first_class_statement,
+    guess_statement,
+    quoted_text,
+    restated,
+    stated_value,
+    value_key,
+)
 from agent_core.domain.email_semantics import EmailSemanticFact, semantic_source_key
 from agent_core.domain.errors import AuthorizationError, ConflictError, NotFoundError
 from agent_core.domain.memory import BeliefType, MemoryAuthority, MemoryRecord, MemoryStatus
@@ -219,6 +228,77 @@ async def test_a_later_message_that_restates_the_fact_renews_the_one_memory() ->
     assert [row.id for row in await _email_memories(factory)] == [first.id]
 
 
+def test_a_value_keeps_the_punctuation_that_changes_it() -> None:
+    """Case, spacing, wrapping quotes and a closing full stop are wording; a sign is the value."""
+    assert value_key("Friday.") == value_key(' "friday" ') == value_key("FRIDAY") == "friday"
+    assert value_key("-5 °C") != value_key("5 °C")
+    assert value_key("3.5%") != value_key("3-5%") != value_key("35%")
+    assert value_key("$5") != value_key("€5") and value_key("A+") != value_key("A-")
+    assert value_key("10:30") != value_key("10/30") and value_key('5"') != value_key("5")
+    assert value_key("...") == "..."
+
+
+async def test_two_values_that_differ_by_a_sign_are_two_facts() -> None:
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    reading = "The freezer reads -5 °C and the fridge reads 5 °C."
+    source = await mail(factory, message_id="m-1", sender=ALEX, body=reading)
+
+    def temperature(value: str) -> EmailSemanticFact:
+        return fact_for(source, quote=reading, subject="Cold room", predicate="reads", value=value)
+
+    [freezer] = await service.form(source, [temperature("-5 °C")])
+    [fridge] = await service.form(source, [temperature("5 °C")])
+    assert fridge.id != freezer.id and len(await _email_memories(factory)) == 2
+    assert (await service.merge_duplicates(apply=True)).superseded == 0
+
+
+async def test_a_value_is_read_past_a_subject_that_holds_a_quoted_name() -> None:
+    """The statement ends with the value in quotes; a subject may hold quotes of its own."""
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    subject = 'Project: "Atlas"'
+    first_body = 'Project: "Atlas" is due on Friday.'
+    original = await mail(factory, message_id="m-1", sender=ALEX, body=first_body, days_ago=5)
+    restating = "Confirming the Atlas project is due Friday."
+    reply = await mail(factory, message_id="m-2", sender=SAM, body=restating, days_ago=2)
+    [first] = await service.form(
+        original, [fact_for(original, quote=first_body, subject=subject, predicate="is due on")]
+    )
+    assert first.statement.endswith('reports Project: "Atlas" is due on: "Friday".')
+    [renewed] = await service.form(
+        reply, [fact_for(reply, quote=restating, subject=subject, predicate="due_date")]
+    )
+    assert renewed.id == first.id and renewed.last_evidence_at == reply.sent_at
+    assert stated_value(first.statement, first.subject) == "Friday"
+    # A value may hold a quotation too, and is read whole.
+    said = 'Alex said by email on 2026-07-22 that Board reply: "He said: "no"".'
+    assert stated_value(said, "Board") == 'He said: "no"'
+
+
+def test_a_first_class_statement_is_restated_whatever_its_senders_name_begins_with() -> None:
+    """A display name may begin "Email from"; only the whole record line makes a guess."""
+    sender, claim = "Email from Alex <alex@example.com>", 'Atlas vote moved to: "Friday".'
+    where = {"account_id": "work", "thread_id": "t-1", "message_id": "m-1"}
+    plain = first_class_statement(sender, "2026-07-22", claim)
+    guess = guess_statement(sender, "2026-07-22", "work", "t-1", "m-1", claim)
+    assert restated(plain, **where, first_class=False) == guess
+    assert restated(guess, **where, first_class=True) == plain
+    # A guess that names another message is still left alone, in either direction.
+    other = {**where, "message_id": "m-2"}
+    assert restated(guess, **other, first_class=True) is None
+    assert restated(guess, **other, first_class=False) is None
+    about_mail = guess_statement(
+        "Sam <sam@example.test>",
+        "2026-07-22",
+        "work",
+        "t-1",
+        "m-1",
+        'Alex said by email on 2026-07-20 that the vote moved to: "Friday".',
+    )
+    assert restated(about_mail, **other, first_class=True) is None
+
+
 async def _copy(
     factory: Any, source: Any, original: MemoryRecord, number: int, **update: object
 ) -> MemoryRecord:
@@ -291,7 +371,10 @@ async def test_the_merge_keeps_the_earliest_memory_of_a_fact_and_supersedes_its_
             ]
         }
         events = await uow.events.list_after(kept.source_session_id, 0, principal())
-    assert rows[kept.id] == kept
+    # The memory kept is the same row in the same words, with its copies' later evidence.
+    evidence = {"last_evidence_at", "evidence_count", "updated_at"}
+    assert rows[kept.id].model_dump(exclude=evidence) == kept.model_dump(exclude=evidence)
+    assert rows[kept.id].last_evidence_at == later_mail.sent_at
     for copy in (same_message, later):
         merged = rows[copy.id]
         assert merged.status is MemoryStatus.SUPERSEDED and merged.superseded_by == kept.id
@@ -306,10 +389,49 @@ async def test_the_merge_keeps_the_earliest_memory_of_a_fact_and_supersedes_its_
     }
     again = await service.merge_duplicates(apply=True)
     assert (again.facts, again.superseded) == (0, 0)
-    # A superseded copy's message does not form the fact again, in any wording.
+    # A superseded copy's message does not form the fact again, in any wording: it
+    # answers with a memory of the fact it already lists, the copy or the one kept.
     result = await service.form(later_mail, [fact_for(later_mail, predicate="as_alex_said")])
-    assert [row.id for row in result] == [later.id]
+    assert len(result) == 1 and result[0].id in {kept.id, later.id}
     assert len(await _email_memories(factory)) == 4
+
+
+async def test_the_merge_gives_the_memory_kept_its_copies_later_evidence_and_retention() -> None:
+    """The earliest memory stays, and must not expire while a copy's later evidence holds."""
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    first_mail = await mail(factory, message_id="m-1", sender=ALEX, body=SENTENCE, days_ago=29)
+    later_mail = await mail(
+        factory, message_id="m-2", sender=SAM, body=f"As Alex said: {SENTENCE}", days_ago=2
+    )
+    [kept] = await service.form(first_mail, [fact_for(first_mail)])
+    # Kept thirty days from an email twenty-nine days old: it expires tomorrow.
+    assert kept.expires_at == first_mail.sent_at + timedelta(days=30)
+    await service.register_source(later_mail)
+    year = later_mail.sent_at + timedelta(days=365)
+    later = await _copy(factory, later_mail, kept, 2, expires_at=year)
+
+    assert (await service.merge_duplicates(apply=False)).superseded == 1
+    async with factory() as uow:
+        assert await uow.memories.get(kept.id, principal()) == kept
+    assert (await service.merge_duplicates(apply=True)).superseded == 1
+    async with factory() as uow:
+        survivor = await uow.memories.get(kept.id, principal())
+        merged = await uow.memories.get(later.id, principal())
+    assert merged.status is MemoryStatus.SUPERSEDED and merged.superseded_by == kept.id
+    assert survivor.statement == kept.statement and survivor.status is kept.status
+    assert survivor.valid_from == first_mail.sent_at
+    assert survivor.last_evidence_at == later_mail.sent_at
+    assert survivor.evidence_count == kept.evidence_count + 1
+    assert survivor.expires_at == year
+
+    # The later message now answers for the memory's retention, so a re-rating of
+    # its thread still reaches the memory kept.
+    await seed_thread(factory, priority=0.9, messages=[_stored(first_mail), _stored(later_mail)])
+    assert (await service.rerate_thread("work", "t-mail")).by_retention == {"no_expiry": 1}
+    async with factory() as uow:
+        assert (await uow.memories.get(kept.id, principal())).expires_at is None
+    assert (await service.merge_duplicates(apply=True)).superseded == 0
 
 
 async def test_the_merge_command_previews_unless_confirmed(monkeypatch: pytest.MonkeyPatch) -> None:

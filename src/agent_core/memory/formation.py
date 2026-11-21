@@ -2954,6 +2954,9 @@ class GovernedMemoryService:
                     portable_scope_promoted = (
                         current.portability is not Portability.LOCAL and len(origin_scopes) >= 2
                     )
+                    # ADR-0340: only the owner's own statement makes a guess direct
+                    # and durable. A correspondent's repeat of it counts as evidence.
+                    upgrades = derivation is MemoryDerivation.DIRECT and not attributed_external
                     reinforced = current.model_copy(
                         update={
                             "scope": "user" if portable_scope_promoted else current.scope,
@@ -2962,15 +2965,9 @@ class GovernedMemoryService:
                             "corroboration_count": current.corroboration_count + 1,
                             "claim_kind": effective_claim_kind,
                             "derivation": (
-                                MemoryDerivation.DIRECT
-                                if derivation is MemoryDerivation.DIRECT
-                                else current.derivation
+                                MemoryDerivation.DIRECT if upgrades else current.derivation
                             ),
-                            "longevity": (
-                                longevity
-                                if derivation is MemoryDerivation.DIRECT
-                                else current.longevity
-                            ),
+                            "longevity": longevity if upgrades else current.longevity,
                             "last_evidence_at": max(
                                 current.last_evidence_at,
                                 evidence_at or self._clock.now(),

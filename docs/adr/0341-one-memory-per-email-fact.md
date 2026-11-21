@@ -46,12 +46,17 @@ Everything here applies to the People policy, `email-semantic@2`.
 
 1. **One memory per fact per message, whatever the wording.** A proposed fact
    is the fact a message already formed when its subject, belief type and value
-   match, comparing values without case or punctuation. The first memory
-   stands, in the words it was formed with, and the proposal changes nothing.
-   This holds for a memory in any status: one that expired and one a merge
-   superseded are not formed again. The retained source record remembers each
-   fact it formed under this identity, beside the exact-wording key it already
-   kept. A deletion already closes its source to formation, as before.
+   match. Values are compared without case, spacing, surrounding quotation
+   marks or a closing punctuation mark, which a model may or may not take with
+   the value. Every other mark is part of the value: `-5 °C` is not `5 °C`, and
+   `3.5%` is not `3-5%`. The value is read from the end of the stored
+   statement, past the subject, so a quotation inside the subject or the value
+   does not change it. The first memory stands, in the words it was formed
+   with, and the proposal changes nothing. This holds for a memory in any
+   status: one that expired and one a merge superseded are not formed again.
+   The retained source record remembers each fact it formed under this
+   identity, beside the exact-wording key it already kept. A deletion already
+   closes its source to formation, as before.
 2. **A quoted sentence is not the replier's statement.** A fact forms nothing
    and renews nothing when its quote is quoted text in the message it names.
    Quoted text is either of:
@@ -74,9 +79,15 @@ Everything here applies to the People policy, `email-semantic@2`.
    memories that share a subject, a belief type and a value are one fact. The
    memory with the earliest evidence stays. Each other copy is superseded by
    it: status superseded, validity closed, pointing at the memory kept. The
-   command touches only what ADR-0340's re-rating may touch, reports counts
-   only, and appends one content-free `email.memory.merged` event per thread
-   it changes. A second run changes nothing.
+   memory kept takes the latest evidence date and the longest retention among
+   its copies, as rule 3 would have given it, so the fact does not expire
+   while a copy's later evidence still holds. Its standing, wording and first
+   evidence date do not change. The message behind that later evidence is
+   linked to the memory kept, so ADR-0340's re-rating still follows that
+   message's thread. The command touches only what ADR-0340's re-rating may
+   touch, reports counts only, and appends one content-free
+   `email.memory.merged` event per thread it changes. A second run changes
+   nothing.
 5. **What the merge leaves alone.** Copies stored under different subjects are
    not merged, because two people in one thread can each hold the same value.
    The preview counts them.
@@ -91,6 +102,14 @@ Everything here applies to the People policy, `email-semantic@2`.
   quotes.
 - A reply that restates a short sentence word for word, with no `>` marks, is
   still read as the replier's own statement.
+- Two people who each write the same sentence of six words or more, word for
+  word and independently, are read as one statement and its quotation. The
+  second forms and renews nothing. Rule 2 accepts this: the alternative reads
+  every unmarked quotation as a fresh statement, and a wrong renewal can also
+  settle a first-class memory as active.
+- Values that differ only by a mark inside them, such as `Nov. 5` and `Nov 5`,
+  are two values. A missed match leaves a second memory; a wrong match would
+  remove a real fact.
 - Quoting is detected in the stored thread. When an earlier message's text is
   no longer held, only the `>` rule applies, and rule 3 folds what it misses.
 - The assessment still spends a model call each time it re-reads a passage.

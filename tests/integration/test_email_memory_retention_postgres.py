@@ -162,3 +162,55 @@ async def test_postgres_merges_a_repeated_email_fact_into_the_earliest_memory() 
         [audit] = [event for event in events if event.event_type == "email.memory.merged"]
         assert audit.payload == {"kept": str(kept.id), "superseded": [str(copy.id)]}
         assert (await merge(app.principal, True)).superseded == 0
+
+        # An earlier memory of the same fact is the one kept. It takes the later
+        # evidence and retention, and the later message answers for it from then on.
+        earlier_at = kept.valid_from - timedelta(days=5)
+        async with app.uow_factory() as uow:
+            earlier = await uow.memories.upsert_belief(
+                kept.model_copy(
+                    update={
+                        "id": UUID(int=9_902),
+                        "statement": kept.statement.replace("requested_action", "first_asked"),
+                        "valid_from": earlier_at,
+                        "last_evidence_at": earlier_at,
+                        "expires_at": earlier_at + timedelta(days=30),
+                        "store_position": await uow.memories.next_position(),
+                    }
+                )
+            )
+            record = await uow.email.get(app.principal, "semantic_source", source.key)
+            assert record is not None
+            listed = cast(list[str], record.payload["memory_ids"])
+            await uow.email.put(
+                record.model_copy(
+                    update={
+                        "revision": record.revision + 1,
+                        "payload": {**record.payload, "memory_ids": [*listed, str(earlier.id)]},
+                    }
+                ),
+                expected_revision=record.revision,
+            )
+        assert (await merge(app.principal, True)).superseded == 1
+        async with app.uow_factory() as uow:
+            survivor = await uow.memories.get(earlier.id, app.principal)
+            replaced = await uow.memories.get(kept.id, app.principal)
+            linked = await uow.email.get(app.principal, "semantic_source", source.key)
+        assert replaced.status is MemoryStatus.SUPERSEDED and replaced.superseded_by == earlier.id
+        assert survivor.valid_from == earlier_at
+        assert survivor.last_evidence_at == kept.last_evidence_at
+        assert survivor.expires_at == kept.expires_at
+        assert linked is not None
+        assert cast(dict[str, str], linked.payload["facts"])[f"renewed:{earlier.id}"] == str(
+            earlier.id
+        )
+        async with app.uow_factory() as uow:
+            [thread] = await uow.email.list(app.principal, "thread")
+        await app.services.email.feedback(
+            app.principal,
+            thread_id=UUID(str(thread.payload["id"])),
+            target="thread",
+            judgment="important",
+        )
+        [current] = await _memories(app)
+        assert current.id == earlier.id and current.expires_at is None

@@ -665,78 +665,102 @@ class EmailExperienceService:
                 else hashlib.sha256(idempotency_key.encode()).hexdigest()
             )
             replay = None if key is None else await uow.email.get(principal, "feedback_replay", key)
-            if replay is not None:
-                if replay.payload.get("request_digest") != request_digest:
-                    raise ConflictError("idempotency key was used for different feedback")
-                return {
-                    "feedback_id": replay.payload["feedback_id"],
-                    "thread": thread_summary(
-                        apply_feedback(
-                            thread, await self._feedback(uow.email, principal), now=self.clock.now()
-                        )
-                    ),
-                }
-            if expected_revision is not None and thread.revision != expected_revision:
-                raise ConflictError("email thread changed")
-            values = (
-                [str(thread.id)]
-                if target == "thread"
-                else addresses(thread.senders)
-                if target == "person"
-                else thread.topics
-            )
-            if target_value is not None:
-                target_value = addresses([target_value])[0] if target == "person" else target_value
-                if target_value not in values:
-                    raise EmailFeedbackTargetError(
-                        "feedback target is not supported by this thread"
-                    )
-                values = [target_value]
-            if len(values) != 1:
-                raise EmailFeedbackTargetError(
-                    "choose the specific person or topic for this feedback"
+            if replay is not None and replay.payload.get("request_digest") != request_digest:
+                raise ConflictError("idempotency key was used for different feedback")
+            feedback_id = (
+                str(replay.payload["feedback_id"])
+                if replay is not None
+                else await self._save_feedback(
+                    uow.email,
+                    principal,
+                    thread,
+                    target=target,
+                    judgment=judgment,
+                    explanation=explanation,
+                    target_value=target_value,
+                    expected_revision=expected_revision,
+                    replay=None if key is None else (key, request_digest),
+                    now=now,
                 )
-            item = EmailFeedback(
-                id=self.ids.new_id(),
-                thread_id=thread.id,
-                target=target,
-                judgment=judgment,
-                target_values=values,
-                explanation=explanation,
-                created_at=now,
             )
-            await save_value(uow.email, principal, "feedback", str(item.id), item, now)
-            await self._bump_profile(uow.email, principal)
-            if key is not None:
-                await uow.email.put(
-                    EmailRecord(
-                        tenant_id=principal.tenant_id,
-                        principal_id=principal.principal_id,
-                        kind="feedback_replay",
-                        key=key,
-                        revision=1,
-                        payload={"feedback_id": str(item.id), "request_digest": request_digest},
-                        created_at=now,
-                        updated_at=now,
-                    ),
-                    expected_revision=0,
-                )
             result: dict[str, object] = {
-                "feedback_id": str(item.id),
+                "feedback_id": feedback_id,
                 "thread": thread_summary(
                     apply_feedback(
                         thread, await self._feedback(uow.email, principal), now=self.clock.now()
                     )
                 ),
             }
+        # A replayed request re-rates too: the first one may have ended after its
+        # feedback committed and before the memories followed.
         await self._memories_follow(principal, thread)
         return result
+
+    async def _save_feedback(
+        self,
+        store: EmailStore,
+        principal: Principal,
+        thread: EmailThread,
+        *,
+        target: Literal["thread", "person", "topic"],
+        judgment: Literal["important", "less_important", "needs_reply", "no_reply_needed"],
+        explanation: str | None,
+        target_value: str | None,
+        expected_revision: int | None,
+        replay: tuple[str, str] | None,
+        now: datetime,
+    ) -> str:
+        """Write one feedback record and its replay receipt; returns the feedback id."""
+        if expected_revision is not None and thread.revision != expected_revision:
+            raise ConflictError("email thread changed")
+        values = (
+            [str(thread.id)]
+            if target == "thread"
+            else addresses(thread.senders)
+            if target == "person"
+            else thread.topics
+        )
+        if target_value is not None:
+            target_value = addresses([target_value])[0] if target == "person" else target_value
+            if target_value not in values:
+                raise EmailFeedbackTargetError("feedback target is not supported by this thread")
+            values = [target_value]
+        if len(values) != 1:
+            raise EmailFeedbackTargetError("choose the specific person or topic for this feedback")
+        item = EmailFeedback(
+            id=self.ids.new_id(),
+            thread_id=thread.id,
+            target=target,
+            judgment=judgment,
+            target_values=values,
+            explanation=explanation,
+            created_at=now,
+        )
+        await save_value(store, principal, "feedback", str(item.id), item, now)
+        await self._bump_profile(store, principal)
+        if replay is not None:
+            key, request_digest = replay
+            await store.put(
+                EmailRecord(
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    kind="feedback_replay",
+                    key=key,
+                    revision=1,
+                    payload={"feedback_id": str(item.id), "request_digest": request_digest},
+                    created_at=now,
+                    updated_at=now,
+                ),
+                expected_revision=0,
+            )
+        return str(item.id)
 
     async def _memories_follow(self, principal: Principal, thread: EmailThread) -> None:
         """Let the thread's email memories follow the owner's feedback at once (ADR-0340).
 
-        The feedback is already committed. A refused re-rating never fails it;
-        the next assessment of the thread re-rates again.
+        The feedback is already committed. A refused re-rating never fails it:
+        a retry of the request, a repeated undo, or the next assessment of the
+        thread re-rates again.
         """
         if self.rerate_memories is None:
             return
@@ -748,7 +772,6 @@ class EmailExperienceService:
     async def undo_feedback(self, principal: Principal, feedback_id: UUID) -> dict[str, object]:
         """Undo one feedback record and rebuild the thread projection from surviving evidence."""
         require_scope(principal, "email.write")
-        undone = False
         async with self.uow_factory() as uow, uow.email.lock(principal):
             item = await read_value(
                 uow.email, principal, "feedback", str(feedback_id), EmailFeedback
@@ -765,15 +788,15 @@ class EmailExperienceService:
                     self.clock.now(),
                 )
                 await self._bump_profile(uow.email, principal)
-                undone = True
             thread = await self._thread(uow.email, principal, item.thread_id)
             summary = thread_summary(
                 apply_feedback(
                     thread, await self._feedback(uow.email, principal), now=self.clock.now()
                 )
             )
-        if undone:
-            await self._memories_follow(principal, thread)
+        # A repeated undo writes nothing and re-rates again: the first one may have
+        # ended after it committed and before the memories followed.
+        await self._memories_follow(principal, thread)
         return summary
 
     async def _draft(self, store: EmailStore, principal: Principal, draft_id: UUID) -> EmailDraft:

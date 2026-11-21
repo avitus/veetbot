@@ -108,22 +108,63 @@ from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 EMAIL_PEOPLE_POLICY = EMAIL_STANDING_POLICY
 # Sources one re-rating transaction examines before it commits and continues.
 _RERATE_PAGE = 200
+# What a retained message did for a memory it lists, strongest first. The source
+# record's `facts` map keeps one `<role>:<memory id>` entry beside each fact's
+# identity, so a message is told apart by itself and not by its timestamp.
+_FORMED, _RENEWED, _SEEN = "formed", "renewed", "seen"
+
+
+def _source_role(facts: object, memory_id: UUID | str) -> str | None:
+    """What this retained message did for a memory, or None on a record that predates roles."""
+    if not isinstance(facts, dict):
+        return None
+    return next(
+        (role for role in (_FORMED, _RENEWED, _SEEN) if f"{role}:{memory_id}" in facts), None
+    )
+
+
+def _note_role(
+    facts: dict[str, object], listed_before: frozenset[str], memory_id: UUID, renewed: bool
+) -> None:
+    """Record that this message renewed, or only found, a memory another message formed.
+
+    A stronger role already recorded stands. A memory the record listed before
+    roles were kept stays unmarked unless this message has now renewed it, so
+    its dates go on answering for it.
+    """
+    current = _source_role(facts, memory_id)
+    if renewed and current != _FORMED:
+        facts[f"{_RENEWED}:{memory_id}"] = str(memory_id)
+    elif not renewed and current is None and str(memory_id) not in listed_before:
+        facts[f"{_SEEN}:{memory_id}"] = str(memory_id)
 
 
 class _Rerating:
     """One pass's stored-state reads and its per-memory outcomes (ADR-0340)."""
 
     def __init__(self) -> None:
-        self.feedback: list[EmailFeedback] | None = None
-        self.owned: frozenset[str] | None = None
-        self.threads: dict[str, EmailThread | None] = {}
-        self.ratings: dict[str, tuple[float | None, bool]] = {}
-        self.known: dict[tuple[str, str, str], bool] = {}
         self.changed: set[UUID] = set()
         self.promoted: set[UUID] = set()
         self.demoted: set[UUID] = set()
         self.first_class: dict[UUID, bool] = {}
         self.retention: dict[UUID, str] = {}
+        # A preview writes nothing, so it keeps each memory as an earlier visit
+        # would have left it, for the later visit that an applied pass reads back.
+        self.projected: dict[UUID, MemoryRecord] = {}
+        self.fresh()
+
+    def fresh(self) -> None:
+        """Forget what was read from the store; the outcomes stay.
+
+        The reads hold only inside one transaction, under its mailbox and
+        People locks. The owner may change feedback, a thread or a sender
+        between two transactions of the same pass.
+        """
+        self.feedback: list[EmailFeedback] | None = None
+        self.owned: frozenset[str] | None = None
+        self.threads: dict[str, EmailThread | None] = {}
+        self.ratings: dict[str, tuple[float | None, bool, bool]] = {}
+        self.known: dict[tuple[str, str, str], bool] = {}
 
     def report(self, *, applied: bool) -> EmailRerateReport:
         by_retention: dict[str, int] = {}
@@ -752,13 +793,13 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 seen.feedback.extend(EmailFeedback.model_validate(row.payload) for row in page)
                 after = page[-1].key
         if source_key not in seen.ratings:
-            assessment = None
-            if not thread.assessment_version and thread.priority == 0:
-                # A new message reset the stored rating; the last assessment still holds it.
-                row = await uow.email.get(self._principal, "assessment", str(thread.id))
-                assessment = None if row is None else row.payload
-            seen.ratings[source_key] = thread_importance(thread, seen.feedback, assessment)
-        importance, marked = seen.ratings[source_key]
+            # The last assessment holds the rating a new message reset, and says
+            # whether it read the thread or abstained.
+            row = await uow.email.get(self._principal, "assessment", str(thread.id))
+            seen.ratings[source_key] = thread_importance(
+                thread, seen.feedback, None if row is None else row.payload
+            )
+        importance, marked, rating_known = seen.ratings[source_key]
         message = next((item for item in thread.messages if item.id == message_id), None)
         sender_seen = message is not None and (sender is None or message.sender == sender)
         known = False
@@ -772,7 +813,8 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             owner_marked_important=marked,
             owner_replied=any(item.direction == "sent" for item in thread.messages),
             known_sender=known,
-            rated=importance is not None,
+            # A floor lengthens on what it shows and is no rating to shorten by.
+            rated=importance is not None and rating_known,
             complete=thread.complete,
             sender_seen=sender_seen,
         )
@@ -855,7 +897,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 memory = await uow.memories.get(UUID(str(value)), self._principal)
             except (NotFoundError, ValueError):
                 continue
-            stated = stated_value(memory.statement)
+            stated = stated_value(memory.statement, memory.subject)
             if (
                 stated is not None
                 and memory.consolidation_policy_version == EMAIL_PEOPLE_POLICY
@@ -885,8 +927,9 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         fact: EmailSemanticFact,
         standing: EmailMemoryStanding,
         run_id: UUID | None,
-    ) -> MemoryRecord | None:
-        """The memory a different, earlier message already formed for this exact claim.
+    ) -> tuple[MemoryRecord | None, bool]:
+        """The memory a different, earlier message already formed for this exact claim,
+        and whether this message renewed it.
 
         A strictly later message renews it: the evidence date moves and the
         expiry is recomputed and never shortened. A first-class memory becomes
@@ -906,15 +949,15 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 for row in sorted(related, key=lambda item: item.store_position, reverse=True)
                 if self._governed_by_table(row)
                 and row.polarity is Polarity.ASSERT
-                and (stated := stated_value(row.statement)) is not None
+                and (stated := stated_value(row.statement, row.subject)) is not None
                 and value_key(stated) == wanted
             ),
             None,
         )
         if current is None:
-            return None
+            return None, False
         if source.sent_at <= current.last_evidence_at:
-            return current
+            return current, False
         expiry = standing.expires_at(source.sent_at)
         if current.expires_at is None or (expiry is not None and expiry < current.expires_at):
             expiry = current.expires_at
@@ -949,7 +992,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         await self._governed._append_event(
             uow, source.session_id, run_id, "memory.reinforced", renewed
         )
-        return renewed
+        return renewed, True
 
     async def _keep_by_table(
         self, uow: RepositoryUnitOfWork, memory: MemoryRecord, standing: EmailMemoryStanding
@@ -993,7 +1036,11 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
 
         A message governs a memory's retention when it supplied the memory's
         last evidence, and its standing and wording when it formed the memory.
-        For a memory nothing renewed, that is the same message. Only the
+        For a memory nothing renewed, that is the same message. The record
+        says which it did for each memory it lists: a message that only found
+        a memory governs nothing, even when it carries the same timestamp as
+        the one that formed it. Dates order the evidence; they identify a
+        message only on a record written before roles were kept. Only the
         owner's command adopts a memory formed before the table existed; the
         hooks follow memories already under it, so nothing is backfilled silently.
         """
@@ -1023,8 +1070,11 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 memory = await uow.memories.get(UUID(str(value)), self._principal)
             except (NotFoundError, ValueError):
                 continue
-            latest = memory.last_evidence_at == evidence_at
-            origin = memory.valid_from == evidence_at
+            # A preview reads back what its earlier visit would have written.
+            memory = seen.projected.get(memory.id, memory)
+            role = _source_role(payload.get("facts"), memory.id)
+            latest = role in {None, _FORMED, _RENEWED} and memory.last_evidence_at == evidence_at
+            origin = role == _FORMED or (role is None and memory.valid_from == evidence_at)
             if (
                 not self._governed_by_table(memory)
                 or not (latest or origin)
@@ -1095,6 +1145,8 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 await uow.memories.reinforce(
                     memory.model_copy(update={**update, "updated_at": now}, deep=True)
                 )
+            else:
+                seen.projected[memory.id] = memory.model_copy(update=update, deep=True)
         return changed
 
     async def _audit_rerating(
@@ -1181,11 +1233,18 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         type and a value are one fact. The earliest evidence stays and each
         other copy is superseded by it. Copies under different subjects are
         counted and left: two people in one thread can each hold the same value.
+
+        The memory kept takes the latest evidence date and the longest
+        retention among its copies, so the fact does not expire while a copy's
+        later evidence still holds. The message behind that evidence is linked
+        to the memory kept, so a later re-rating still follows its thread.
         """
         report = EmailMergeReport(applied=apply)
         if not self.enabled:
             return report
         by_thread: dict[tuple[str, str], list[str]] = {}
+        # The retained messages that list each memory, by record key.
+        listing: dict[str, list[str]] = {}
         after: str | None = None
         while True:
             async with self._uow_factory() as uow:
@@ -1206,6 +1265,8 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     and isinstance(listed, list)
                 ):
                     by_thread.setdefault((account_id, thread_id), []).extend(map(str, listed))
+                    for value in listed:
+                        listing.setdefault(str(value), []).append(record.key)
             if len(page) < _RERATE_PAGE:
                 break
             after = page[-1].key
@@ -1222,7 +1283,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                         memory = await uow.memories.get(UUID(value), self._principal)
                     except (NotFoundError, ValueError):
                         continue
-                    stated = stated_value(memory.statement)
+                    stated = stated_value(memory.statement, memory.subject)
                     if (
                         stated is None
                         or memory.polarity is not Polarity.ASSERT
@@ -1252,6 +1313,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     if not apply:
                         continue
                     now = self._clock.now()
+                    await self._keep_later_evidence(uow, kept, copies, listing, now)
                     for copy in copies:
                         await uow.memories.reinforce(
                             copy.model_copy(
@@ -1286,11 +1348,91 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             }
         )
 
+    async def _keep_later_evidence(
+        self,
+        uow: RepositoryUnitOfWork,
+        kept: MemoryRecord,
+        copies: Sequence[MemoryRecord],
+        listing: dict[str, list[str]],
+        now: datetime,
+    ) -> None:
+        """Give the memory a merge keeps what its copies know that it does not.
+
+        A later message that restates a fact renews the one memory: the
+        evidence date moves and the expiry is never shortened. A copy is that
+        renewal stored as a second row, so the merge applies it now. The
+        standing, the wording and the first evidence date stay the survivor's.
+        """
+        update: dict[str, object] = {}
+        newest = max(copies, key=lambda item: item.last_evidence_at)
+        if newest.last_evidence_at > kept.last_evidence_at:
+            later = {
+                copy.last_evidence_at
+                for copy in copies
+                if copy.last_evidence_at > kept.last_evidence_at
+            }
+            update.update(
+                last_evidence_at=newest.last_evidence_at,
+                evidence_count=kept.evidence_count + len(later),
+            )
+            await self._link_latest_source(uow, kept, newest, listing.get(str(newest.id), []))
+        expiries = [row.expires_at for row in (kept, *copies)]
+        dated = [expiry for expiry in expiries if expiry is not None]
+        longest = None if len(dated) < len(expiries) else max(dated)
+        if longest != kept.expires_at:
+            update["expires_at"] = longest
+        if update:
+            await uow.memories.reinforce(
+                kept.model_copy(update={**update, "updated_at": now}, deep=True)
+            )
+
+    async def _link_latest_source(
+        self,
+        uow: RepositoryUnitOfWork,
+        kept: MemoryRecord,
+        copy: MemoryRecord,
+        record_keys: Sequence[str],
+    ) -> None:
+        """Let the message behind a merged copy's last evidence answer for the memory kept."""
+        for key in record_keys:
+            record = await uow.email.get(self._principal, "semantic_source", key)
+            if record is None or record.payload.get("excluded"):
+                continue
+            payload = record.payload
+            facts, listed = payload.get("facts"), payload.get("memory_ids")
+            try:
+                evidence_at = datetime.fromisoformat(str(payload.get("evidence_at")))
+            except ValueError:
+                continue
+            if evidence_at != copy.last_evidence_at or _source_role(facts, copy.id) == _SEEN:
+                continue
+            roles = dict(facts) if isinstance(facts, dict) else {}
+            roles[f"{_RENEWED}:{kept.id}"] = str(kept.id)
+            memory_ids = {str(value) for value in (listed if isinstance(listed, list) else [])}
+            await uow.email.put(
+                record.model_copy(
+                    update={
+                        "revision": record.revision + 1,
+                        "updated_at": self._clock.now(),
+                        "payload": {
+                            **payload,
+                            "facts": roles,
+                            "memory_ids": sorted(memory_ids | {str(kept.id)}),
+                        },
+                    }
+                ),
+                expected_revision=record.revision,
+            )
+            return
+
     async def rerate_all(self, *, apply: bool) -> EmailRerateReport:
         """Re-rate every live email memory; a preview unless `apply` (ADR-0340).
 
         Sources are read in key order, a bounded page per transaction, so the
-        mailbox lock is never held across the whole store.
+        mailbox lock is never held across the whole store. Each page reads
+        feedback, threads and senders again under its own locks: the owner may
+        mark a thread between two pages, and a rating read for the first would
+        undo on the second what that mark's own re-rating just did.
         """
         seen = _Rerating()
         if not self.enabled:
@@ -1302,6 +1444,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 uow.email.lock(self._principal),
                 uow.people.lock(self._principal),
             ):
+                seen.fresh()
                 page = await uow.email.list(
                     self._principal, "semantic_source", after=after, limit=_RERATE_PAGE
                 )
@@ -1485,6 +1628,8 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 prepared.append((fact, linked))
             prior_facts = registered.payload.get("facts", {})
             fact_ids = dict(prior_facts) if isinstance(prior_facts, dict) else {}
+            listed = registered.payload.get("memory_ids")
+            listed_before = frozenset(map(str, listed if isinstance(listed, list) else []))
             formed = []
             # A historical import keeps the thirty-day horizon from the source
             # date, so importing never makes an old claim current (gate 26).
@@ -1518,9 +1663,14 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     with suppress(NotFoundError):
                         formed.append(await uow.memories.get(UUID(str(known)), self._principal))
                     continue
-                existing = await self._formed_by_message(
-                    uow, registered, subject, fact
-                ) or await self._renew(uow, source, subject, fact, standing, run_id)
+                existing = await self._formed_by_message(uow, registered, subject, fact)
+                if existing is None:
+                    existing, renewed = await self._renew(
+                        uow, source, subject, fact, standing, run_id
+                    )
+                    if existing is not None:
+                        # Another message formed it. This one renewed it, or only found it.
+                        _note_role(fact_ids, listed_before, existing.id, renewed)
                 if existing is not None:
                     formed.append(existing)
                     fact_ids[key] = fact_ids[identity] = str(existing.id)
@@ -1541,7 +1691,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                         claim,
                     )
                 )
-                belief, _ = await self._governed.remember_formation(
+                belief, outcome = await self._governed.remember_formation(
                     session_id=source.session_id,
                     run_id=run_id,
                     statement=statement,
@@ -1580,6 +1730,11 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     )
                 formed.append(belief)
                 fact_ids[key] = fact_ids[identity] = str(belief.id)
+                if outcome in {"committed", "conflicted", "superseded"}:
+                    fact_ids[f"{_FORMED}:{belief.id}"] = str(belief.id)
+                else:
+                    # Formation answered with a belief that was already stored.
+                    _note_role(fact_ids, listed_before, belief.id, False)
             previous_ids = registered.payload.get("memory_ids", [])
             memory_ids = (
                 sorted({str(value) for value in previous_ids} | {str(row.id) for row in formed})

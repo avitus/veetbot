@@ -34,11 +34,14 @@ _DATE = r"\d{4}-\d{2}-\d{2}"
 class EmailMemoryStanding:
     """What stored state says about one message's thread and sender.
 
-    `rated` is false when nothing says how important the thread is: its stored
-    rating was reset by a new message and no earlier assessment or owner
-    feedback survives. `complete` is false when the stored thread holds only
-    part of its messages, so an owner reply may sit in the part not held.
-    `sender_seen` is false when this message is not among those held.
+    `rated` is false when the thread's importance is not a known rating. Either
+    nothing says how important it is: its stored rating was reset by a new
+    message and no earlier assessment or owner feedback survives. Or
+    `importance` is only a floor: an older assessment record's content share,
+    or the zero an abstaining assessment saved. A floor lengthens and never
+    shortens. `complete` is false when the stored thread holds only part of its
+    messages, so an owner reply may sit in the part not held. `sender_seen` is
+    false when this message is not among those held.
     """
 
     importance: float
@@ -105,19 +108,20 @@ def kept_label(expires_at: datetime | None, evidence_at: datetime) -> str:
     return retention_label(None if expires_at is None else (expires_at - evidence_at).days)
 
 
-def last_rating(assessment: Mapping[str, object] | None) -> float | None:
-    """The rating a thread's last saved assessment gave it, if one survives.
+def last_rating(assessment: Mapping[str, object] | None) -> tuple[float, bool] | None:
+    """The rating a thread's last saved assessment gave it, and whether it is exact.
 
     The assessment record keeps the rating itself. A record saved before that
     holds only the model's features; without the reply history of its day the
     relationship share cannot be rebuilt, so the content share of the same
-    formula stands in as a floor.
+    formula stands in. That figure is a floor, not the rating: it may lengthen
+    a memory's retention and never shortens it.
     """
     if assessment is None:
         return None
     stored = assessment.get("priority")
     if isinstance(stored, (int, float)) and not isinstance(stored, bool) and 0 <= stored <= 1:
-        return float(stored)
+        return float(stored), True
     content, urgency = assessment.get("content_importance"), assessment.get("urgency")
     if not (
         isinstance(content, (int, float))
@@ -126,17 +130,19 @@ def last_rating(assessment: Mapping[str, object] | None) -> float | None:
         and 0 <= urgency <= 1
     ):
         return None
-    return assessment_priority(
+    floor = assessment_priority(
         float(content), 0.0, float(urgency), bulk=assessment.get("bulk") is True
     )
+    return floor, False
 
 
 def thread_importance(
     thread: EmailThread,
     feedback: Sequence[EmailFeedback],
     assessment: Mapping[str, object] | None = None,
-) -> tuple[float | None, bool]:
-    """The thread's rating for memory, and whether the owner marked it Important.
+) -> tuple[float | None, bool, bool]:
+    """The thread's rating for memory, whether the owner marked it Important, and
+    whether the rating is known.
 
     This is the saved Inbox rating after the owner's surviving importance
     feedback, the last judgment winning. The dated-attention rule that takes a
@@ -146,18 +152,29 @@ def thread_importance(
     A new message resets the stored rating to zero until the thread is
     assessed again. That zero is not a rating: the last saved assessment
     answers instead, and with none the importance is unknown (None).
+
+    A rating is known when a grounded assessment or the owner's own feedback
+    gave it. Two figures are only floors, good for lengthening a memory and
+    never for shortening it: the content share of an assessment record saved
+    before ratings were kept, and the rating an assessment saved without a
+    grounded reading. A rejected or ungrounded result, and a junk first pass,
+    save zero features and with them a zero that reads no part of the thread.
     """
     rating: float | None = thread.priority
+    known = True
     if not thread.assessment_version and thread.priority == 0:
-        rating = last_rating(assessment)
+        last = last_rating(assessment)
+        rating, known = (None, False) if last is None else last
+    if assessment is not None and assessment.get("grounded") is False:
+        known = False
     marked = False
     matching = [item for item in feedback if feedback_matches(item, thread)]
     for item in sorted(matching, key=lambda value: (value.created_at, str(value.id))):
         if item.judgment == "important":
-            rating, marked = 1.0, True
+            rating, marked, known = 1.0, True, True
         elif item.judgment == "less_important":
-            rating, marked = 0.0, False
-    return rating, marked
+            rating, marked, known = 0.0, False, True
+    return rating, marked, known
 
 
 def claim_text(subject: str, predicate: str, value: str) -> str:
@@ -177,6 +194,12 @@ def guess_statement(
 def first_class_statement(sender: str, sent_on: str, claim: str) -> str:
     """A plain statement that still says who said it, by what channel, and when."""
     return f"{sender} said by email on {sent_on} that {claim}"
+
+
+# Where each wording's attribution ends. Both are searched for, not matched from
+# the start, so reading a statement stays linear in its length.
+_GUESS_HEAD = re.compile(rf" on ({_DATE}) \(mailbox ")
+_PLAIN_HEAD = re.compile(rf" said by email on ({_DATE}) that ")
 
 
 def attributed_email_statement(statement: str) -> bool:
@@ -203,8 +226,16 @@ def restated(
     """The same claim in the other standing's words, or None when it is not this source's.
 
     A stored statement has its whitespace collapsed, so the identifiers are
-    compared the same way. A statement that parses as neither form, or names
-    another message, is left alone.
+    compared the same way. The standing asked for says which wording the
+    statement is in now, so the text never has to be guessed at:
+
+    - A guess becomes first-class only from this message's own record line. A
+      record line that names another message is left alone.
+    - A first-class statement returns to a guess from its plain wording. Its
+      sender is whatever stands before the first "said by email on <date>
+      that", and may itself begin "Email from".
+
+    A statement in neither wording is left alone.
     """
     marker = " ".join(
         f" (mailbox {account_id}, thread {thread_id}, message {message_id}) reports ".split()
@@ -215,13 +246,13 @@ def restated(
     )
     if guess is not None:
         sender, sent_on = guess["sender"], guess["date"]
+    elif first_class:
+        return None
     else:
-        plain = re.fullmatch(
-            rf"(?P<sender>.+?) said by email on (?P<date>{_DATE}) that (?P<claim>.+)", statement
-        )
-        if plain is None or statement.startswith("Email from "):
+        plain = _PLAIN_HEAD.search(statement)
+        if plain is None or plain.start() == 0 or plain.end() == len(statement):
             return None
-        sender, sent_on, claim = plain["sender"], plain["date"], plain["claim"]
+        sender, sent_on, claim = statement[: plain.start()], plain[1], statement[plain.end() :]
     if first_class:
         return first_class_statement(sender, sent_on, claim)
     return " ".join(
@@ -234,17 +265,76 @@ def restated(
 QUOTED_SENTENCE_WORDS = 6
 
 
-def stated_value(statement: str) -> str | None:
-    """The value an email statement quotes at its end, in either wording."""
+def _claim(statement: str) -> str | None:
+    """The claim an email statement makes, past its attribution, in either wording.
+
+    Whichever attribution ends first is the statement's own; the other, if it
+    appears at all, is text inside the claim.
+    """
+    guess = _GUESS_HEAD.search(statement) if statement.startswith("Email from ") else None
+    plain = _PLAIN_HEAD.search(statement)
+    if guess is not None and (plain is None or guess.start() < plain.start()):
+        _, found, claim = statement[guess.end() :].partition(") reports ")
+        return claim if found else None
+    return None if plain is None else statement[plain.end() :]
+
+
+def stated_value(statement: str, subject: str | None = None) -> str | None:
+    """The value an email statement quotes at its end, in either wording.
+
+    The claim reads ``<subject> <predicate>: "<value>".`` and the value opens at
+    the first ``: "`` after the subject, so a quotation inside the subject or
+    inside the value does not move it. `subject` is the memory's stored subject.
+    A memory linked to a person is stored under that person and not under the
+    words its statement uses; then the first ``: "`` of the claim opens the value.
+    """
     if not attributed_email_statement(statement):
         return None
-    found = re.search(r': "(.*)"\.$', statement, re.S)
-    return None if found is None else found[1]
+    claim = _claim(statement)
+    if claim is None or not claim.endswith('".'):
+        return None
+    named = " ".join((subject or "").split())
+    opened = claim.find(': "', len(named) if named and claim.startswith(f"{named} ") else 0)
+    return None if opened < 0 or opened + 3 > len(claim) - 2 else claim[opened + 3 : -2]
+
+
+# Opening quotation marks and the mark that closes each: straight, curly and angle.
+_QUOTE_PAIRS = {
+    '"': '"',
+    "'": "'",
+    "`": "`",
+    "\N{LEFT DOUBLE QUOTATION MARK}": "\N{RIGHT DOUBLE QUOTATION MARK}",
+    "\N{LEFT SINGLE QUOTATION MARK}": "\N{RIGHT SINGLE QUOTATION MARK}",
+    "\N{LEFT-POINTING DOUBLE ANGLE QUOTATION MARK}": (
+        "\N{RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK}"
+    ),
+}
+_CLOSING_MARKS = ".,;:!?"
 
 
 def value_key(value: str) -> str:
-    """A value compared without case, punctuation or spacing (ADR-0341)."""
-    return " ".join(re.sub(r"[^\w]+", " ", value.casefold()).split())
+    """A value compared without case, spacing, wrapping quotes or a closing mark (ADR-0341).
+
+    These are wording: a model that reads one message twice may take the full
+    stop or the quotation marks with the value, or leave them. Every other mark
+    is part of the value: ``-5 °C`` is not ``5 °C``, and ``3.5%`` is not ``3-5%``.
+    """
+    folded = " ".join(value.casefold().split())
+    bare = folded
+    while True:
+        trimmed = bare.rstrip(_CLOSING_MARKS).rstrip()
+        inner = trimmed[1:-1]
+        if (
+            len(trimmed) > 1
+            and _QUOTE_PAIRS.get(trimmed[0]) == trimmed[-1]
+            and trimmed[0] not in inner
+            and trimmed[-1] not in inner
+        ):
+            trimmed = inner.strip()
+        if trimmed == bare:
+            break
+        bare = trimmed
+    return bare or folded
 
 
 def claim_key(belief_type: str, subject: str, value: str) -> str:
