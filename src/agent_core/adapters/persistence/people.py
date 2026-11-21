@@ -519,7 +519,13 @@ class InMemoryPeopleStore:
         for tenant, principal, record_id in sorted(self._records, key=lambda key: key[2]):
             if tenant != owner.tenant_id or principal != owner.principal_id:
                 continue
-            if query.sort == "id" and query.after and record_id <= query.after:
+            if (
+                query.sort == "id"
+                and query.after
+                and record_id <= query.after
+                # A distinct listing chooses each assignment's row before the cursor.
+                and not query.distinct_assignments
+            ):
                 continue
             record = await self.get(
                 owner, record_id, ceiling=query.sensitivity_ceiling, known_at=query.known_at
@@ -687,6 +693,10 @@ class InMemoryPeopleStore:
                 if assignment in distinct_seen:
                     continue
                 distinct_seen.add(assignment)
+                # The cursor follows that choice, so a later copy of an
+                # assignment already listed never starts another page.
+                if query.after and record_id <= query.after:
+                    continue
             results.append(record)
         if query.sort == "history":
             results.sort(
@@ -1786,7 +1796,9 @@ class PostgresPeopleStore:
             statement = statement.where(known if query.unknown_time == "exclude" else ~known)
         if query.after and query.sort != "recent":
             if query.sort == "id":
-                statement = statement.where(PeopleRevisionRow.entity_id > query.after)
+                # A distinct listing applies the cursor to the chosen rows below.
+                if not query.distinct_assignments:
+                    statement = statement.where(PeopleRevisionRow.entity_id > query.after)
             elif query.after_event_at is None:
                 statement = statement.where(~known, PeopleRevisionRow.entity_id > query.after)
             else:
@@ -1872,11 +1884,12 @@ class PostgresPeopleStore:
                 .subquery("distinct_assignments")
             )
             row_alias = aliased(PeopleRevisionRow, distinct)
-            rows = (
-                await self._session.execute(
-                    select(row_alias).order_by(row_alias.entity_id).limit(query.limit + 1)
-                )
-            ).scalars()
+            page = select(row_alias).order_by(row_alias.entity_id).limit(query.limit + 1)
+            if query.after:
+                # After the lowest id of each assignment is chosen: a cursor
+                # applied first would list a later copy of it on another page.
+                page = page.where(row_alias.entity_id > query.after)
+            rows = (await self._session.execute(page)).scalars()
             return [PEOPLE_RECORD.validate_python(row.payload) for row in rows]
         rows = (
             await self._session.execute(statement.order_by(*ordering).limit(query.limit + 1))

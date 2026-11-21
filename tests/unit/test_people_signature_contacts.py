@@ -410,6 +410,51 @@ async def test_a_late_older_signature_leaves_the_owners_ending_alone() -> None:
     assert numbers["650.555.0142"].valid_to is None
 
 
+async def test_a_sender_with_more_aliases_than_one_page_is_still_placed() -> None:
+    """What the signatures have stated is read a page at a time, each alias once."""
+    factory, service = await _stack()
+    rory = (await _people(factory))["Rory O'Driscoll"]
+    common: PeopleFields = {
+        "tenant_id": principal().tenant_id,
+        "principal_id": principal().principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    await _receive(factory, service, "m-old", days_ago=6, body=_signed(title="Principal, Scale"))
+    async with factory() as uow:
+        for number in range(120):
+            await uow.people.put(
+                PersonIdentifier(
+                    id=uuid4(),
+                    person_id=rory.id,
+                    identifier_kind="name",
+                    namespace="owner",
+                    value=f"Rory Alias {number}",
+                    context="owner",
+                    verification="owner_confirmed",
+                    valid_from=NOW - timedelta(days=30),
+                    **common,
+                ),
+                expected_revision=0,
+            )
+    newer = await _receive(
+        factory, service, "m-new", days_ago=2, body=_signed(title="Partner, Scale")
+    )
+
+    async with factory() as uow:
+        titles = {
+            row.value: row.valid_to
+            for title in ("principal, scale", "partner, scale")
+            for row in await uow.people.query(
+                all_rows(["identifier"]).model_copy(
+                    update={"person_id": rory.id, "identifier_value": title}
+                )
+            )
+            if isinstance(row, PersonIdentifier) and row.namespace == SIGNATURE_NAMESPACE
+        }
+    assert titles == {"Principal, Scale": newer.sent_at, "Partner, Scale": None}
+
+
 async def test_a_later_signature_replaces_the_numbers_it_states() -> None:
     factory, service = await _stack()
     await _receive(factory, service, "m-old", days_ago=6, body=_signed(phone="650.555.0100"))

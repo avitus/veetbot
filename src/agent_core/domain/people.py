@@ -554,7 +554,8 @@ class PeopleQuery(PeopleValue):
     # ADR-0121 identity lookup: an exact (case-insensitive) identifier or name
     # value, whether identifiers must be attached to a person, the instant an
     # identifier must be valid at, and one row per distinct assignment so
-    # per-message copies of one address cannot crowd out a match.
+    # per-message copies of one address cannot crowd out a match. That row is
+    # the assignment's lowest id, and `after` pages over those rows only.
     identifier_value: str | None = Field(default=None, min_length=1, max_length=512)
     assigned: Literal["any", "attached", "unattached"] = "any"
     valid_at: AwareDatetime | None = None
