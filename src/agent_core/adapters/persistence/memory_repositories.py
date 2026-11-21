@@ -97,6 +97,7 @@ from agent_core.domain.memory import (
     LIFECYCLE_POLICY_VERSION,
     OWNED_RESOURCE_PATTERN,
     SENSITIVITY_ORDER,
+    TRACE_BELIEF_ID_FIELDS,
     BeliefRejection,
     BeliefType,
     ConsolidationRun,
@@ -1520,8 +1521,11 @@ class PostgresTraceStore:
             )
         ]
         predicates.extend(
-            RecallTraceRow.trace.contains({"returned": [str(belief_id)]})
+            RecallTraceRow.trace.contains({field: [str(belief_id)]})
             for belief_id in belief_ids
+            # Every list of belief identifiers, so one that was ranked or cut
+            # for the budget and never returned does not outlive its erasure.
+            for field in TRACE_BELIEF_ID_FIELDS
         )
         predicates.extend(
             RecallTraceRow.trace.contains({"query": {"people_scope": [str(record_id)]}})

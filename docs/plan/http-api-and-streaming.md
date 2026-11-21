@@ -2601,7 +2601,8 @@ rendered as text. With the flag unset none of these routes exists.
 `GET /v1/recall-questions` requires `memory.read` and returns every question,
 optionally filtered by `split` (`development`, `holdout`) and `status`
 (`active`, `retired`), each with its revision, its latest recorded run result
-and whether that run passed. `GET /v1/recall-questions/{id}/history` requires
+and whether that run passed. A result is shown only for the content it tested:
+an edit that changes what a question measures clears it. `GET /v1/recall-questions/{id}/history` requires
 `memory.read` and returns every state the question has held, oldest first.
 
 `POST /v1/recall-questions` requires `memory.write` and a strict

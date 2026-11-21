@@ -125,6 +125,38 @@ _INJECTION = re.compile(
 )
 
 
+def _merged_away(
+    found: Sequence[UUID], kept: Sequence[RecalledBelief], operations: tuple[StoredMerge, ...]
+) -> dict[UUID, list[UUID]]:
+    """For each memory that stands for a merge: the candidates it stood in for.
+
+    A merged member that the arms found is scored with the memory that stands
+    for it and is never returned itself. The diagnostic ranking still names it,
+    or a trace could not tell it from a memory the arms never found.
+    """
+
+    members = {operation.id: operation.plan.member_ids for operation in operations}
+    kept_ids = {item.belief_id for item in kept}
+    gone = [key for key in found if key not in kept_ids]
+    return {
+        item.belief_id: [key for key in gone if key in members.get(item.merge_id, ())]
+        for item in kept
+        if item.merge_id is not None
+    }
+
+
+def _ranked_candidates(
+    ranked: Sequence[RecalledBelief], merged_away: dict[UUID, list[UUID]]
+) -> list[UUID]:
+    """Every scored candidate, best first; a merged member directly after its stand-in."""
+
+    listed: list[UUID] = []
+    for item in ranked:
+        listed.append(item.belief_id)
+        listed.extend(merged_away.get(item.belief_id, ()))
+    return listed[:RANKED_CANDIDATES_LIMIT]
+
+
 def _collapse_merges(
     items: list[RecalledBelief], operations: tuple[StoredMerge, ...]
 ) -> list[RecalledBelief]:
@@ -789,7 +821,9 @@ class HybridMemoryRetriever:
             if _is_durable(record, owner_facts=effective_query.candidate_selection == "relevance"):
                 durable_ids.add(record.id)
             recalled.append(candidate)
+        found = [item.belief_id for item in recalled]
         recalled = _collapse_merges(recalled, merges)
+        merged_away = _merged_away(found, recalled, merges)
         before_fusion = {item.belief_id: item.score for item in recalled}
         recalled = _rrf_fuse(
             recalled,
@@ -1157,6 +1191,16 @@ class HybridMemoryRetriever:
         rendered_bytes = rendered.encode("utf-8")
         lap("pack")
         classified = {record.id: record for record in records}
+        # Read before the total is taken: this read is part of what the recall cost.
+        people_dependencies = (
+            PeopleRecallDependencies(
+                people_revision=await uow.people.watermark(self._principal),
+                memory_revision=head,
+                selection_belief_ids=people_selection_belief_ids,
+            )
+            if authorized and (people_items or effective_query.people_scope)
+            else None
+        )
         trace_id = self._ids.new_id()
         trace = RecallTrace(
             id=trace_id,
@@ -1189,7 +1233,7 @@ class HybridMemoryRetriever:
             ranked_candidates=(
                 []
                 if effective_query.profile is RecallProfile.CORE
-                else [item.belief_id for item in ranked[:RANKED_CANDIDATES_LIMIT]]
+                else _ranked_candidates(ranked, merged_away)
             ),
             returned_classes=recall_class_counts(
                 (item.belief_id for item in selected_items), classified
@@ -1199,15 +1243,7 @@ class HybridMemoryRetriever:
             carried_in=[item.belief_id for item in selected_items if item.carried],
             beliefs=[item.model_copy(deep=True) for item in selected_items],
             people=selected_people,
-            people_dependencies=(
-                PeopleRecallDependencies(
-                    people_revision=await uow.people.watermark(self._principal),
-                    memory_revision=head,
-                    selection_belief_ids=people_selection_belief_ids,
-                )
-                if authorized and (people_items or effective_query.people_scope)
-                else None
-            ),
+            people_dependencies=people_dependencies,
             retrieval_policy_version=policy_version,
             created_at=self._clock.now(),
             operator_fields_expire_at=(

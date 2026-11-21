@@ -50,13 +50,20 @@ low, or cut by a budget.
 5. **The candidate ranking is kept.** A question-led recall records
    `ranked_candidates`: every scored candidate, best first, before duplicate
    and per-subject collapse, to a bound above what recall can fetch. A
-   snapshot recall has no question and records none.
+   snapshot recall has no question and records none. A merged memory the arms
+   found is scored with the memory that stands for it and is never returned
+   itself; the ranking lists it directly after that memory, so a trace can tell
+   it from one the arms never found.
 6. **Retention and erasure are unchanged in kind.** The ranking and the
    summary's timings and arms are operator tier and are removed by the
    existing expiry sweep. The summary's counts name no belief and stay, as
    `dropped_for_budget_count` already does. The three erasure paths now scrub
    one shared list of identifier fields, `TRACE_BELIEF_ID_FIELDS`, and a test
-   fails if a trace gains an identifier list that is not in it.
+   fails if a trace gains an identifier list that is not in it. Erasure also
+   finds a trace by that list: a memory that was ranked or cut for the budget
+   and never returned is in no rendered belief, and its identifier must not
+   outlive its erasure for that reason. Erasing such a memory removes the
+   identifier and leaves what the trace rendered standing.
 
 7. **An owner question set is the standing measure for a recall change.** Real
    questions the owner asked, each with the stored facts it should reach, are

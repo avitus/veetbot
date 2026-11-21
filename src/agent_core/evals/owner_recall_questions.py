@@ -31,7 +31,7 @@ def probe_from_question(question: RecallQuestion) -> Probe:
     content = question.content
     return Probe(
         id=question.key,
-        incident=f"owner-questions-{question.split.value}",
+        incident=f"{QUESTION_INCIDENT_PREFIX}{question.split.value}",
         family=content.family,
         question=content.question,
         search_text=content.search_text,
@@ -82,6 +82,24 @@ def content_from_probe(probe: Probe) -> RecallQuestionContent:
     )
 
 
+QUESTION_INCIDENT_PREFIX = "owner-questions-"
+
+
+def question_fingerprint(probe: Probe) -> str | None:
+    """The content fingerprint a stored question's run is bound to, else None.
+
+    It is computed from the probe that ran, so a result can only ever be
+    recorded against the content that was tested.
+    """
+
+    if not probe.incident.startswith(QUESTION_INCIDENT_PREFIX):
+        return None
+    try:
+        return content_from_probe(probe).criteria_sha256
+    except ValueError:
+        return None
+
+
 def loaded_from_questions(questions: Iterable[RecallQuestion], *, label: str) -> LoadedProbes:
     """One probe set from stored questions, in key order, bound to a digest of its content."""
 
@@ -108,16 +126,20 @@ def results_from_report(
     """Each question's outcome in one probe report, keyed by question key.
 
     Only observations that ran as stored questions count: an incident probe in
-    the same report is not a question, whatever its identifier.
+    the same report is not a question, whatever its identifier. A run that does
+    not say what content it tested is bound to no question and is left out.
     """
 
     results: dict[str, QuestionResult] = {}
     for observation in report.probes:
-        if not observation.incident.startswith("owner-questions-") or not observation.paths:
+        if not observation.incident.startswith(QUESTION_INCIDENT_PREFIX) or not observation.paths:
+            continue
+        if observation.content_sha256 is None:
             continue
         results[observation.probe_id] = QuestionResult(
             recorded_at=recorded_at,
             report_digest=report_digest,
+            content_sha256=observation.content_sha256,
             paths=tuple(
                 QuestionPathResult(
                     path=path.path,

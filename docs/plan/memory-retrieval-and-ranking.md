@@ -706,8 +706,11 @@ first, before duplicate and per-subject collapse, to a bound above what recall
 can fetch. Read with `returned` and `dropped_for_budget` it places a missing
 belief: absent from the ranking, the arms never found it or it fell under the
 relevance floor; ranked and in `dropped_for_budget`, a budget cut it; ranked and
-in neither, the collapse removed it. A snapshot recall has no question and
-records no ranking.
+in neither, the collapse removed it. A merged memory the arms found is listed
+directly after the memory that stands for it: it was scored with that memory
+and is returned only under its identity. A snapshot recall has no question and
+records no ranking. `total` covers every read the recall makes, including the
+People revision a People recall records.
 
 Every trace field that is a plain list of belief identifiers is named once, in
 `TRACE_BELIEF_ID_FIELDS`, and the reconsolidation, email and call erasure paths

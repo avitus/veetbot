@@ -1272,6 +1272,33 @@ async def test_postgres_expires_operator_trace_fields_and_keeps_the_user_view(
         assert view.considered_not_shown == 1
 
 
+async def test_postgres_belief_erasure_reaches_a_candidate_that_was_never_returned(
+    tmp_path: Path,
+) -> None:
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"memera{uuid4().hex[:10]}"
+        first = await _remember(
+            composition, session_id, f"The {marker} standup is at nine", subject=f"standup-{marker}"
+        )
+        second = await _remember(
+            composition, session_id, f"The {marker} retro is on Friday", subject=f"retro-{marker}"
+        )
+        result = await composition.memory_retriever.recall(
+            _query(composition, text=f"{marker} standup").model_copy(update={"max_items": 1}),
+            session_id=session_id,
+            turn_id=uuid4(),
+        )
+        assert [item.belief_id for item in result.items] == [first.id]
+        async with composition.uow_factory() as uow:
+            recorded = await uow.traces.get(result.trace_id, composition.principal)
+            assert second.id in recorded.ranked_candidates and second.id not in recorded.returned
+            assert await uow.traces.erase_people(composition.principal, [], [second.id]) == 1
+        async with composition.uow_factory() as uow:
+            with pytest.raises(NotFoundError):
+                await uow.traces.get(result.trace_id, composition.principal)
+
+
 async def test_postgres_mark_cited_unions_into_the_trace_and_feeds_usage_back(
     tmp_path: Path,
 ) -> None:

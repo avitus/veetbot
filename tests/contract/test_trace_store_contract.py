@@ -277,6 +277,22 @@ async def test_people_trace_erasure_includes_query_only_identity() -> None:
     await people_trace_scope_erasure_contract(InMemoryTraceStore())
 
 
+@pytest.mark.parametrize("field", ["ranked_candidates", "dropped_for_budget", "cited"])
+async def test_belief_erasure_reaches_a_trace_that_only_lists_the_identifier(field: str) -> None:
+    """Erasure follows every list of belief identifiers, not the returned ones alone."""
+
+    store = InMemoryTraceStore()
+    belief_id = UUID(int=781)
+    listed = trace().model_copy(update={"id": UUID(int=782), field: [belief_id]})
+    untouched = trace().model_copy(update={"id": UUID(int=783)})
+    await store.record(listed)
+    await store.record(untouched)
+    assert await store.erase_people(principal(), [], [belief_id]) == 1
+    with pytest.raises(NotFoundError):
+        await store.get(listed.id, principal())
+    assert await store.get(untouched.id, principal()) == untouched
+
+
 def test_a_trace_reports_its_arms_and_whole_latency_apart_from_its_stages() -> None:
     """Readers ask the trace; summing every timing would count the total twice."""
 

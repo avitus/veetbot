@@ -4,6 +4,28 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-20 — A recorded run belongs to the question content it tested (ADR-0338, ADR-0339)
+
+- A recall question's recorded result now names a fingerprint of what the
+  question measured when it ran. A result for content the question no longer
+  holds is refused as stale, and an edit that changes what a question measures
+  clears its recorded result, so the page never shows a pass beside content
+  that has not run. `agent memory questions record` prints how many results it
+  recorded, how many were stale and how many named no question.
+- `agent memory questions export` writes a new private file that takes the
+  destination's place. An existing file with wider permissions used to keep
+  them.
+- In the in-memory store a failed import now leaves every question as it was,
+  and two owners' questions with one identifier keep separate histories.
+- On the page, a change refused because the question moved on stays explained
+  after the list reloads.
+- A recall trace's candidate ranking lists a merged memory directly after the
+  memory that stands for it, and its total time includes the People revision
+  read. Erasing a memory now reaches a trace that only ranked it or cut it for
+  the budget.
+- The probe tool reads the store once per observation instead of once per
+  expected text.
+
 ## 2026-11-20 — One fact in an email thread, one memory (ADR-0341)
 
 - Veetbot was storing the same fact from an email thread many times: 271 of

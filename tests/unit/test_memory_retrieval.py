@@ -17,6 +17,7 @@ import pytest
 
 from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
+from agent_core.domain.agents import Principal
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
@@ -349,6 +350,39 @@ async def test_recall_trace_times_every_stage_not_only_the_vector_search(
     assert latencies["total"] >= sum(latencies[stage] for stage in stages)
     # No vector search ran, so the trace must not claim one.
     assert "semantic" not in latencies
+
+
+async def test_recall_total_time_includes_the_people_revision_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow read made while the trace is assembled is part of the recall's time."""
+
+    ticks = iter(range(1, 10_000))
+    monkeypatch.setattr("agent_core.memory.retrieval.perf_counter", lambda: next(ticks) / 1000)
+    _clock, factory, _service, retriever = await formation_stack()
+    async with factory() as uow:
+        await uow.memories.upsert_belief(memory())
+        people = uow.people
+    read_at: list[int] = []
+    original = people.watermark
+
+    async def slow(owner: Principal) -> int:
+        # The read costs half a second of the fake clock.
+        for _ in range(500):
+            next(ticks)
+        read_at.append(next(ticks))
+        return await original(owner)
+
+    monkeypatch.setattr(people, "watermark", slow)
+    result = await retriever.recall(
+        recall_query().model_copy(update={"people_scope": (UUID(int=9001),)}),
+        session_id=SESSION_ID,
+    )
+    async with factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+
+    assert read_at and trace.people_dependencies is not None
+    assert trace.arm_latencies_ms["total"] >= 500
 
 
 async def test_recall_token_budget_binds_before_the_item_cap() -> None:

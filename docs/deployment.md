@@ -2187,8 +2187,13 @@ agent memory probe --questions all --output /var/tmp/question-run.json   # on th
 agent memory questions record --report /var/tmp/question-run.json         # on production
 ```
 
+`record` prints `{"recorded": N, "stale": N, "unknown": N}`. A stale result was
+measured against content the question no longer holds, because it was edited
+after the clone was taken; run the set again on a fresh clone to replace it.
+
 `agent memory questions export --split holdout --output PATH` writes a half back
-out as a probe file readable by its owner alone.
+out as a probe file readable by its owner alone, also when a file with wider
+permissions was already at that path.
 
 ### Email memories kept by importance (ADR-0340)
 

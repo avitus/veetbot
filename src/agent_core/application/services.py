@@ -97,6 +97,7 @@ from agent_core.domain.persona import (
 )
 from agent_core.domain.recall_questions import (
     QuestionImportOutcome,
+    QuestionRecordOutcome,
     QuestionResult,
     QuestionSplit,
     QuestionStatus,
@@ -1202,4 +1203,4 @@ class RecallQuestionService(Protocol):
 
     async def record_results(
         self, principal: Principal, results: Mapping[str, QuestionResult]
-    ) -> int: ...
+    ) -> QuestionRecordOutcome: ...

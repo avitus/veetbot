@@ -55,10 +55,13 @@ def make_question(
     )
 
 
-def make_result(*, delivered: int = 1) -> QuestionResult:
+def make_result(
+    *, delivered: int = 1, content: RecallQuestionContent | None = None
+) -> QuestionResult:
     return QuestionResult(
         recorded_at=NOW,
         report_digest="a" * 64,
+        content_sha256=(content or make_content()).criteria_sha256,
         paths=(
             QuestionPathResult(
                 path="automatic",
@@ -110,7 +113,7 @@ async def questions_scope_isolation_contract(store: RecallQuestionStore) -> None
     assert await store.get_by_key(stranger, question.key) is None
     assert await store.list_questions(stranger) == []
     assert await store.history(stranger, question.id) == []
-    assert await store.record_result(stranger, question.key, make_result()) is False
+    assert not await store.record_result(stranger, question.key, make_result(), expected_revision=1)
     forged = question.model_copy(
         update={
             "principal_id": stranger.principal_id,
@@ -192,16 +195,62 @@ async def questions_record_result_contract(store: RecallQuestionStore) -> None:
     question = make_question(owner)
     await store.create(question)
 
-    assert await store.record_result(owner, "home-city", make_result()) is True
+    assert await store.record_result(owner, "home-city", make_result(), expected_revision=1)
     stored = await store.get(owner, question.id)
     assert stored is not None and stored.latest_result == make_result()
     # A recorded run is not an edit: revision and history stand.
     assert stored.revision == 1 and len(await store.history(owner, question.id)) == 1
-    assert await store.record_result(owner, "home-city", make_result(delivered=0)) is True
+    assert await store.record_result(
+        owner, "home-city", make_result(delivered=0), expected_revision=1
+    )
     replaced = await store.get(owner, question.id)
     assert replaced is not None and replaced.latest_result is not None
     assert replaced.latest_result.passed is False
-    assert await store.record_result(owner, "missing", make_result()) is False
+    assert not await store.record_result(owner, "missing", make_result(), expected_revision=1)
+    # A result for a revision the question has left changes nothing.
+    assert not await store.record_result(owner, "home-city", make_result(), expected_revision=2)
+    assert await store.get(owner, question.id) == replaced
+
+
+async def questions_save_carries_the_result_contract(store: RecallQuestionStore) -> None:
+    owner = principal()
+    question = make_question(owner)
+    await store.create(question)
+    await store.record_result(owner, "home-city", make_result(), expected_revision=1)
+    recorded = await store.get(owner, question.id)
+    assert recorded is not None and recorded.latest_result is not None
+
+    kept = recorded.model_copy(update={"status": QuestionStatus.RETIRED, "revision": 2})
+    assert await store.save(kept, expected_revision=1) is True
+    after_status = await store.get(owner, question.id)
+    assert after_status is not None and after_status.latest_result == make_result()
+
+    cleared = after_status.model_copy(
+        update={"content": make_content(fact="New Town"), "revision": 3, "latest_result": None}
+    )
+    assert await store.save(cleared, expected_revision=2) is True
+    after_edit = await store.get(owner, question.id)
+    assert after_edit is not None and after_edit.latest_result is None
+
+
+async def questions_same_id_two_owners_contract(store: RecallQuestionStore) -> None:
+    owner = principal()
+    mine = make_question(owner, "mine")
+    theirs = make_question(other(), "theirs").model_copy(update={"id": mine.id})
+    await store.create(mine)
+    await store.create(theirs)
+    edited = mine.model_copy(update={"content": make_content(fact="New Town"), "revision": 2})
+    assert await store.save(edited, expected_revision=1) is True
+
+    # One identifier under two owners is two questions with two histories.
+    assert [item.revision for item in await store.history(owner, mine.id)] == [1, 2]
+    assert [item.revision for item in await store.history(other(), mine.id)] == [1]
+
+    assert await store.erase_principal(owner) == 1
+    assert [item.revision for item in await store.history(other(), mine.id)] == [1]
+    kept = theirs.model_copy(update={"status": QuestionStatus.RETIRED, "revision": 2})
+    assert await store.save(kept, expected_revision=1) is True
+    assert len(await store.history(other(), mine.id)) == 2
 
 
 async def questions_erase_principal_contract(store: RecallQuestionStore) -> None:
@@ -226,6 +275,8 @@ CONTRACTS = [
     questions_save_contract,
     questions_list_filters_contract,
     questions_record_result_contract,
+    questions_save_carries_the_result_contract,
+    questions_same_id_two_owners_contract,
     questions_erase_principal_contract,
 ]
 

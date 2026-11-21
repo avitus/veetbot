@@ -11,6 +11,7 @@ import os
 import signal
 import socket
 import sys
+import tempfile
 from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
 from contextlib import aclosing
 from datetime import datetime, timedelta
@@ -1829,6 +1830,26 @@ def questions_import(
     typer.echo(json.dumps(outcome))
 
 
+def _write_private_file(output: Path, text: str) -> None:
+    """Write a file only its owner can read, replacing whatever was at the path.
+
+    Opening an existing file keeps the mode it already had, so a file that was
+    readable by others would stay readable with the owner's facts in it. The
+    text goes to a new private file beside the destination, which then takes
+    its place; a failure leaves the older file as it was and no scrap behind.
+    """
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, scratch = tempfile.mkstemp(dir=output.parent, prefix=f".{output.name}.")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as target:
+            target.write(text)
+        os.replace(scratch, output)
+    except BaseException:
+        Path(scratch).unlink(missing_ok=True)
+        raise
+
+
 async def _questions_export(which: str) -> list[str]:
     async with build(storage="postgres") as composition:
         loaded = await _stored_question_probes(composition, which)
@@ -1849,15 +1870,15 @@ def questions_export(
     except (ConfigurationError, AgentCoreError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
-    output.parent.mkdir(parents=True, exist_ok=True)
-    # The file holds the owner's own facts: create it private, never widen it later.
-    descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as target:
-        target.write("".join(line + "\n" for line in lines))
+    try:
+        _write_private_file(output, "".join(line + "\n" for line in lines))
+    except OSError as exc:
+        typer.echo(f"the export could not be written: {exc}", err=True)
+        raise typer.Exit(1) from exc
     typer.echo(json.dumps({"exported": len(lines)}))
 
 
-async def _questions_record(report_bytes: bytes) -> int:
+async def _questions_record(report_bytes: bytes) -> dict[str, int]:
     probes_module = cast(Any, importlib.import_module("agent_core.evals.owner_recall_probes"))
     questions = cast(Any, importlib.import_module("agent_core.evals.owner_recall_questions"))
     report = probes_module.ProbeReport.model_validate_json(report_bytes)
@@ -1867,10 +1888,10 @@ async def _questions_record(report_bytes: bytes) -> int:
             report_digest=hashlib.sha256(report_bytes).hexdigest(),
             recorded_at=composition.clock.now(),
         )
-        return cast(
-            int,
-            await _question_service(composition).record_results(composition.principal, results),
+        outcome = await _question_service(composition).record_results(
+            composition.principal, results
         )
+        return cast(dict[str, int], outcome.model_dump())
 
 
 @questions_app.command("record")
@@ -1879,18 +1900,22 @@ def questions_record(
         Path, typer.Option("--report", help="A probe report written by `agent memory probe`.")
     ],
 ) -> None:
-    """Record each question's outcome from a probe report as its latest result."""
+    """Record each question's outcome from a probe report as its latest result.
+
+    A result measured against content the question no longer holds is counted
+    as stale and not stored.
+    """
 
     try:
         with report.open("rb") as source:
             data = source.read(20_000_001)
         if len(data) > 20_000_000:
             raise ValueError("The probe report exceeds the input limit")
-        recorded = asyncio.run(_questions_record(data))
+        outcome = asyncio.run(_questions_record(data))
     except (OSError, ConfigurationError, AgentCoreError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
-    typer.echo(json.dumps({"recorded": recorded}))
+    typer.echo(json.dumps(outcome))
 
 
 async def _memory_replay(session_id: UUID) -> Any:

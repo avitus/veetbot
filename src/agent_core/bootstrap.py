@@ -1952,7 +1952,7 @@ def _memory_uow_repositories(
     artifacts = InMemoryArtifactRepository()
     browser_task_grants = InMemoryBrowserTaskGrantRepository()
     records = InMemoryRecordStore()
-    recall_questions = InMemoryRecallQuestionStore()
+    recall_questions = InMemoryRecallQuestionStore(memories._transaction)
     session_deletions = InMemorySessionDeletionRepository(
         sessions=sessions,
         runs=runs,

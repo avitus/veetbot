@@ -20,7 +20,7 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:972), and formation precision and
+scenarios (memory-retrieval-and-ranking.md:975), and formation precision and
 recall of consequential facts (memory-formation-and-consolidation.md:861-863).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
@@ -28,10 +28,10 @@ therefore been argued from reading the diff.
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:358-360), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:1014-1017),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:1017-1020),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:102), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:1009), and re-derivation
+resolved at read time (memory-retrieval-and-ranking.md:1012), and re-derivation
 that is opt-in per principal (memory-formation-and-consolidation.md:888) are
 all written down, and none of them runs.
 
@@ -858,7 +858,7 @@ first time they move; lifecycle decisions read these counters, never the legacy
 `utility`, which two months of per-run snapshot charges depressed and no wait can
 reset. The `memory.cited` payload names the delivered traces. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:1014-1017): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:1017-1020): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.
@@ -945,7 +945,12 @@ it runs the set as it stood when the clone was taken; the report's digest
 binds it to that exact set. `agent memory questions record --report` writes
 each question's outcome back to production as its latest result: per path, the
 furthest stage each fact reached and the counts, never text. A recorded result
-is not an edit and moves no revision. `agent memory questions import` and
+is not an edit and moves no revision. Each result names a fingerprint of what
+the question measured when it ran. A result measured against content the
+question no longer holds is refused and counted as stale, and an edit that
+changes what a question measures clears its recorded result, so the page never
+shows a pass beside content that has not run. The command prints how many
+results it recorded, how many were stale and how many named no question. `agent memory questions import` and
 `export` read and write the probe file format; an export is created readable
 by its owner alone. A question is owner-written test content: it may quote a
 memory, and forgetting that memory does not rewrite the question.

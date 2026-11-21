@@ -11,6 +11,7 @@ from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.recall_questions import (
     MAX_QUESTIONS_PER_PRINCIPAL,
     QuestionImportOutcome,
+    QuestionRecordOutcome,
     QuestionResult,
     QuestionSplit,
     QuestionStatus,
@@ -160,15 +161,33 @@ class PublicRecallQuestionService:
 
     async def record_results(
         self, principal: Principal, results: Mapping[str, QuestionResult]
-    ) -> int:
-        """Set each named question's latest run result; unknown keys are skipped."""
+    ) -> QuestionRecordOutcome:
+        """Set each named question's latest run result, when it tested this content.
+
+        A run happens on a clone, and the owner may edit a question before its
+        result comes back. A result measured against other content is stale and
+        is not stored; neither is one for a key the owner has no question for.
+        """
 
         require_scope(principal, "memory.write")
-        recorded = 0
+        recorded = stale = unknown = 0
         async with self._uow_factory() as uow:
             for key, result in results.items():
-                recorded += await uow.recall_questions.record_result(principal, key, result)
-        return recorded
+                stored = await uow.recall_questions.get_by_key(principal, key)
+                if stored is None:
+                    unknown += 1
+                elif (
+                    result.content_sha256 == stored.content.criteria_sha256
+                    # The revision check refuses a result that an edit overtook
+                    # between the read above and this write.
+                    and await uow.recall_questions.record_result(
+                        principal, key, result, expected_revision=stored.revision
+                    )
+                ):
+                    recorded += 1
+                else:
+                    stale += 1
+        return QuestionRecordOutcome(recorded=recorded, stale=stale, unknown=unknown)
 
     async def _owned(
         self, uow: RepositoryUnitOfWork, principal: Principal, question_id: UUID
@@ -224,11 +243,20 @@ class PublicRecallQuestionService:
                 f"recall question expected revision {expected_revision} "
                 f"but it is at {stored.revision}"
             )
+        changed = stored.content if content is None else content
         saved = stored.model_copy(
             update={
-                "content": stored.content if content is None else content,
+                "content": changed,
                 "status": stored.status if status is None else status,
                 "revision": stored.revision + 1,
+                # A result says how the question did as it was then measured.
+                # Once what it measures changes, that result is about another
+                # question; a note or a status change leaves it standing.
+                "latest_result": (
+                    stored.latest_result
+                    if changed.criteria_sha256 == stored.content.criteria_sha256
+                    else None
+                ),
                 "updated_at": self._clock.now(),
             }
         )

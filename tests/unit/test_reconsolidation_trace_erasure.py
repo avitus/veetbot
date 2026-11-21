@@ -56,3 +56,23 @@ def test_email_trace_erasure_scrubs_the_candidate_ranking() -> None:
     erased = erase_trace(value, {"doomed"})
     assert erased is not None
     assert erased["ranked_candidates"] == ["kept", "also-kept"]
+
+
+def test_email_trace_erasure_reaches_a_candidate_that_was_never_returned() -> None:
+    """Ranked but not returned: the identifier is in no rendered belief, only in a list."""
+
+    value = {
+        "beliefs": [{"belief_id": "kept", "record_kind": "belief", "statement": "Stays"}],
+        "returned": ["kept"],
+        "ranked_candidates": ["kept", "doomed"],
+        "dropped_for_budget": ["doomed"],
+        "rendered": "Stays",
+        "rendered_sha256": "unchanged",
+    }
+    erased = erase_trace(value, {"doomed"})
+    assert erased is not None
+    assert erased["ranked_candidates"] == ["kept"] and erased["dropped_for_budget"] == []
+    # Nothing that was rendered is gone, so what was rendered stands.
+    assert erased["beliefs"] == value["beliefs"] and erased["returned"] == ["kept"]
+    assert (erased["rendered"], erased["rendered_sha256"]) == ("Stays", "unchanged")
+    assert erase_trace(value, {"absent"}) is None

@@ -114,14 +114,55 @@ def test_export_writes_a_file_only_its_owner_can_read(
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
+def test_export_over_an_existing_file_leaves_it_private(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def exported(which: str) -> list[str]:
+        return ['{"id":"home-city"}']
+
+    monkeypatch.setattr(main, "_questions_export", exported)
+    output = tmp_path / "questions.jsonl"
+    output.write_text("an older export\n", encoding="utf-8")
+    output.chmod(0o644)
+    result = CliRunner().invoke(
+        main.app, ["memory", "questions", "export", "--output", str(output)]
+    )
+    assert result.exit_code == 0, result.output
+    assert output.read_text(encoding="utf-8") == '{"id":"home-city"}\n'
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    # Nothing but the export is left beside it.
+    assert [item.name for item in tmp_path.iterdir()] == ["questions.jsonl"]
+
+
+def test_a_failed_export_keeps_the_older_file_and_leaves_no_scrap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def exported(which: str) -> list[str]:
+        return ['{"id":"home-city"}']
+
+    def refuse(source: object, target: object) -> None:
+        raise OSError("the disk refused the rename")
+
+    monkeypatch.setattr(main, "_questions_export", exported)
+    monkeypatch.setattr("os.replace", refuse)
+    output = tmp_path / "questions.jsonl"
+    output.write_text("an older export\n", encoding="utf-8")
+    result = CliRunner().invoke(
+        main.app, ["memory", "questions", "export", "--output", str(output)]
+    )
+    assert result.exit_code == 1
+    assert output.read_text(encoding="utf-8") == "an older export\n"
+    assert [item.name for item in tmp_path.iterdir()] == ["questions.jsonl"]
+
+
 def test_record_reads_a_bounded_report_and_counts_what_it_recorded(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     seen: list[bytes] = []
 
-    async def recorded(data: bytes) -> int:
+    async def recorded(data: bytes) -> dict[str, int]:
         seen.append(data)
-        return 7
+        return {"recorded": 7, "stale": 2, "unknown": 1}
 
     monkeypatch.setattr(main, "_questions_record", recorded)
     report = tmp_path / "report.json"
@@ -131,5 +172,6 @@ def test_record_reads_a_bounded_report_and_counts_what_it_recorded(
     missing = runner.invoke(
         main.app, ["memory", "questions", "record", "--report", str(tmp_path / "absent.json")]
     )
-    assert done.exit_code == 0 and json.loads(done.output) == {"recorded": 7}
+    assert done.exit_code == 0
+    assert json.loads(done.output) == {"recorded": 7, "stale": 2, "unknown": 1}
     assert seen == [b"{}"] and missing.exit_code == 1

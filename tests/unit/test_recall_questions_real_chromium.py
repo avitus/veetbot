@@ -134,12 +134,15 @@ async def test_the_owner_keeps_the_question_set_from_the_page() -> None:
 
             # A recorded run shows on the question without changing it.
             assert app.services.recall_questions is not None
+            (stored,) = (await app.services.recall_questions.list_questions(owner)).items
             await app.services.recall_questions.record_results(
                 owner,
                 {
                     "home-city": QuestionResult(
                         recorded_at=NOW,
                         report_digest="c" * 64,
+                        # The run tested the question as the page last saved it.
+                        content_sha256=stored.content.criteria_sha256,
                         paths=(
                             QuestionPathResult(
                                 path="automatic",
@@ -166,6 +169,29 @@ async def test_the_owner_keeps_the_question_set_from_the_page() -> None:
             await expect(page.locator("#summary")).to_contain_text("0 active questions")
             await page.locator("#filter-status").select_option("retired")
             await expect(page.locator(".card")).to_have_count(1)
+            await page.locator(".card").get_by_role("button", name="Restore", exact=True).click()
+            await page.locator("#filter-status").select_option("active")
+            await expect(page.locator(".card")).to_have_count(1)
+
+            # A change refused because the question moved on stays explained
+            # after the list reloads; the reload alone must not wipe the reason.
+            (current,) = (await app.services.recall_questions.list_questions(owner)).items
+            await app.services.recall_questions.edit(
+                owner,
+                current.id,
+                expected_revision=current.revision,
+                content=current.content.model_copy(update={"notes": "edited elsewhere"}),
+            )
+            await page.locator(".card").get_by_role("button", name="Retire", exact=True).click()
+            await expect(page.locator("#error")).to_contain_text("the question changed")
+            await expect(page.locator(".card")).to_have_count(1)
+            await expect(page.locator("#summary")).to_contain_text("1 active question")
+            await expect(page.locator("#error")).to_be_visible()
+            # The reloaded card holds the new revision, so the same click now works.
+            await page.locator(".card").get_by_role("button", name="Retire", exact=True).click()
+            await expect(page.locator(".card")).to_have_count(0)
+            await expect(page.locator("#error")).to_be_hidden()
+            await page.locator("#filter-status").select_option("retired")
             await page.locator(".card").get_by_role("button", name="Restore", exact=True).click()
             await page.locator("#filter-status").select_option("active")
             await expect(page.locator(".card")).to_have_count(1)

@@ -262,6 +262,7 @@ function render() {
 }
 
 async function setStatus(question, status) {
+  let failure = "";
   lock(true);
   try {
     await api(BASE + "/" + question.id + "/status", {
@@ -269,11 +270,13 @@ async function setStatus(question, status) {
     });
     toast(status === "retired" ? "Retired. It will not run until restored." : "Restored.");
   } catch (error) {
-    show("error", error.message);
+    failure = error.message;
   } finally {
     lock(false);
   }
   await load(true);
+  // The reload clears the page's message; a refused change has to stay explained.
+  if (failure) show("error", failure);
 }
 
 function addFact(item) {

@@ -53,6 +53,14 @@ being placed.
    it stood when the clone was taken. `agent memory questions record --report`
    then writes each question's outcome to production as its latest result:
    stages and counts, no text. A result is not an edit and moves no revision.
+   **A result is bound to the content it tested.** Each run carries a
+   fingerprint of what the question measured when it ran (everything but its
+   notes), computed from the probe that ran. Recording refuses a result whose
+   fingerprint is not the question's current one and counts it as stale, and an
+   edit that changes what a question measures clears its recorded result; a
+   note or a status change leaves it. The owner may edit a question between
+   the clone and the recording, and the page must never show a pass beside
+   content that has not run.
 9. **A question is owner-written test content.** It may quote a memory's text.
    Forgetting or erasing that memory does not rewrite the question; the owner
    edits or retires it, and a pinned memory that no longer exists reports as
@@ -68,6 +76,9 @@ being placed.
 - Question rows hold owner facts outside the memory store. Memory erasure does
   not reach them; this is stated here rather than hidden, and the page is the
   place to correct it.
+- An export holds the same facts. It is written to a new private file that
+  then takes the destination's place, so a file that already existed with
+  wider permissions does not keep them.
 - The schema gains a migration, so rollback across it is a schema boundary.
 
 ## Not decided here

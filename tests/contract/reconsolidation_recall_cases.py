@@ -313,3 +313,30 @@ async def reviewed_recall_excludes_legacy_operations(factory: UnitOfWorkFactory)
 
 
 RECALL_SCENARIOS.append(reviewed_recall_excludes_legacy_operations)
+
+
+async def merged_member_stays_in_the_candidate_ranking(factory: UnitOfWorkFactory) -> None:
+    """A member a merge stands for was found and scored, so the trace still names it."""
+
+    async with factory() as uow:
+        job, group = await seed(Stores(uow.memories, uow.reconsolidation, uow.events, uow.people))
+        plan = await uow.reconsolidation.plan_merge(principal(), job.lease_token, group.id, NOW)
+        assert plan is not None
+        await uow.reconsolidation.commit_merge(principal(), job.lease_token, group.id, plan, NOW)
+    retriever = HybridMemoryRetriever(
+        factory, FixedClock(NOW), RandomIdFactory(), principal(), reconsolidation_enabled=True
+    )
+    result = await retriever.recall(recall_query(), session_id=SESSION_ID)
+    async with factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+
+    merged_away = set(plan.member_ids) - {plan.canonical_id}
+    assert merged_away and [item.belief_id for item in result.items] == [plan.canonical_id]
+    ranking = trace.ranked_candidates
+    position = ranking.index(plan.canonical_id)
+    # Listed directly after the memory that stands for it, never returned itself.
+    assert set(ranking[position + 1 : position + 1 + len(merged_away)]) == merged_away
+    assert not merged_away & set(trace.returned)
+
+
+RECALL_SCENARIOS.append(merged_member_stays_in_the_candidate_ranking)

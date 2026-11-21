@@ -33,6 +33,7 @@ from agent_core.domain.memory import (
     EMAIL_RETENTION_POLICY,
     LIFECYCLE_POLICY_VERSION,
     SENSITIVITY_ORDER,
+    TRACE_BELIEF_ID_FIELDS,
     BeliefRejection,
     BeliefType,
     ConsolidationRun,
@@ -819,7 +820,7 @@ class InMemoryTraceStore:
                     ({item.record_id, *item.person_ids, *item.source_ids} & records)
                     for item in trace.people
                 )
-                or beliefs & set(trace.returned)
+                or any(beliefs & set(getattr(trace, field)) for field in TRACE_BELIEF_ID_FIELDS)
                 or any(
                     item.record_kind != "belief"
                     and (records | beliefs)

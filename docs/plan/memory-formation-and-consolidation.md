@@ -289,7 +289,7 @@ same-source shortcut is decided over every related belief before any of them is
 acted on, and re-consolidating a conflicted session is a no-op like any other
 replay. The rule and what a
 conflict then commits are stated in
-[memory-evaluation-and-lifecycle.md:1029-1054](memory-evaluation-and-lifecycle.md:1029-1054).
+[memory-evaluation-and-lifecycle.md:1034-1059](memory-evaluation-and-lifecycle.md:1034-1059).
 
 **Only the same attribute can disagree (ADR-0248).** Related beliefs are the
 live beliefs with the same subject, type and **predicate key**: a closed key

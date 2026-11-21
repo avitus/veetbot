@@ -8,6 +8,8 @@ is created and no edit can move it (ADR-0338, ADR-0339).
 
 from __future__ import annotations
 
+import hashlib
+import json
 from enum import StrEnum
 from typing import Final, Literal
 from uuid import UUID
@@ -93,6 +95,23 @@ class RecallQuestionContent(BaseModel):
             raise ValueError("the question measures nothing: name a fact or a text it must reach")
         return self
 
+    @property
+    def criteria_sha256(self) -> str:
+        """A fingerprint of what a run of the question tests.
+
+        A recorded result names the fingerprint it was measured against, so a
+        result for an older wording is never shown beside a newer one. The
+        notes explain the question and change nothing a run checks, so they
+        are left out.
+        """
+
+        canonical = json.dumps(
+            self.model_dump(mode="json", exclude={"notes"}),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
 
 class QuestionPathResult(BaseModel):
     """How one path of the latest run went for a question: stages and counts, no text."""
@@ -123,6 +142,8 @@ class QuestionResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     recorded_at: AwareDatetime
     report_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # The `criteria_sha256` of the question content the run tested.
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     paths: tuple[QuestionPathResult, ...] = Field(min_length=1, max_length=2)
 
     @property
@@ -140,7 +161,8 @@ class RecallQuestion(BaseModel):
     status: QuestionStatus = QuestionStatus.ACTIVE
     content: RecallQuestionContent
     revision: int = Field(default=1, ge=1)
-    # Written by a recorded run, never by an edit: it moves no revision.
+    # Written by a recorded run, which moves no revision. An edit that changes
+    # what the question measures clears it.
     latest_result: QuestionResult | None = None
     created_at: AwareDatetime
     updated_at: AwareDatetime
@@ -176,6 +198,9 @@ class RecallQuestionView(BaseModel):
     @classmethod
     def of(cls, question: RecallQuestion) -> RecallQuestionView:
         result = question.latest_result
+        if result is not None and result.content_sha256 != question.content.criteria_sha256:
+            # A result measured against other content says nothing about this one.
+            result = None
         return cls(
             id=question.id,
             key=question.key,
@@ -207,3 +232,16 @@ class QuestionImportOutcome(BaseModel):
     created: int = Field(default=0, ge=0)
     updated: int = Field(default=0, ge=0)
     unchanged: int = Field(default=0, ge=0)
+
+
+class QuestionRecordOutcome(BaseModel):
+    """What recording a run did, by count.
+
+    A stale result was measured against content the question no longer holds;
+    an unknown one names a key the owner has no question for. Neither is stored.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    recorded: int = Field(default=0, ge=0)
+    stale: int = Field(default=0, ge=0)
+    unknown: int = Field(default=0, ge=0)

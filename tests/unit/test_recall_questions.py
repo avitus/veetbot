@@ -195,10 +195,18 @@ def test_a_probe_report_becomes_each_questions_latest_result() -> None:
             probe_id="home-city",
             incident="owner-questions-holdout",
             family="attributes",
+            content_sha256="c" * 64,
             paths=(
                 _path("automatic", "ranked", delivered=0, found=(True,)),
                 _path("deliberate", "delivered", delivered=1, found=(True,)),
             ),
+        ),
+        # A run that cannot say what content it tested is bound to no question.
+        ProbeObservation(
+            probe_id="unbound",
+            incident="owner-questions-holdout",
+            family="attributes",
+            paths=(_path("automatic", "delivered", delivered=1),),
         ),
         # An incident probe that happens to be in the same report is not a question.
         ProbeObservation(
@@ -228,3 +236,4 @@ def test_a_probe_report_becomes_each_questions_latest_result() -> None:
     ]
     # One path that missed is a miss: the automatic path is what a chat gets unasked.
     assert result.passed is False and result.report_digest == "b" * 64
+    assert result.content_sha256 == "c" * 64
