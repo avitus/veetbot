@@ -43,10 +43,14 @@ from agent_core.domain.email_memory import (
     first_class_statement,
     guess_statement,
     kept_label,
+    named_message,
     names_message,
     names_thread,
     owner_judgment,
     quoted_text,
+    reads_current_source,
+    rerating_settled,
+    reset_rating,
     restated,
     stated_value,
     thread_importance,
@@ -188,6 +192,9 @@ class _Rerating:
         # Each is kept with the stored row it was made from, and holds only
         # while that row is still what the store has.
         self.projected: dict[UUID, tuple[MemoryRecord, MemoryRecord]] = {}
+        # Memories this pass put back after the owner's feedback had left them
+        # past due. The message that formed each is read again afterwards.
+        self.reopened: set[UUID] = set()
         self.fresh()
 
     def fresh(self) -> None:
@@ -1085,6 +1092,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         adopt: bool,
         lower: bool = True,
         owner: bool = False,
+        only: frozenset[str] | None = None,
     ) -> list[UUID]:
         """Re-rate the memories one retained message governs; returns those it changed.
 
@@ -1108,12 +1116,20 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         existed; the hooks follow memories already under it, so nothing is
         backfilled silently. With `lower` false the pass only lengthens and
         promotes. `owner` says the pass is the owner's own feedback at work.
+        `only` limits the visit to those of the record's memories.
 
         A memory past its expiry is never revived, with one exception. When
         the owner's own feedback is what set an expiry already in the past,
         the record notes it. A later pass that gives the memory a retention
         still running puts it back as it was, also after the expiry sweep
-        closed it. A memory that expired on its own carries no note.
+        closed it. A memory that expired on its own carries no note. The
+        note sits with the message behind the memory's last evidence, which
+        need not be the one that formed it: the pass remembers each memory
+        it put back, so its caller reads the forming message again.
+
+        A statement is read for its sender, its date and its message only in
+        its own attribution, and against the stored message's sender when the
+        thread holds that message.
         """
         payload = record.payload
         account_id, thread_id, message_id = (
@@ -1134,14 +1150,23 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             or not isinstance(memory_ids, list)
             # Most retained messages formed nothing: read no thread for them.
             or not memory_ids
+            or (only is not None and not only & set(map(str, memory_ids)))
         ):
             return []
         standing = await self._standing(uow, account_id, thread_id, message_id, seen=seen)
+        held = seen.threads.get(thread_source_key(account_id, thread_id))
+        # The stored message's own sender, when the thread holds the message.
+        sender = next(
+            (item.sender for item in (held.messages if held else []) if item.id == message_id),
+            None,
+        )
         facts = payload.get("facts")
         notes = dict(facts) if isinstance(facts, dict) else {}
         now = self._clock.now()
         changed: list[UUID] = []
         for value in memory_ids:
+            if only is not None and str(value) not in only:
+                continue
             try:
                 stored = await uow.memories.get(UUID(str(value)), self._principal)
             except (NotFoundError, ValueError):
@@ -1153,8 +1178,12 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             baseline, projection = seen.projected.get(stored.id, (stored, stored))
             memory = projection if baseline == stored else stored
             role = _source_role(facts, memory.id)
-            named = role is None and names_message(
-                memory.statement, account_id, thread_id, message_id
+            first_class = memory.derivation is MemoryDerivation.DIRECT
+            # A first-class row is a plain statement and names no message.
+            named = (
+                role is None
+                and not first_class
+                and names_message(memory.statement, account_id, thread_id, message_id, sender)
             )
             latest = role in {None, _FORMED, _RENEWED} and memory.last_evidence_at == evidence_at
             origin = role == _FORMED or named
@@ -1178,7 +1207,6 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             if named and apply:
                 notes[f"{_FORMED}:{memory.id}"] = str(memory.id)
             update: dict[str, object] = {}
-            first_class = memory.derivation is MemoryDerivation.DIRECT
             # A promotion needs only what is visible. A demotion needs evidence:
             # the sender is seen and is not someone the owner knows, or a
             # current, complete reading keeps the thread under a year. A reset
@@ -1197,8 +1225,10 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     thread_id=thread_id,
                     message_id=message_id,
                     first_class=standing.first_class,
-                    # The row's standing, not its words, says which wording it is in.
+                    # The row's standing, not its words, says which wording it is in,
+                    # and the stored message, not a display name, says who sent it.
                     direct=first_class,
+                    sender=sender,
                 )
                 if statement is not None:
                     first_class = standing.first_class
@@ -1229,6 +1259,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     update["expires_at"] = expiry
                     if lapsed:
                         notes.pop(f"{_LAPSED}:{memory.id}", None)
+                        seen.reopened.add(memory.id)
                         if memory.status not in LIVE_MEMORY_STATUSES and lapse is not None:
                             # The expiry sweep closed it meanwhile; it reopens as it was.
                             update.update(status=lapse[1], valid_to=None)
@@ -1317,11 +1348,83 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 payload={
                     "cause": cause,
                     "policy_version": EMAIL_RETENTION_POLICY,
-                    "belief_ids": sorted(str(value) for value in changed),
+                    # Two messages can each change one memory in a pass; it is named once.
+                    "belief_ids": sorted({str(value) for value in changed}),
                 },
             ),
             lease=lease,
         )
+
+    async def _learning_paused(self, uow: RepositoryUnitOfWork) -> bool:
+        """Whether the owner has paused learning, read under the caller's mailbox lock.
+
+        The pause is saved under the same lock. A caller that read it earlier,
+        outside the lock, may act on a state the owner has since changed.
+        """
+        state = await uow.email.get(self._principal, "learning", "shared")
+        return state is not None and state.payload.get("paused") is True
+
+    async def _rerate_sources(
+        self,
+        uow: RepositoryUnitOfWork,
+        keys: Sequence[str],
+        seen: _Rerating,
+        *,
+        apply: bool,
+        adopt: bool,
+        lower: bool = True,
+        owner: bool = False,
+    ) -> list[UUID]:
+        """Re-rate these retained messages in order, whatever that order is.
+
+        A memory the owner's feedback left past due is put back by the
+        message behind its last evidence, whose record holds the note. Its
+        standing is set by the message that formed it, which may have been
+        read first, while the memory was still past due and so not touched.
+        Each memory this pass put back therefore has the messages that list
+        it read once more, so the outcome does not depend on which was first.
+
+        The forming message may also sit in a thread this pass does not
+        cover. A guess's record line names it, and it is read too, in the
+        raising direction only: what another thread's reading would take
+        away waits for that thread's own re-rating or the owner's command.
+        A first-class statement names no message; one that returns keeps its
+        standing until the thread that formed it is next re-rated.
+        """
+        changed: list[UUID] = []
+        earlier = set(seen.reopened)
+        for key in keys:
+            record = await uow.email.get(self._principal, "semantic_source", key)
+            if record is not None:
+                changed += await self._rerate_source(
+                    uow, record, seen, apply=apply, adopt=adopt, lower=lower, owner=owner
+                )
+        reopened = seen.reopened - earlier
+        if not reopened:
+            return changed
+        wanted = frozenset(str(value) for value in reopened)
+        elsewhere: list[str] = []
+        for memory_id in sorted(reopened, key=str):
+            stored = await uow.memories.get(memory_id, self._principal)
+            baseline, projection = seen.projected.get(stored.id, (stored, stored))
+            named = named_message((projection if baseline == stored else stored).statement)
+            origin = None if named is None else semantic_source_key(*named)
+            if origin is not None and origin not in keys and origin not in elsewhere:
+                elsewhere.append(origin)
+        for key in (*keys, *elsewhere):
+            record = await uow.email.get(self._principal, "semantic_source", key)
+            if record is not None:
+                changed += await self._rerate_source(
+                    uow,
+                    record,
+                    seen,
+                    apply=apply,
+                    adopt=adopt,
+                    lower=lower and key in keys,
+                    owner=owner and key in keys,
+                    only=wanted,
+                )
+        return changed
 
     async def rerate_thread(
         self,
@@ -1333,7 +1436,12 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         run: Run | None = None,
         lease: WorkerLease | None = None,
     ) -> EmailRerateReport:
-        """Make one thread's live email memories follow its current importance and sender."""
+        """Make one thread's live email memories follow its current importance and sender.
+
+        The learning pause is read here, under the mailbox lock it is saved
+        under. A caller's earlier reading may be out of date by the time the
+        lock is held, and while learning is paused nothing is written.
+        """
         seen = _Rerating()
         if not self.enabled:
             return seen.report(applied=apply)
@@ -1342,6 +1450,10 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             uow.email.lock(self._principal),
             uow.people.lock(self._principal),
         ):
+            if await self._learning_paused(uow):
+                # A pause holds the memories still. Nothing is written, so a
+                # saved assessment keeps its mark for the refresh after it.
+                return seen.report(applied=apply)
             await self._standing(uow, account_id, provider_thread_id, "", seen=seen)
             source_key = thread_source_key(account_id, provider_thread_id)
             thread = seen.threads.get(source_key)
@@ -1353,17 +1465,17 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 *(str(value) for value in (observed if isinstance(observed, list) else [])),
                 *(message.id for message in ([] if thread is None else thread.messages)),
             }
-            changed: list[UUID] = []
-            for message_id in sorted(message_ids) if thread is not None else []:
-                record = await uow.email.get(
-                    self._principal,
-                    "semantic_source",
-                    semantic_source_key(account_id, provider_thread_id, message_id),
-                )
-                if record is not None:
-                    changed += await self._rerate_source(
-                        uow, record, seen, apply=apply, adopt=False, owner=cause == "feedback"
-                    )
+            changed = await self._rerate_sources(
+                uow,
+                [
+                    semantic_source_key(account_id, provider_thread_id, message_id)
+                    for message_id in (sorted(message_ids) if thread is not None else [])
+                ],
+                seen,
+                apply=apply,
+                adopt=False,
+                owner=cause == "feedback",
+            )
             if apply:
                 await self._audit_rerating(uow, changed, cause=cause, run=run, lease=lease)
                 if thread is not None:
@@ -1376,13 +1488,21 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         It is cleared in the re-rating's own transaction, so the two stand or
         fall together: a refresh that stops after saving an assessment leaves
         the mark, and the next refresh re-rates whatever else is current.
+
+        The mark stays when the thread has changed since the assessment read
+        it and its rating is reset. That rating could only lengthen here; what
+        it would shorten is owed until the thread is stored as it was read
+        again, or an assessment of the thread as it is now replaces the record.
         """
         row = await uow.email.get(self._principal, "assessment", str(thread.id))
         if row is None or row.payload.get(RERATING_PENDING) is not True:
             return
-        settled = {key: value for key, value in row.payload.items() if key != RERATING_PENDING}
+        if reset_rating(thread) and not reads_current_source(thread, row.payload):
+            return
         await uow.email.put(
-            row.model_copy(update={"revision": row.revision + 1, "payload": settled}),
+            row.model_copy(
+                update={"revision": row.revision + 1, "payload": rerating_settled(row.payload)}
+            ),
             expected_revision=row.revision,
         )
 
@@ -1409,6 +1529,9 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         the order given and starts no new one once its time is spent; a thread
         it does not reach waits like the rest. The caller supplies the timer
         that measures that time; without one the pass has no time limit.
+
+        Each page reads the learning pause under its locks and the pass ends
+        there while it is on, as a thread's own re-rating does.
         """
         seen = _Rerating()
         if not self.enabled:
@@ -1430,22 +1553,29 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 uow.email.lock(self._principal),
                 uow.people.lock(self._principal),
             ):
+                if await self._learning_paused(uow):
+                    # A pause holds the memories still, here as in a thread's own re-rating.
+                    break
                 seen.fresh()
                 changed: list[UUID] = []
                 for account_id, provider_thread_id in threads[start : start + _LENGTHEN_PAGE]:
                     if spent():
                         break
-                    for record in await self._thread_sources(uow, account_id, provider_thread_id):
-                        changed += await self._rerate_source(
-                            uow, record, seen, apply=True, adopt=False, lower=False
-                        )
+                    changed += await self._rerate_sources(
+                        uow,
+                        await self._thread_sources(uow, account_id, provider_thread_id),
+                        seen,
+                        apply=True,
+                        adopt=False,
+                        lower=False,
+                    )
                 await self._audit_rerating(uow, changed, cause=cause, run=None, lease=None)
         return seen.report(applied=True)
 
     async def _thread_sources(
         self, uow: RepositoryUnitOfWork, account_id: str, provider_thread_id: str
-    ) -> list[EmailRecord]:
-        """One thread's retained messages, from the index of every message observed."""
+    ) -> list[str]:
+        """The keys of one thread's retained messages, from the index of every message observed."""
         index = await uow.email.get(
             self._principal, "thread_source", thread_source_key(account_id, provider_thread_id)
         )
@@ -1469,16 +1599,10 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 if row is None
                 else {message.id for message in EmailThread.model_validate(row.payload).messages}
             )
-        records: list[EmailRecord] = []
-        for message_id in sorted(message_ids):
-            record = await uow.email.get(
-                self._principal,
-                "semantic_source",
-                semantic_source_key(account_id, provider_thread_id, message_id),
-            )
-            if record is not None:
-                records.append(record)
-        return records
+        return [
+            semantic_source_key(account_id, provider_thread_id, message_id)
+            for message_id in sorted(message_ids)
+        ]
 
     async def merge_duplicates(self, *, apply: bool) -> EmailMergeReport:
         """Keep one memory per fact in each thread; a preview unless `apply` (ADR-0341).
@@ -1500,6 +1624,9 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         thread. The listings are read before the locks are taken, so a copy
         whose latest evidence none of them answers for under the locks is left
         as it is; the next run places it.
+
+        An applied merge appends one content-free event per thread it changed,
+        naming every fact it merged there; a preview appends none.
         """
         report = EmailMergeReport(applied=apply)
         if not self.enabled:
@@ -1572,6 +1699,8 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     pair = (belief_type, stated_key)
                     subjects_by_value[pair] = subjects_by_value.get(pair, 0) + 1
                 other_subjects += sum(count - 1 for count in subjects_by_value.values())
+                # What this thread's merge changed: each memory kept, with its copies.
+                merged: list[tuple[MemoryRecord, list[MemoryRecord]]] = []
                 for group in groups.values():
                     if len(group) < 2:
                         continue
@@ -1600,15 +1729,28 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                                 deep=True,
                             )
                         )
+                    merged.append((kept, copies))
+                if merged:
+                    # One event for the thread, in the session of its earliest memory kept.
+                    merged.sort(key=lambda pair: str(pair[0].id))
+                    first = min(
+                        (kept for kept, _ in merged),
+                        key=lambda item: (item.valid_from, item.store_position),
+                    )
                     await uow.events.append(
                         NewEvent(
-                            session_id=kept.source_session_id,
+                            session_id=first.source_session_id,
                             run_id=None,
                             event_type="email.memory.merged",
                             actor_type="memory",
                             payload={
-                                "kept": str(kept.id),
-                                "superseded": sorted(str(copy.id) for copy in copies),
+                                "merged": [
+                                    {
+                                        "kept": str(kept.id),
+                                        "superseded": sorted(str(copy.id) for copy in copies),
+                                    }
+                                    for kept, copies in merged
+                                ]
                             },
                         )
                     )
@@ -1631,18 +1773,22 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         """The copies a merge may supersede, and the message behind their latest evidence.
 
         A copy with evidence later than the survivor's hands that evidence
-        over, which needs the message that supplied it. The newest copy whose
-        message is found carries the rest. A newer copy whose message is not
-        found keeps its evidence and stays a memory of its own.
+        over, which needs the message that supplied it. Each such copy is
+        checked by itself: the listing was read before the locks, and any one
+        of them may have been renewed since by a message it does not hold.
+        The newest copy whose message is found supplies the survivor's new
+        evidence. A copy whose message is not found keeps its evidence and
+        stays a memory of its own until the next run.
         """
         copies = [copy for copy in others if copy.last_evidence_at <= kept.last_evidence_at]
         source: EmailRecord | None = None
         later = (copy for copy in others if copy.last_evidence_at > kept.last_evidence_at)
         for copy in sorted(later, key=lambda item: item.last_evidence_at, reverse=True):
-            if source is None:
-                source = await self._latest_source(uow, copy, listing.get(str(copy.id), []))
-            if source is not None:
-                copies.append(copy)
+            found = await self._latest_source(uow, copy, listing.get(str(copy.id), []))
+            if found is None:
+                continue
+            copies.append(copy)
+            source = source or found
         return source, copies
 
     async def _latest_source(
@@ -1743,10 +1889,27 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         feedback, threads and senders again under its own locks: the owner may
         mark a thread between two pages, and a rating read for the first would
         undo on the second what that mark's own re-rating just did.
+
+        A memory the owner's feedback left past due is put back by the message
+        behind its last evidence, and takes its standing from the message
+        that formed it. Key order may bring the forming message first, while
+        the memory is still past due. So when the pass has put memories back,
+        it reads the sources once more, only for those memories.
         """
         seen = _Rerating()
         if not self.enabled:
             return seen.report(applied=apply)
+        await self._rerate_pages(seen, apply=apply, only=None)
+        if seen.reopened:
+            await self._rerate_pages(
+                seen, apply=apply, only=frozenset(str(value) for value in seen.reopened)
+            )
+        return seen.report(applied=apply)
+
+    async def _rerate_pages(
+        self, seen: _Rerating, *, apply: bool, only: frozenset[str] | None
+    ) -> None:
+        """One reading of every retained source for the owner's command, a page a transaction."""
         after: str | None = None
         while True:
             async with (
@@ -1760,13 +1923,14 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 )
                 changed: list[UUID] = []
                 for record in page:
-                    changed += await self._rerate_source(uow, record, seen, apply=apply, adopt=True)
+                    changed += await self._rerate_source(
+                        uow, record, seen, apply=apply, adopt=True, only=only
+                    )
                 if apply:
                     await self._audit_rerating(uow, changed, cause="command", run=None, lease=None)
             if len(page) < _RERATE_PAGE:
                 break
             after = page[-1].key
-        return seen.report(applied=apply)
 
     async def _prepare_fact_people(
         self,

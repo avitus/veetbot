@@ -88,8 +88,10 @@ Everything here applies to the People policy, `email-semantic@2`.
    linked to the memory kept, so ADR-0340's re-rating still follows that
    message's thread. The command touches only what ADR-0340's re-rating may
    touch, reports counts only, and appends one content-free
-   `email.memory.merged` event per thread it changes. A second run changes
-   nothing.
+   `email.memory.merged` event per thread it changes. The event names every
+   fact merged in that thread, each as the memory kept and the copies it
+   superseded, and sits in the session of the earliest memory kept there. A
+   preview appends none. A second run changes nothing.
 5. **What the merge leaves alone.** Copies stored under different subjects are
    not merged, because two people in one thread can each hold the same value.
    The preview counts them.
@@ -98,7 +100,9 @@ Everything here applies to the People policy, `email-semantic@2`.
    no membership: the listing record says its message formed the memory, or,
    on a record written before roles were kept, the memory's own record line
    names the thread. Without this a thread's earlier copy could supersede a
-   memory another thread formed.
+   memory another thread formed. The thread a record line names is the one in
+   its own header; a record line that its claim quotes names nothing
+   (ADR-0340).
 7. **A copy's later evidence is handed over only to a message that answers
    for it.** The command reads which messages list each memory before it
    takes a thread's locks. Under the locks it reads the copy and those
@@ -106,7 +110,10 @@ Everything here applies to the People policy, `email-semantic@2`.
    renewed it, or is the one its record line names, and carries that evidence
    date. If a copy was renewed in between, none of the messages read answers
    for its new evidence, and the copy is left as it is; the next run reads the
-   renewing message and merges it.
+   renewing message and merges it. Each copy with later evidence is checked
+   by itself: a message found for the newest copy answers for that copy only.
+   The newest copy whose message is found supplies the evidence the memory
+   kept takes.
 
 ## Consequences
 

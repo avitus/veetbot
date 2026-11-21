@@ -49,7 +49,13 @@ from agent_core.domain.email_drafting import (
     EmailToolError as EmailToolError,
 )
 from agent_core.domain.email_junk import JunkPilotUnavailableError, junk_request
-from agent_core.domain.email_memory import RERATING_PENDING
+from agent_core.domain.email_memory import (
+    RERATING_PENDING,
+    rerating_attempts,
+    rerating_due,
+    rerating_put_off,
+    rerating_settled,
+)
 from agent_core.domain.email_people import EmailPeopleAssessment, email_people_schema
 from agent_core.domain.email_semantics import (
     EmailSemanticFact,
@@ -1073,6 +1079,8 @@ class _TaskIO:
             assessed = await self._assess_arrivals()
             if not arrival_check:
                 await self._verify_subscriptions()
+            # A followed-up re-rating that changed memories counts as work found: its
+            # audit event sits in this slice's session, which an empty look loses.
             if not (assessed or self.found_work or self.imported or any(self.full_reads.values())):
                 await self._record_empty_look()
             return
@@ -2055,32 +2063,36 @@ class _TaskIO:
                 await self._record_skipped(thread, skipped, len(facts))
             await self._rerate_memories(thread)
 
-    async def _rerate_memories(self, thread: EmailThread) -> None:
+    async def _rerate_memories(self, thread: EmailThread) -> int:
         """Let the thread's memories follow the rating just saved (ADR-0340).
 
         A refused re-rating, such as an erased source, never ends the refresh.
         A rating saved without a grounded reading (a rejected or ungrounded
         result, or a junk first pass) lengthens on what the thread shows and
         shortens nothing; the re-rating reads that from the saved assessment.
+        Returns how many memories it changed.
         """
         try:
-            await self.semantics.rerate_thread(
+            report = await self.semantics.rerate_thread(
                 thread.account_id,
                 thread.provider_thread_id,
                 run=self.context.run,
                 lease=self.context.lease,
             )
         except (ConflictError, NotFoundError, ToolTrustRejectedError, ToolValidationError):
-            return
+            return 0
+        return report.changed
 
     def _owing_rerating(self, assessment: dict[str, Any]) -> dict[str, Any]:
         """An assessment about to be saved, marked as owing its memories a re-rating.
 
         The re-rating clears the mark in its own transaction. A refresh that
         stops between the save and the re-rating, or a pause that holds the
-        memories still, leaves the mark for a later refresh to act on.
+        memories still, leaves the mark for a later refresh to act on. A new
+        save starts afresh: failed follow-ups of the one it replaces are not
+        counted against it.
         """
-        owed = {key: value for key, value in assessment.items() if key != RERATING_PENDING}
+        owed = rerating_settled(assessment)
         return {**owed, RERATING_PENDING: True} if self.semantics.people_enabled else owed
 
     async def _resume_reratings(self, owing: Sequence[EmailThread]) -> None:
@@ -2089,14 +2101,60 @@ class _TaskIO:
         Such an assessment is current, so nothing would visit its thread again.
         The mark is looked for whatever the assessment's freshness, and a
         bounded number are followed up in one slice.
+
+        A follow-up can leave the mark standing: the re-rating was refused,
+        or the thread has changed since the assessment read it. That debt is
+        then put off for a while, longer each time, and debts with fewer
+        failures behind them go first. Twenty that keep failing therefore
+        cannot hold back the twenty-first.
+
+        A follow-up that changes memories leaves an audit event in this
+        slice's session, so the slice is then more than an empty look.
         """
         if not owing or not self.semantics.people_enabled:
             return
-        learning = await self.service.learning_context(self.context.principal, None)
+        c = self.context
+        learning = await self.service.learning_context(c.principal, None)
         if learning.get("paused"):
+            # An early exit only: the re-rating reads the pause again under its lock.
             return
-        for thread in owing[:RERATING_RESUME_LIMIT]:
-            await self._rerate_memories(thread)
+        now = c.clock.now()
+        due: list[tuple[int, str, EmailThread]] = []
+        async with c.uow_factory() as uow:
+            for thread in owing:
+                row = await uow.email.get(c.principal, "assessment", str(thread.id))
+                if (
+                    row is not None
+                    and row.payload.get(RERATING_PENDING) is True
+                    and rerating_due(row.payload, now)
+                ):
+                    due.append((rerating_attempts(row.payload), str(thread.id), thread))
+        for _, _, thread in sorted(due, key=lambda item: item[:2])[:RERATING_RESUME_LIMIT]:
+            if await self._rerate_memories(thread):
+                self.found_work = True
+            await self._put_off_rerating(thread)
+
+    async def _put_off_rerating(self, thread: EmailThread) -> None:
+        """Count a follow-up that left its assessment's mark standing, and put the next one off.
+
+        The record's own time is left as it was: the order assessments are
+        taken in depends on it, and nothing was assessed here.
+        """
+        c = self.context
+        async with c.uow_factory() as uow, uow.email.lock(c.principal):
+            row = await uow.email.get(c.principal, "assessment", str(thread.id))
+            if row is None or row.payload.get(RERATING_PENDING) is not True:
+                return
+            await self._write_fence(uow)
+            await uow.email.put(
+                row.model_copy(
+                    update={
+                        "revision": row.revision + 1,
+                        "payload": rerating_put_off(row.payload, c.clock.now()),
+                    }
+                ),
+                expected_revision=row.revision,
+            )
 
     async def _bulk_reason(self, thread: EmailThread, assessment: EmailAssessment) -> str | None:
         """Why bulk mail forms nothing (ADR-0116): the census first, then the verdict.

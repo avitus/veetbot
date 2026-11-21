@@ -160,7 +160,7 @@ async def test_postgres_merges_a_repeated_email_fact_into_the_earliest_memory() 
         assert merged.status is MemoryStatus.SUPERSEDED and merged.superseded_by == kept.id
         assert [row.id for row in await _memories(app)] == [kept.id]
         [audit] = [event for event in events if event.event_type == "email.memory.merged"]
-        assert audit.payload == {"kept": str(kept.id), "superseded": [str(copy.id)]}
+        assert audit.payload == {"merged": [{"kept": str(kept.id), "superseded": [str(copy.id)]}]}
         assert (await merge(app.principal, True)).superseded == 0
 
         # An earlier memory of the same fact is the one kept. It takes the later

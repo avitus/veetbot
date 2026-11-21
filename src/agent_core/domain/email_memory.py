@@ -29,6 +29,11 @@ FIRST_CLASS_CONFIDENCE_CEILING = 0.65
 # it. The re-rating clears it in its own transaction, so a refresh that stops
 # between the two leaves it for the next one to find.
 RERATING_PENDING = "rerating_pending"
+# A follow-up that leaves the mark standing is counted and the next one put off,
+# so debts that keep failing cannot hold back the ones behind them.
+RERATING_ATTEMPTS = "rerating_attempts"
+RERATING_RETRY_AT = "rerating_retry_at"
+_RERATING_RETRY_CEILING = timedelta(days=1)
 _ONE_YEAR_DAYS = 365
 _RETENTION_LABELS = {None: "no_expiry", 365: "1_year", 90: "90_days", 30: "30_days"}
 _DATE = r"\d{4}-\d{2}-\d{2}"
@@ -162,6 +167,61 @@ def last_rating(assessment: Mapping[str, object] | None) -> tuple[float, bool] |
     return floor, False
 
 
+def reset_rating(thread: EmailThread) -> bool:
+    """Whether the thread's stored rating is the zero a changed thread is reset to."""
+    return not thread.assessment_version and thread.priority == 0
+
+
+def reads_current_source(thread: EmailThread, assessment: Mapping[str, object] | None) -> bool:
+    """Whether a saved assessment read the thread's messages as they are stored now.
+
+    Each assessment records the revision of the messages it read. A thread
+    stored before revisions were kept has none, and nothing shows what an
+    assessment of it read.
+    """
+    return (
+        assessment is not None
+        and bool(thread.source_fingerprint)
+        and assessment.get("source_fingerprint") == thread.source_fingerprint
+    )
+
+
+def rerating_attempts(assessment: Mapping[str, object]) -> int:
+    """How many follow-ups of this saved assessment left its mark standing."""
+    attempts = assessment.get(RERATING_ATTEMPTS)
+    return attempts if isinstance(attempts, int) and not isinstance(attempts, bool) else 0
+
+
+def rerating_due(assessment: Mapping[str, object], now: datetime) -> bool:
+    """Whether a marked assessment's next follow-up may run now."""
+    try:
+        return datetime.fromisoformat(str(assessment.get(RERATING_RETRY_AT))) <= now
+    except (TypeError, ValueError):
+        return True
+
+
+def rerating_put_off(assessment: Mapping[str, object], now: datetime) -> dict[str, object]:
+    """The assessment with one more failed follow-up counted and the next one put off.
+
+    The wait doubles with each failure, from two minutes up to a day, so a
+    debt that cannot be paid costs one attempt a day and a passing refusal is
+    retried by the next refresh or the one after.
+    """
+    attempts = rerating_attempts(assessment) + 1
+    wait = min(_RERATING_RETRY_CEILING, timedelta(minutes=2 ** min(attempts, 16)))
+    return {
+        **assessment,
+        RERATING_ATTEMPTS: attempts,
+        RERATING_RETRY_AT: (now + wait).isoformat(),
+    }
+
+
+def rerating_settled(assessment: Mapping[str, object]) -> dict[str, object]:
+    """The assessment without its mark, or anything a follow-up noted beside it."""
+    owed = {RERATING_PENDING, RERATING_ATTEMPTS, RERATING_RETRY_AT}
+    return {key: value for key, value in assessment.items() if key not in owed}
+
+
 def thread_importance(
     thread: EmailThread,
     feedback: Sequence[EmailFeedback],
@@ -179,18 +239,22 @@ def thread_importance(
     assessed again. That zero is not a rating: the last saved assessment
     answers instead, and with none the importance is unknown (None).
 
-    A rating is known when a grounded assessment or the owner's own feedback
-    gave it. Two figures are only floors, good for lengthening a memory and
-    never for shortening it: the content share of an assessment record saved
-    before ratings were kept, and the rating an assessment saved without a
-    grounded reading. A rejected or ungrounded result, and a junk first pass,
+    A rating is known when the owner's own feedback gave it, or a grounded
+    assessment of the thread as it is stored now. Three figures are only
+    floors, good for lengthening a memory and never for shortening it: the
+    content share of an assessment record saved before ratings were kept, the
+    rating an assessment saved without a grounded reading, and the rating of a
+    reset thread's last assessment when that assessment read another revision
+    of its messages. A rejected or ungrounded result, and a junk first pass,
     save zero features and with them a zero that reads no part of the thread.
     """
     rating: float | None = thread.priority
     known = True
-    if not thread.assessment_version and thread.priority == 0:
+    if reset_rating(thread):
         last = last_rating(assessment)
         rating, known = (None, False) if last is None else last
+        # A message came or went since: what was read then is not the thread now.
+        known = known and reads_current_source(thread, assessment)
     if assessment is not None and assessment.get("grounded") is False:
         known = False
     judgment = owner_judgment(thread, feedback)
@@ -249,29 +313,113 @@ def attributed_email_statement(statement: str) -> bool:
     )
 
 
-def _record_marker(account_id: str, thread_id: str, message_id: str) -> str:
-    """The part of a record line that names its message, as a stored statement holds it."""
-    return " ".join(
-        f"(mailbox {account_id}, thread {thread_id}, message {message_id}) reports".split()
-    )
+@dataclass(frozen=True, slots=True)
+class _Attribution:
+    """What a statement's own attribution says, and the claim that follows it.
+
+    `source` is the mailbox, thread and message a record line names, as the
+    line holds them; a plain statement names none.
+    """
+
+    sender: str
+    sent_on: str
+    source: str
+    claim: str
 
 
-def names_message(statement: str, account_id: str, thread_id: str, message_id: str) -> bool:
+_RECORD_OPENING = "Email from"
+
+
+def _collapsed(text: str) -> str:
+    """Text as a stored statement holds it: every run of whitespace is one space."""
+    return " ".join(text.split())
+
+
+def _record_attribution(statement: str, sender: str | None = None) -> _Attribution | None:
+    """A record line's own header, or None when the statement is not a record line.
+
+    The header is the only place a statement is read for a date or for the
+    message it came from. It ends at the first dated mailbox clause, so a
+    record line the claim quotes is part of the claim. With `sender`, the
+    stored message's own, the header must open with exactly that sender, so a
+    display name that holds a clause of its own is never read as one.
+    """
+    if not statement.startswith(f"{_RECORD_OPENING} "):
+        return None
+    if sender is None:
+        head = _GUESS_HEAD.search(statement, len(_RECORD_OPENING))
+        plain = _PLAIN_HEAD.search(statement)
+        if head is not None and plain is not None and plain.start() < head.start():
+            # A plain statement whose sender's name begins "Email from".
+            return None
+    else:
+        named = _collapsed(sender)
+        opening = f"{_RECORD_OPENING} {named}" if named else _RECORD_OPENING
+        head = _GUESS_HEAD.match(statement, len(opening)) if statement.startswith(opening) else None
+    if head is None:
+        return None
+    source, found, claim = statement[head.end() :].partition(") reports ")
+    if not found:
+        return None
+    return _Attribution(statement[len(_RECORD_OPENING) + 1 : head.start()], head[1], source, claim)
+
+
+def _plain_attribution(statement: str, sender: str | None = None) -> _Attribution | None:
+    """A plain statement's own attribution: its sender, then the first dated clause.
+
+    With `sender`, the stored message's own, the statement must open with
+    exactly that sender, so a display name that holds "said by email on
+    <date> that" supplies neither the sender nor the date.
+    """
+    if sender is None:
+        head = _PLAIN_HEAD.search(statement)
+    else:
+        named = _collapsed(sender)
+        head = _PLAIN_HEAD.match(statement, len(named)) if statement.startswith(named) else None
+    if head is None or head.start() == 0 or head.end() == len(statement):
+        return None
+    return _Attribution(statement[: head.start()], head[1], "", statement[head.end() :])
+
+
+def _source_ids(account_id: str, thread_id: str, message_id: str) -> str:
+    """How a record line's header names this message, as a stored statement holds it."""
+    return _collapsed(f"{account_id}, thread {thread_id}, message {message_id}")
+
+
+def names_message(
+    statement: str, account_id: str, thread_id: str, message_id: str, sender: str | None = None
+) -> bool:
     """Whether a statement is the record line of this very message.
 
     A guess says which message formed it. That identifies the message by
-    itself, where a date can be shared by two.
+    itself, where a date can be shared by two. Only the line's own header is
+    read: an email the claim quotes names nothing. `sender` is the stored
+    message's sender when the caller holds it.
     """
-    wording = _wording(statement)
-    marker = _record_marker(account_id, thread_id, message_id)
-    return wording is not None and wording[0] == "guess" and f" {marker} " in statement
+    header = _record_attribution(statement, sender)
+    return header is not None and header.source == _source_ids(account_id, thread_id, message_id)
 
 
 def names_thread(statement: str, account_id: str, thread_id: str) -> bool:
     """Whether a statement is the record line of some message of this thread."""
-    wording = _wording(statement)
-    opening = " ".join(f"(mailbox {account_id}, thread {thread_id}, message ".split())
-    return wording is not None and wording[0] == "guess" and f" {opening} " in statement
+    header = _record_attribution(statement)
+    opening = _collapsed(f"{account_id}, thread {thread_id}, message")
+    return header is not None and header.source.startswith(f"{opening} ")
+
+
+def named_message(statement: str) -> tuple[str, str, str] | None:
+    """The mailbox, thread and message a record line's own header names, if it names one.
+
+    This says only where to look. Whether that message formed the memory is
+    for its retained record to say, or for `names_message` on a record that
+    keeps no role.
+    """
+    header = _record_attribution(statement)
+    if header is None:
+        return None
+    account_id, first, rest = header.source.partition(", thread ")
+    thread_id, second, message_id = rest.partition(", message ")
+    return (account_id, thread_id, message_id) if first and second and message_id else None
 
 
 def restated(
@@ -282,51 +430,54 @@ def restated(
     message_id: str,
     first_class: bool,
     direct: bool | None = None,
+    sender: str | None = None,
 ) -> str | None:
     """The same claim in the other standing's words, or None when it is not this source's.
 
     A stored statement has its whitespace collapsed, so the identifiers are
-    compared the same way.
+    compared the same way. The sender, the date and the message are read from
+    the statement's own attribution and nowhere else.
 
     - A guess becomes first-class only from this message's own record line. A
-      record line that names another message is left alone, whatever its claim
-      holds: an email it quotes is never read as its sender.
+      record line whose header names another message is left alone, whatever
+      its claim holds: an email it quotes is never read as its sender.
     - A first-class statement returns to a guess from its plain wording. Its
-      sender is whatever stands before the first "said by email on <date>
-      that", and may itself begin "Email from".
+      sender may itself begin "Email from", or hold a whole record line.
 
     `direct` is the row's own standing, which says which wording it is in. A
     sender's display name can hold a whole record line, and a guess's claim can
     quote an email, so the words alone can be read both ways. Without it the
     statement is read as the wording whose attribution comes first.
 
+    `sender` is the stored message's sender. With it the attribution must open
+    with exactly that sender: a display name the sender chose then supplies
+    neither a date nor a message. A promotion requires that match. A demotion
+    takes standing away, so when the stored sender no longer opens the
+    statement it falls back to the first attribution the words hold.
+
     A statement in neither wording is left alone.
     """
-    marker = _record_marker(account_id, thread_id, message_id)
-    head, found, claim = statement.partition(f" {marker} ")
-    guess = (
-        re.fullmatch(rf"Email from (?P<sender>.+) on (?P<date>{_DATE})", head) if found else None
-    )
-    if guess is not None:
-        sender, sent_on = guess["sender"], guess["date"]
-    elif first_class or direct is False:
-        return None
-    else:
+    if direct is None:
         wording = _wording(statement)
-        plain = _PLAIN_HEAD.search(statement)
-        if (
-            plain is None
-            or plain.start() == 0
-            or plain.end() == len(statement)
-            # A record line for another message, unless the row says it is first-class.
-            or (direct is None and (wording is None or wording[0] != "plain"))
-        ):
+        if wording is None:
             return None
-        sender, sent_on, claim = statement[: plain.start()], plain[1], statement[plain.end() :]
+        direct = wording[0] == "plain"
+    if direct:
+        if first_class:
+            return None
+        found = _plain_attribution(statement, sender)
+        if found is None and sender is not None:
+            found = _plain_attribution(statement)
+    else:
+        found = _record_attribution(statement, sender)
+        if found is not None and found.source != _source_ids(account_id, thread_id, message_id):
+            found = None
+    if found is None:
+        return None
     if first_class:
-        return first_class_statement(sender, sent_on, claim)
-    return " ".join(
-        guess_statement(sender, sent_on, account_id, thread_id, message_id, claim).split()
+        return first_class_statement(found.sender, found.sent_on, found.claim)
+    return _collapsed(
+        guess_statement(found.sender, found.sent_on, account_id, thread_id, message_id, found.claim)
     )
 
 

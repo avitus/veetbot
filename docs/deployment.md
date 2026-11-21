@@ -2211,7 +2211,7 @@ agent memory rerate-email --owner TENANT/PRINCIPAL --confirm  # apply
 The report is content-free: memories examined and changed, how many became
 first-class or returned to a guess, and how many fall in each retention tier.
 Run the preview first and keep its output. The command needs People enabled,
-revives no expired memory, and is safe to repeat; a second run changes
+revives no expired memory (it puts back only one the owner's own feedback left past due, once that feedback no longer holds), and is safe to repeat; a second run changes
 nothing. Run the owner question set on a clone before the first `--confirm`
 and again after it, as for any recall change.
 

@@ -92,12 +92,14 @@ async def seed_thread(
     thread_id: UUID = THREAD_ID,
     assessed: bool = True,
     complete: bool = True,
+    fingerprint: str = "",
 ) -> EmailThread:
     """The thread as the mailbox projection stores it, with its assessed importance.
 
     A new message resets the stored rating to zero until the thread is assessed
     again (`assessed=False`), and a long thread keeps only some of its messages
-    (`complete=False`).
+    (`complete=False`). `fingerprint` names the revision of its messages, which
+    a saved assessment records as the source it read.
     """
     thread = EmailThread(
         id=thread_id,
@@ -111,6 +113,7 @@ async def seed_thread(
         messages=messages,
         assessment_version="email-experience@1" if assessed else "",
         complete=complete,
+        source_fingerprint=fingerprint,
     )
     await _put(factory, "thread", str(thread.id), thread.model_dump(mode="json"))
     index_key = thread_source_key("work", provider_thread_id)
@@ -263,9 +266,26 @@ def test_importance_is_the_saved_rating_after_the_owners_importance_feedback() -
     # The rating, whether the owner marked the thread Important, and whether it is known.
     assert thread_importance(thread, []) == (0.4, False, True)
     # A new message resets the stored rating; the last assessment still says what it was.
-    reset = thread.model_copy(update={"priority": 0.0, "assessment_version": ""})
+    reset = thread.model_copy(
+        update={"priority": 0.0, "assessment_version": "", "source_fingerprint": "rev-2"}
+    )
     assert thread_importance(reset, []) == (None, False, False)
-    assert thread_importance(reset, [], {"priority": 0.7}) == (0.7, False, True)
+    current = {"priority": 0.7, "source_fingerprint": "rev-2"}
+    assert thread_importance(reset, [], current) == (0.7, False, True)
+    # It rated the messages it read. Against another revision of the thread, or with
+    # no revision recorded on either side, its rating is a floor and not a known rating.
+    assert thread_importance(reset, [], {**current, "source_fingerprint": "rev-1"}) == (
+        0.7,
+        False,
+        False,
+    )
+    assert thread_importance(reset, [], {"priority": 0.7}) == (0.7, False, False)
+    unversioned = reset.model_copy(update={"source_fingerprint": ""})
+    assert thread_importance(unversioned, [], {"priority": 0.7, "source_fingerprint": ""}) == (
+        0.7,
+        False,
+        False,
+    )
     # A record saved before ratings were kept gives a floor, which is not a known rating.
     older_record = {"content_importance": 0.95, "relationship_importance": 0.9, "urgency": 0.6}
     floor, _, known = thread_importance(reset, [], older_record)
@@ -911,7 +931,9 @@ async def test_a_floor_from_an_older_assessment_record_never_shortens_a_memory()
     assert memory.expires_at == source.sent_at + timedelta(days=365)
 
     # A new message resets the stored rating; only the older record answers for it.
-    await seed_thread(factory, priority=0.0, messages=[_message(source)], assessed=False)
+    await seed_thread(
+        factory, priority=0.0, messages=[_message(source)], assessed=False, fingerprint="rev-2"
+    )
     features: dict[str, object] = {
         "content_importance": 0.4,
         "relationship_importance": 1.0,
@@ -925,8 +947,10 @@ async def test_a_floor_from_an_older_assessment_record_never_shortens_a_memory()
     # The floor still lengthens: content 0.95 alone is enough for no expiry.
     await _put(factory, "assessment", str(THREAD_ID), {**features, "content_importance": 0.95})
     assert (await service.rerate_thread("work", "t-mail")).by_retention == {"no_expiry": 1}
-    # The rating itself, kept with every assessment saved since, does lower.
-    await _put(factory, "assessment", str(THREAD_ID), {**features, "priority": 0.36})
+    # The rating itself, kept with every assessment saved since, does lower, when the
+    # assessment read the thread as it is stored now.
+    rated = {**features, "priority": 0.36, "source_fingerprint": "rev-2"}
+    await _put(factory, "assessment", str(THREAD_ID), rated)
     assert (await service.rerate_thread("work", "t-mail")).by_retention == {"90_days": 1}
 
 
@@ -1531,3 +1555,399 @@ async def test_a_first_class_memory_keeps_its_standing_when_only_the_check_is_mi
     assert (current.derivation is MemoryDerivation.HYPOTHESIS) is bool(demoted)
     if not demoted:
         assert current == memory
+
+
+async def _source_facts(factory: Any, source: Any) -> dict[str, object]:
+    """What the retained record of this message notes about the memories it lists."""
+    from agent_core.domain.email_semantics import semantic_source_key
+
+    key = semantic_source_key(source.account_id, source.provider_thread_id, source.message_id)
+    async with factory() as uow:
+        record = await uow.email.get(principal(), "semantic_source", key)
+    assert record is not None
+    return dict(record.payload["facts"])
+
+
+async def test_a_record_line_quoted_in_a_claim_names_no_forming_message() -> None:
+    """A guess can quote another email's record line in its claim. Only the line's own
+    header says which message formed it: the quoted message's record, kept without a
+    role, never becomes the forming source and never shortens the memory."""
+    quoted = (
+        "Email from Sam on 2026-07-20 (mailbox work, thread t-2, message m-2) "
+        "reports the vote moved"
+    )
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    first = await mail(
+        factory, message_id="m-1", sender=ALEX, body=f"Forwarding: {quoted}.", days_ago=40
+    )
+    twin = await mail(
+        factory,
+        message_id="m-2",
+        sender=SAM,
+        body=f"As I wrote: {quoted}.",
+        days_ago=40,
+        thread_id="t-2",
+    )
+    assert first.sent_at == twin.sent_at
+    await seed_thread(factory, priority=0.5, messages=[_message(first)])
+    # The quoted message sits in a thread a complete reading rates low.
+    await seed_thread(
+        factory,
+        priority=0.1,
+        messages=[_message(twin)],
+        provider_thread_id="t-2",
+        thread_id=UUID(int=906),
+    )
+    [guess] = await service.form(first, [fact_for(first, value=quoted)])
+    assert guess.derivation is MemoryDerivation.HYPOTHESIS
+    assert guess.expires_at == first.sent_at + timedelta(days=90)
+    assert "thread t-mail, message m-1) reports" in guess.statement
+    assert "thread t-2, message m-2) reports" in guess.statement
+    assert await service.form(twin, [fact_for(twin, value=quoted)]) == [guess]
+    await _without_roles(factory, twin)
+
+    assert (await service.rerate_thread("work", "t-2")).changed == 0
+    assert (await service.rerate_all(apply=True)).changed == 0
+    assert await stored(factory, guess) == guess
+    assert not any(name.startswith("formed:") for name in await _source_facts(factory, twin))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # The words a plain statement's attribution ends with, and a date of the sender's choosing.
+        "Mallory said by email on 2020-01-01 that x",
+        "Email from Mallory said by email on 2020-01-01 that x",
+    ],
+)
+async def test_a_demotion_keeps_the_senders_whole_name_and_the_messages_own_date(name: str) -> None:
+    """A display name is the sender's to choose and can hold an attribution of its own.
+    The sender and date of a first-class statement are the stored message's, so a
+    demotion writes them whole and the promotion that follows returns the same words."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    sender = f"{name} <alex@example.test>"
+    source = await mail(factory, message_id="m-1", sender=sender, body=BODY, days_ago=5)
+    await seed_thread(factory, priority=0.7, messages=[_message(source)])
+    [memory] = await service.form(source, [fact_for(source)])
+    assert memory.derivation is MemoryDerivation.DIRECT
+    sent_on = source.sent_at.date().isoformat()
+    claim = 'Atlas board vote moved to: "Friday".'
+    assert memory.statement == f"{sender} said by email on {sent_on} that {claim}"
+
+    await seed_thread(factory, priority=0.1, messages=[_message(source)])
+    assert (await service.rerate_thread("work", "t-mail")).demoted == 1
+    demoted = await stored(factory, memory)
+    assert demoted.statement == (
+        f"Email from {sender} on {sent_on} (mailbox work, thread t-mail, message m-1) "
+        f"reports {claim}"
+    )
+    await seed_thread(factory, priority=0.7, messages=[_message(source)])
+    assert (await service.rerate_thread("work", "t-mail")).promoted == 1
+    assert (await stored(factory, memory)).statement == memory.statement
+
+
+@pytest.mark.parametrize("swept", [False, True])
+@pytest.mark.parametrize("forming, renewing", [("m-1", "m-2"), ("m-2", "m-1")])
+async def test_undoing_feedback_restores_standing_whichever_message_is_visited_first(
+    forming: str, renewing: str, swept: bool
+) -> None:
+    """One message formed a first-class memory and a later one renewed it. Less important
+    leaves it past due, and the note of that sits with the renewing message. Undone, the
+    memory returns first-class whichever of the two a re-rating reads first."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    first = await mail(factory, message_id=forming, sender=ALEX, body=BODY, days_ago=60)
+    later = await mail(factory, message_id=renewing, sender=ALEX, body=CONFIRMING, days_ago=40)
+    await seed_thread(factory, priority=0.7, messages=[_message(first), _message(later)])
+    [memory] = await service.form(first, [fact_for(first)])
+    [renewed] = await service.form(later, [fact_for(later)])
+    assert renewed.id == memory.id and renewed.derivation is MemoryDerivation.DIRECT
+    assert renewed.last_evidence_at == later.sent_at
+    assert renewed.expires_at == later.sent_at + timedelta(days=365)
+
+    await seed_feedback(factory, "less_important")
+    report = await service.rerate_thread("work", "t-mail", cause="feedback")
+    assert report.by_retention == {"30_days": 1}
+    lapsed = await stored(factory, memory)
+    assert lapsed.expires_at == later.sent_at + timedelta(days=30) and lapsed.expires_at < NOW
+    assert f"lapsed:{memory.id}" in await _source_facts(factory, later)
+    if swept:
+        [closed] = await service._governed.expire()
+        assert closed.id == memory.id and closed.status is MemoryStatus.EXPIRED
+
+    await seed_feedback(factory, "less_important", undone=True)
+    preview = await service.rerate_thread("work", "t-mail", apply=False, cause="feedback")
+    report = await service.rerate_thread("work", "t-mail", cause="feedback")
+    assert preview.model_dump(exclude={"applied"}) == report.model_dump(exclude={"applied"})
+    assert (report.first_class, report.guesses, report.by_retention) == (1, 0, {"1_year": 1})
+    restored = await stored(factory, memory)
+    assert restored.derivation is MemoryDerivation.DIRECT
+    assert restored.statement == renewed.statement
+    assert restored.expires_at == renewed.expires_at
+    assert restored.status is renewed.status and restored.valid_to is None
+    # Nothing is left to do, by the hook or by the owner's command.
+    assert (await service.rerate_thread("work", "t-mail", cause="feedback")).changed == 0
+    assert (await service.rerate_all(apply=True)).changed == 0
+
+
+@pytest.mark.parametrize("swept", [False, True])
+@pytest.mark.parametrize(
+    "formed_in, forming, renewed_in, renewing",
+    # The command reads retained messages in key order: the renewing message's key
+    # sorts first in one case and the forming message's in the other.
+    [("t-mail", "m-1", "t-2", "m-2"), ("t-2", "m-2", "t-mail", "m-1")],
+)
+async def test_the_owners_command_restores_standing_across_threads_in_either_order(
+    formed_in: str, forming: str, renewed_in: str, renewing: str, swept: bool
+) -> None:
+    """The message that formed a memory and the one that renewed it can sit in two
+    threads. Whichever the command reads first, the memory it puts back takes the
+    standing its forming message now earns."""
+    from agent_core.domain.email_semantics import semantic_source_key
+
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    first = await mail(
+        factory, message_id=forming, sender=ALEX, body=BODY, days_ago=60, thread_id=formed_in
+    )
+    later = await mail(
+        factory,
+        message_id=renewing,
+        sender=ALEX,
+        body=CONFIRMING,
+        days_ago=40,
+        thread_id=renewed_in,
+    )
+    assert (
+        semantic_source_key("work", formed_in, forming)
+        < semantic_source_key("work", renewed_in, renewing)
+    ) is (formed_in == "t-2")
+    ids = {"t-mail": THREAD_ID, "t-2": UUID(int=906)}
+    for source, thread in ((first, formed_in), (later, renewed_in)):
+        await seed_thread(
+            factory,
+            priority=0.7,
+            messages=[_message(source)],
+            provider_thread_id=thread,
+            thread_id=ids[thread],
+        )
+    [memory] = await service.form(first, [fact_for(first)])
+    [renewed] = await service.form(later, [fact_for(later)])
+    assert renewed.id == memory.id and renewed.derivation is MemoryDerivation.DIRECT
+
+    # Less important on the sender rates both threads: the forming thread demotes the
+    # memory, and the renewing thread's own reading leaves it past due.
+    lowered = EmailFeedback(
+        id=UUID(int=910),
+        thread_id=THREAD_ID,
+        target="person",
+        judgment="less_important",
+        target_values=["alex@example.test"],
+        created_at=NOW,
+    )
+    await _put(factory, "feedback", str(lowered.id), lowered.model_dump(mode="json"))
+    assert (await service.rerate_thread("work", formed_in, cause="feedback")).demoted == 1
+    assert (await service.rerate_thread("work", renewed_in)).by_retention == {"30_days": 1}
+    lapsed = await stored(factory, memory)
+    assert lapsed.derivation is MemoryDerivation.HYPOTHESIS
+    assert lapsed.expires_at is not None and lapsed.expires_at < NOW
+    if swept:
+        await service._governed.expire()
+
+    undone = lowered.model_copy(update={"undone_at": NOW})
+    await _put(factory, "feedback", str(undone.id), undone.model_dump(mode="json"))
+    preview = await service.rerate_all(apply=False)
+    report = await service.rerate_all(apply=True)
+    assert preview.model_dump(exclude={"applied"}) == report.model_dump(exclude={"applied"})
+    assert (report.first_class, report.guesses, report.by_retention) == (1, 0, {"1_year": 1})
+    restored = await stored(factory, memory)
+    assert restored.derivation is MemoryDerivation.DIRECT
+    assert restored.statement == renewed.statement and restored.expires_at == renewed.expires_at
+    assert restored.status is renewed.status and restored.valid_to is None
+    assert (await service.rerate_all(apply=True)).changed == 0
+
+
+@pytest.mark.parametrize("swept", [False, True])
+async def test_a_memory_put_back_from_another_thread_takes_its_forming_threads_standing(
+    swept: bool,
+) -> None:
+    """Less important on a person, given on the thread that formed a memory, demotes it
+    there; the thread that renewed it leaves it past due at its next assessment. Undone,
+    the forming thread is read first and finds the memory still past due. The pass over
+    the other thread puts it back and reads the message its record line names, so the
+    memory returns first-class. What that pass may not do is take standing away."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    first = await mail(factory, message_id="m-1", sender=ALEX, body=BODY, days_ago=60)
+    later = await mail(
+        factory, message_id="m-2", sender=ALEX, body=CONFIRMING, days_ago=40, thread_id="t-2"
+    )
+    other = UUID(int=906)
+    await seed_thread(factory, priority=0.7, messages=[_message(first)])
+    await seed_thread(
+        factory, priority=0.7, messages=[_message(later)], provider_thread_id="t-2", thread_id=other
+    )
+    [memory] = await service.form(first, [fact_for(first)])
+    [renewed] = await service.form(later, [fact_for(later)])
+    assert renewed.id == memory.id and renewed.derivation is MemoryDerivation.DIRECT
+
+    async def judge(undone: bool) -> None:
+        item = EmailFeedback(
+            id=UUID(int=911),
+            thread_id=THREAD_ID,
+            target="person",
+            judgment="less_important",
+            target_values=["alex@example.test"],
+            created_at=NOW,
+            undone_at=NOW if undone else None,
+        )
+        await _put(factory, "feedback", str(item.id), item.model_dump(mode="json"))
+
+    await judge(undone=False)
+    assert (await service.rerate_thread("work", "t-mail", cause="feedback")).demoted == 1
+    assert (await service.lengthen_threads([("work", "t-2")])).changed == 0
+    assert (await service.rerate_thread("work", "t-2")).by_retention == {"30_days": 1}
+    if swept:
+        await service._governed.expire()
+
+    await judge(undone=True)
+    # The feedback's own thread first, as the request does it, then the other thread.
+    assert (await service.rerate_thread("work", "t-mail", cause="feedback")).changed == 0
+    report = await service.lengthen_threads([("work", "t-2")])
+    assert (report.promoted, report.first_class, report.by_retention) == (1, 1, {"1_year": 1})
+    restored = await stored(factory, memory)
+    assert restored.derivation is MemoryDerivation.DIRECT
+    assert restored.statement == renewed.statement and restored.expires_at == renewed.expires_at
+    assert restored.status is renewed.status and restored.valid_to is None
+
+    # The same from the other side. Given on the renewing thread, the judgment leaves a
+    # first-class memory past due, and a first-class statement names no message. While
+    # it is past due its forming thread is rated low. Put back, it keeps its standing
+    # until that thread's own re-rating, which reads the thread whole.
+    await judge(undone=False)
+    assert (await service.rerate_thread("work", "t-2", cause="feedback")).by_retention == {
+        "30_days": 1
+    }
+    await seed_thread(factory, priority=0.1, messages=[_message(first)])
+    await judge(undone=True)
+    assert (await service.rerate_thread("work", "t-mail")).changed == 0
+    report = await service.rerate_thread("work", "t-2", cause="feedback")
+    assert (report.demoted, report.first_class, report.by_retention) == (0, 1, {"1_year": 1})
+    report = await service.rerate_thread("work", "t-mail")
+    assert report.demoted == 1
+    assert (await stored(factory, memory)).derivation is MemoryDerivation.HYPOTHESIS
+
+
+async def _owed(factory: Any) -> object:
+    """Whether the thread's saved assessment still owes its memories a re-rating."""
+    async with factory() as uow:
+        row = await uow.email.get(principal(), "assessment", str(THREAD_ID))
+    return None if row is None else row.payload.get("rerating_pending")
+
+
+LOW_READING: dict[str, object] = {
+    "priority": 0.1,
+    "content_importance": 0.1,
+    "urgency": 0,
+    "grounded": True,
+    "source_fingerprint": "rev-1",
+    "rerating_pending": True,
+}
+
+
+async def test_a_rating_saved_for_an_earlier_revision_of_the_thread_lowers_nothing() -> None:
+    """A grounded low assessment is saved and its re-rating does not run. The thread
+    then changes: Gmail drops another message, the rating is reset and the thread is
+    still held whole. Followed up now, the saved rating describes a revision that is
+    gone. It may lengthen; it never shortens or demotes."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY, days_ago=40)
+    await seed_thread(factory, priority=0.7, messages=[_message(source)], fingerprint="rev-1")
+    [memory] = await service.form(source, [fact_for(source)])
+    assert memory.derivation is MemoryDerivation.DIRECT
+    assert memory.expires_at == source.sent_at + timedelta(days=365)
+
+    await _put(factory, "assessment", str(THREAD_ID), LOW_READING)
+    await seed_thread(
+        factory, priority=0.0, messages=[_message(source)], assessed=False, fingerprint="rev-2"
+    )
+    assert (await service.rerate_thread("work", "t-mail")).changed == 0
+    assert (await service.rerate_all(apply=True)).changed == 0
+    assert await stored(factory, memory) == memory
+    # The debt stays where the next refresh finds it, until an assessment replaces it.
+    assert await _owed(factory) is True
+
+    # What the earlier revision was rated still lengthens.
+    await _put(factory, "assessment", str(THREAD_ID), {**LOW_READING, "priority": 0.9})
+    assert (await service.rerate_thread("work", "t-mail")).by_retention == {"no_expiry": 1}
+    assert await _owed(factory) is True
+
+    # An assessment of the revision now stored is a current reading: it lowers, and settles.
+    await _put(
+        factory, "assessment", str(THREAD_ID), {**LOW_READING, "source_fingerprint": "rev-2"}
+    )
+    report = await service.rerate_thread("work", "t-mail")
+    assert (report.demoted, report.by_retention) == (1, {"30_days": 1})
+    assert await _owed(factory) is None
+
+
+@pytest.mark.parametrize("change", ["feedback", "sender"])
+async def test_a_stale_rating_leaves_the_owner_and_the_sender_check_their_say(change: str) -> None:
+    """The owner's own judgment and a failed sender check are not ratings of a revision.
+    Each still acts while the saved rating describes an earlier one."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY, days_ago=40)
+    await seed_thread(factory, priority=0.7, messages=[_message(source)], fingerprint="rev-1")
+    [memory] = await service.form(source, [fact_for(source)])
+    await _put(factory, "assessment", str(THREAD_ID), LOW_READING)
+    check = "fail" if change == "sender" else "pass"
+    await seed_thread(
+        factory,
+        priority=0.0,
+        messages=[_message(source, check=check)],
+        assessed=False,
+        fingerprint="rev-2",
+    )
+    if change == "feedback":
+        await seed_feedback(factory, "less_important")
+        report = await service.rerate_thread("work", "t-mail", cause="feedback")
+        assert (report.demoted, report.by_retention) == (1, {"30_days": 1})
+    else:
+        report = await service.rerate_thread("work", "t-mail")
+        assert (report.demoted, report.by_retention) == (1, {"1_year": 1})
+        assert (await stored(factory, memory)).expires_at == memory.expires_at
+
+
+async def test_a_rerating_reads_the_learning_pause_under_its_own_lock() -> None:
+    """A refresh reads the pause before it calls the re-rating, and the owner can pause
+    in between. The re-rating reads it again once it holds the mailbox lock, and while
+    learning is paused it writes nothing: no memory, no note, no settled mark."""
+    from agent_core.domain.email import EmailLearningState
+
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY)
+    await seed_thread(factory, priority=0.2, messages=[_message(source)], fingerprint="rev-1")
+    [memory] = await service.form(source, [fact_for(source)])
+    assert memory.expires_at == source.sent_at + timedelta(days=30)
+    await seed_thread(factory, priority=0.9, messages=[_message(source)], fingerprint="rev-1")
+    await _put(factory, "assessment", str(THREAD_ID), {**LOW_READING, "priority": 0.9})
+
+    async def pause(paused: bool) -> None:
+        state = EmailLearningState(paused=paused)
+        await _put(factory, "learning", "shared", state.model_dump(mode="json"))
+
+    await pause(True)
+    for apply in (False, True):
+        report = await service.rerate_thread("work", "t-mail", apply=apply)
+        assert (report.examined, report.changed) == (0, 0)
+    assert (await service.lengthen_threads([("work", "t-mail")])).changed == 0
+    assert await stored(factory, memory) == memory and await _owed(factory) is True
+
+    await pause(False)
+    assert (await service.rerate_thread("work", "t-mail")).by_retention == {"no_expiry": 1}
+    assert (await stored(factory, memory)).expires_at is None and await _owed(factory) is None

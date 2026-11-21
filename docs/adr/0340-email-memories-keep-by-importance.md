@@ -160,6 +160,36 @@ No ranking code changes, so the `retrieval@7` label stays.
   assessment's freshness, and follows up at most twenty threads a slice. A
   pause in learning holds the memories still and leaves the marks, and the
   first refresh after it follows them up.
+  - *A follow-up that leaves the mark standing is put off.* The re-rating may
+    be refused, or the thread may have changed since the assessment read it.
+    The record then counts the failure and the next follow-up waits: two
+    minutes after the first, doubling up to a day. Among the debts that are
+    due, those with fewer failures go first. Twenty that keep failing
+    therefore cannot hold back the twenty-first. An assessment saved again
+    starts afresh.
+  - *The mark stays while the assessment describes another revision.* Each
+    assessment records the revision of the messages it read. When the thread
+    has changed since and its rating is reset, the saved rating is a floor
+    (see below): the follow-up lengthens on it and settles nothing. The mark
+    is cleared when the thread is stored as it was read again, or when an
+    assessment of the thread as it is now replaces the record and is followed.
+  - *A slice that changes memories this way is not an empty check.* A new-mail
+    slice with no new mail is otherwise recorded as an empty look, which
+    requests no formation and whose session is removed after seven days. The
+    follow-up's audit event sits in that session, so a slice whose follow-up
+    changed a memory is recorded as work: it keeps its session and takes the
+    ordinary end-of-run path.
+- **A pause in learning holds every hook.** A thread's re-rating, whatever
+  caused it, and the pass over other threads read the pause after they take
+  the mailbox lock, under which the pause is saved, and write nothing while it
+  is on: no memory, no note and no settled mark. A refresh also reads the
+  pause before it calls the re-rating; that earlier reading only saves work.
+  Feedback the owner gives during a pause is saved and rates the thread. It
+  reaches the thread's memories with the thread's next saved assessment once
+  the pause is over, which the feedback's own profile change brings about for
+  every thread a refresh still assesses, and otherwise with the owner's
+  command. The owner's two commands are not hooks and run when the owner runs
+  them.
 - **Person and topic feedback, and the other threads it matches.** Importance
   feedback on a person or a topic rates every thread it matches, not only the
   one it was given on. That thread is re-rated in full. When the feedback is
@@ -191,6 +221,16 @@ No ranking code changes, so the `retrieval@7` label stays.
   does a sender check that merely reads no verdict: the stored message may
   have been cached before the check existed, so it earns no standing and takes
   none from a memory that is already first-class. A failed check demotes.
+- **A saved rating describes the messages it read.** When a thread's rating is
+  reset, its last saved assessment answers for it. That assessment's rating is
+  known only while the thread is stored as the assessment read it: the
+  revision the assessment recorded is the thread's revision now. Read against
+  another revision, or with no revision recorded on either side, the rating is
+  a floor: it lengthens and never shortens or demotes. Otherwise a low rating
+  saved before Gmail dropped a message could expire a memory of the thread as
+  it now stands, and a later high rating could not bring it back. The owner's
+  own feedback and a failed sender check are not ratings of a revision, and
+  act as before.
 - **Older memories wait for the command.** The two hooks, and the pass over
   other threads, follow only a memory
   already under the table, one that carries `email-retention@1`. A memory
@@ -216,6 +256,19 @@ No ranking code changes, so the `retrieval@7` label stays.
   has closed it meanwhile. It is put back only while it is exactly as the
   feedback left it. The note sits in the record's fact map, which source
   erasure clears. A memory that expired by the table carries no note.
+
+  The note sits with the message behind the memory's last evidence, and the
+  standing is set by the message that formed it. For a renewed memory these
+  are two messages, and a re-rating may read the forming one first, while the
+  memory is still past due and so not touched. Each pass therefore reads
+  again, for every memory it has put back, the messages that list it; the
+  owner's command reads its sources a second time for those memories. The
+  outcome is the same whichever message comes first. When the forming message
+  sits in a thread the pass does not cover, a guess's record line names it,
+  and it is read too, in the raising direction only. A first-class statement
+  names no message: one that returns this way keeps its standing until the
+  thread that formed it is next re-rated, or the command runs, as everything
+  another thread's reading would take away does.
 - **What re-rating changes.** The expiry always. When the standing changes, the
   statement is reworded in place, and the derivation, longevity and review flag
   follow. A promoted guess keeps the confidence it was stored with, because the
@@ -234,7 +287,10 @@ No ranking code changes, so the `retrieval@7` label stays.
   later message is from a known sender too, as a repeat makes a chat memory
   active. A guess stays provisional however often it is repeated, and a
   stranger's repeat of a first-class memory moves its dates and settles
-  nothing. Nobody can write a claim into the active set by sending it twice.
+  nothing. A stranger, a sender whose check failed or gave no verdict, and a
+  guess can never settle a claim by repetition. A second message that passes
+  the sender check as a known person does settle it, which is why the
+  residual risk stated in the consequences reaches the active set as well.
 - **Which message governs a renewed memory.** The message that formed it sets
   its standing and wording. The message that supplied its last evidence sets
   its retention. For a memory nothing renewed these are the same message. The
@@ -255,6 +311,20 @@ No ranking code changes, so the `retrieval@7` label stays.
   memory's last evidence date, which needs only what is visible. A plain
   statement on records that all lack a role cannot be told apart at all, so
   its standing is left as it is.
+- **A statement is read only in its own attribution.** The sender, the date
+  and the message a statement came from are read from its opening
+  attribution and nowhere past it. A record line's header ends at its first
+  dated mailbox clause, so a record line the claim quotes names nothing: the
+  quoted message's record never becomes the forming source, and a merge never
+  counts the memory in the quoted thread. The row's standing says which
+  wording it is in: a first-class row is a plain statement, so no record line
+  inside its sender's name is read as a header. A display name is the
+  sender's to choose and can hold either attribution's words. When the stored
+  thread holds the message, the statement is read against that message's own
+  sender: it must open with exactly that sender, which then supplies neither
+  a date nor a message of its choosing. A promotion requires that match. A
+  demotion takes standing away, so when the stored sender no longer opens the
+  statement it falls back to the first attribution the words hold.
 - **A later chat.** The owner's own statement about the same subject takes the
   memory over under the ordinary formation rules, which this change leaves as
   they are: it promotes a guess in place with the owner's words, and it
@@ -330,7 +400,10 @@ reports what applying would leave: it carries each memory from one visit to
 the next as the first would have written it, and drops that picture as soon
 as the stored memory is no longer the one it was drawn from. Nothing is backfilled at deploy, and no
 later assessment or feedback changes a memory the command has not yet brought
-under the table. A memory that already expired is not revived.
+under the table. A memory that already expired is not revived. When the
+command puts back a memory the owner's feedback had left past due, it reads
+its sources once more for that memory, so the message that formed it sets its
+standing wherever it sorts and whichever thread it is in.
 
 ### 9. Gates and evidence
 
@@ -392,6 +465,23 @@ under the table. A memory that already expired is not revived.
 - A first-class statement no longer carries identifiers, so two emails that say
   the same thing read alike apart from sender and date. The renewal rule folds
   the exact repeats.
+- A statement is text, and text alone cannot always say where an attribution
+  ends. Two cases are left to it. A record written before roles were kept is
+  matched to its memory by the record line's header, read against the stored
+  message's sender when the thread holds the message and by the words alone
+  when it does not; the merge reads a role-less listing by the words alone.
+  Misleading either needs a display name that reproduces another message's
+  mailbox, thread and message identifiers, which a correspondent is never
+  shown, and a role-less record of that message that lists the memory.
+  Records written since carry roles and do not depend on the words. Reading
+  against the stored sender has a cost of its own: if stored mail ever renders
+  a sender differently than when a guess formed, that guess is not promoted
+  and stays an attributed guess, while a first-class memory can still be
+  demoted.
+- While learning is paused the owner's feedback moves no memory. A memory
+  the owner marks Important during a pause can still reach its expiry before
+  the pause ends, and an expired memory is not revived; "Still true" or
+  ending the pause first avoids it.
 - A reply that quotes the earlier message can renew a memory through the quoted
   text. The assessment already reads the newest message first; no separate
   quote filter is added here.

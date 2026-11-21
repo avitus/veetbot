@@ -577,6 +577,196 @@ async def test_the_refresh_continues_when_a_memory_rerating_is_refused() -> None
     semantics.rerate_thread.assert_awaited_once_with("work", "t1", run=run, lease=lease)
 
 
+async def test_pending_reratings_that_keep_failing_do_not_hold_back_the_rest() -> None:
+    """A slice follows up twenty debts. When the same twenty are refused every time, each
+    is put off for a while, so the twenty-first has its turn in the next slice."""
+    from unittest.mock import AsyncMock
+
+    from agent_core.adapters.determinism import FixedClock
+    from agent_core.domain.email import EmailRecord
+    from agent_core.runtime.email_tasks import RERATING_RESUME_LIMIT, _TaskIO
+    from tests.contract.people_mail_fixtures import correspondence_stack
+    from tests.contract.support import principal
+
+    factory, _ = await correspondence_stack()
+    owner = principal()
+    threads = [
+        SimpleNamespace(id=UUID(int=5_000 + n), account_id="work", provider_thread_id=f"t-{n:02}")
+        for n in range(RERATING_RESUME_LIMIT + 1)
+    ]
+    async with factory() as uow:
+        for thread in threads:
+            await uow.email.put(
+                EmailRecord(
+                    tenant_id=owner.tenant_id,
+                    principal_id=owner.principal_id,
+                    kind="assessment",
+                    key=str(thread.id),
+                    revision=1,
+                    payload={"priority": 0.5, "rerating_pending": True},
+                    created_at=NOW,
+                    updated_at=NOW,
+                ),
+                expected_revision=0,
+            )
+    last = threads[-1].provider_thread_id
+    attempted: list[str] = []
+
+    async def refusing(account_id: str, thread_id: str, **kwargs: Any) -> EmailRerateReport:
+        attempted.append(thread_id)
+        if thread_id != last:
+            raise ConflictError("erased")
+        return EmailRerateReport()
+
+    clock = FixedClock(NOW)
+    io = _TaskIO.__new__(_TaskIO)
+    vars(io).update(
+        context=SimpleNamespace(
+            run=SimpleNamespace(id=UUID(int=2), session_id=UUID(int=1)),
+            lease=object(),
+            uow_factory=factory,
+            principal=owner,
+            clock=clock,
+        ),
+        semantics=SimpleNamespace(people_enabled=True, rerate_thread=refusing),
+        service=SimpleNamespace(learning_context=AsyncMock(return_value={})),
+        found_work=False,
+        # The lease fence is the worker's own and is not what this test is about.
+        _write_fence=AsyncMock(),
+    )
+
+    async def slice_() -> list[str]:
+        attempted.clear()
+        await _TaskIO._resume_reratings(io, threads)  # type: ignore[arg-type]
+        assert len(attempted) <= RERATING_RESUME_LIMIT
+        return list(attempted)
+
+    assert await slice_() == [thread.provider_thread_id for thread in threads[:-1]]
+    # The refused twenty are put off; the one they held back is followed up now.
+    assert await slice_() == [last]
+    assert await slice_() == []
+    # Their time comes again, and debts with fewer failures behind them go first.
+    clock.advance(timedelta(minutes=2))
+    assert last not in await slice_()
+    clock.advance(timedelta(minutes=2))
+    assert await slice_() == [last]
+    async with factory() as uow:
+        rows = await uow.email.list(owner, "assessment", limit=100)
+    assert all(row.payload["rerating_pending"] is True for row in rows)
+    assert {row.updated_at for row in rows} == {NOW}
+
+
+def test_a_put_off_rerating_waits_longer_each_time_and_a_new_save_starts_afresh() -> None:
+    from agent_core.domain.email_memory import (
+        rerating_attempts,
+        rerating_due,
+        rerating_put_off,
+        rerating_settled,
+    )
+    from agent_core.runtime.email_tasks import _TaskIO
+
+    marked: dict[str, Any] = {"priority": 0.5, "rerating_pending": True}
+    assert rerating_due(marked, NOW) and rerating_attempts(marked) == 0
+    once = rerating_put_off(marked, NOW)
+    assert rerating_attempts(once) == 1
+    assert not rerating_due(once, NOW + timedelta(minutes=1))
+    assert rerating_due(once, NOW + timedelta(minutes=2))
+    often = marked
+    for _ in range(40):
+        often = rerating_put_off(often, NOW)
+    # However often it failed, a debt is tried again within a day.
+    assert not rerating_due(often, NOW + timedelta(hours=23))
+    assert rerating_due(often, NOW + timedelta(days=1))
+    # A time that cannot be read holds nothing back.
+    assert rerating_due({**once, "rerating_retry_at": "soon"}, NOW)
+    assert rerating_settled(often) == {"priority": 0.5}
+
+    # An assessment saved again reuses the stored one; its debt is a new one.
+    io = _TaskIO.__new__(_TaskIO)
+    vars(io).update(semantics=SimpleNamespace(people_enabled=True))
+    assert _TaskIO._owing_rerating(io, often) == marked
+    vars(io).update(semantics=SimpleNamespace(people_enabled=False))
+    assert _TaskIO._owing_rerating(io, often) == {"priority": 0.5}
+
+
+async def test_a_slice_that_only_resumed_a_rerating_is_not_an_empty_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new-mail slice can find no mail and still change memories, by following up a
+    re-rating an earlier refresh left owing. Its run holds the audit event of that
+    change, so it is no empty check and its session is not removed with them."""
+    from decimal import Decimal
+
+    from agent_core.adapters.determinism import FixedClock
+    from agent_core.domain.email import EmailBudgetLimits
+    from tests.gates.test_email_arrival_checks_m26 import _seed_spend
+
+    stopped = True
+    original = EmailPeopleFormationService.rerate_thread
+
+    async def stopping(self: Any, account_id: str, thread_id: str, **kwargs: Any) -> Any:
+        if stopped:
+            return EmailRerateReport()
+        return await original(self, account_id, thread_id, **kwargs)
+
+    monkeypatch.setattr(EmailPeopleFormationService, "rerate_thread", stopping)
+    clock = FixedClock(NOW)
+    settings = replace(_email_settings(), email_mode_enabled=True, people_enabled=True)
+    async with build(
+        settings=settings,
+        script=FakeModelScript(turns=[_assessment(0.6)]),
+        mcp_client_factory=await _mail(census=False),
+        clock=clock,
+    ) as app:
+        service = app.services.email
+
+        async def rerated(run: Any) -> bool:
+            async with app.uow_factory() as uow:
+                events = await uow.events.list_after(run.session_id, 0, app.principal)
+            return "email.memory.rerated" in [event.event_type for event in events]
+
+        await service.submit_task(app.principal, kind="refresh")
+        [memory] = await _memories(app)
+        assert memory.expires_at == memory.last_evidence_at + timedelta(days=90)
+        async with app.uow_factory() as uow:
+            [thread] = await uow.email.list(app.principal, "thread")
+        # The owner marks the thread Important while no re-rating can run.
+        await service.feedback(
+            app.principal,
+            thread_id=UUID(str(thread.payload["id"])),
+            target="thread",
+            judgment="important",
+        )
+        assert (await _memories(app))[0].expires_at == memory.expires_at
+        stopped = False
+
+        # Above the learning share a refresh reads only new mail, and none arrived.
+        service.budget_limits = EmailBudgetLimits(
+            daily_cost=Decimal("40"), monthly_cost=Decimal("600")
+        )
+        await _seed_spend(app, "460", NOW - timedelta(days=10))
+        clock.advance(timedelta(minutes=1))
+        operation = await service.submit_task(app.principal, kind="refresh")
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure
+        task = await service.get_task(app.principal, run.id)
+        assert task is not None and task.scope == "new_mail"
+        assert run.usage.model_calls == 0
+        [kept] = await _memories(app)
+        assert kept.id == memory.id and kept.expires_at is None
+        assert await rerated(run)
+        assert task.empty_check is False
+
+        clock.advance(timedelta(days=7, minutes=1))
+        assert await service.prune_empty_checks(app.principal) == 0
+        assert await rerated(run)
+
+        # A slice that finds nothing, and follows up nothing, is still an empty check.
+        operation = await service.submit_task(app.principal, kind="refresh")
+        quiet = await service.get_task(app.principal, operation.run_id)
+        assert quiet is not None and quiet.scope == "new_mail" and quiet.empty_check is True
+
+
 async def test_the_owner_command_previews_unless_confirmed(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_core.cli import main
     from tests.contract.support import principal

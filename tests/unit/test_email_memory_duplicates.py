@@ -20,6 +20,9 @@ from agent_core.domain.email_memory import (
     EmailMergeReport,
     first_class_statement,
     guess_statement,
+    named_message,
+    names_message,
+    names_thread,
     quoted_text,
     restated,
     stated_value,
@@ -328,6 +331,69 @@ def test_a_first_class_statement_is_restated_whatever_its_senders_name_begins_wi
     # A row that is already a guess is never read as a plain statement.
     assert reword(plain, "m-1", first_class=False, direct=False) is None
 
+    # The display name may hold the record line of this very message. A first-class
+    # row is in the plain wording, so nothing in its sender's name is read as a header.
+    same = (
+        "Email from A on 2026-01-01 (mailbox work, thread t-1, message m-1) reports x "
+        "<a@example.com>"
+    )
+    own = first_class_statement(same, "2026-07-22", claim)
+    assert reword(own, "m-1", first_class=False, direct=True) == guess_statement(
+        same, "2026-07-22", "work", "t-1", "m-1", claim
+    )
+
+
+def test_a_record_line_is_told_by_its_own_header_never_by_one_its_claim_quotes() -> None:
+    """A claim can quote another email's record line. The identifiers that say which
+    message and thread formed a guess are the ones in its own header."""
+    quoted = guess_statement(
+        "Alex", "2026-07-20", "work", "t-9", "m-9", 'the vote moved to: "Friday".'
+    )
+    quoting = guess_statement(
+        "Sam <sam@example.test>", "2026-07-22", "work", "t-1", "m-1", f'Alex wrote: "{quoted}".'
+    )
+    assert names_message(quoting, "work", "t-1", "m-1") and names_thread(quoting, "work", "t-1")
+    assert not names_message(quoting, "work", "t-9", "m-9")
+    assert not names_thread(quoting, "work", "t-9")
+    # Another message of the header's own thread is not this one either.
+    assert not names_message(quoting, "work", "t-1", "m-9")
+    assert not names_thread(quoting, "work", "t-")
+    # A first-class statement names no message, whatever its claim quotes.
+    plain = first_class_statement(
+        "Sam <sam@example.test>", "2026-07-22", f'Alex wrote: "{quoted}".'
+    )
+    assert not names_message(plain, "work", "t-9", "m-9")
+    assert not names_thread(plain, "work", "t-9")
+    assert named_message(quoting) == ("work", "t-1", "m-1") and named_message(plain) is None
+
+    # A display name is the sender's to choose and can hold a record line too. The words
+    # alone then end the header early. Read against the stored message's own sender, the
+    # header is the whole of it, and another message's sender does not open the line.
+    crafted = "A on 2026-01-01 (mailbox work, thread t-9, message m-9) reports x <a@example.com>"
+    line = guess_statement(crafted, "2026-07-22", "work", "t-1", "m-1", 'the vote: "Friday".')
+    assert names_message(line, "work", "t-1", "m-1", crafted)
+    assert not names_message(line, "work", "t-9", "m-9", crafted)
+    assert not names_message(line, "work", "t-9", "m-9", "Sam <sam@example.test>")
+    assert not names_message(line, "work", "t-1", "m-1", "Sam <sam@example.test>")
+
+    def promote(thread_id: str, message_id: str, sender: str) -> str | None:
+        return restated(
+            line,
+            account_id="work",
+            thread_id=thread_id,
+            message_id=message_id,
+            first_class=True,
+            direct=False,
+            sender=sender,
+        )
+
+    assert promote("t-1", "m-1", crafted) == first_class_statement(
+        crafted, "2026-07-22", 'the vote: "Friday".'
+    )
+    # A promotion never takes its sender from words the stored sender does not open.
+    assert promote("t-1", "m-1", "Sam <sam@example.test>") is None
+    assert promote("t-9", "m-9", "Sam <sam@example.test>") is None
+
 
 def test_a_value_is_read_past_the_subject_a_person_linked_memory_names() -> None:
     """A memory linked to a person is stored under `person:<who>:<subject>`, and its
@@ -478,8 +544,9 @@ async def test_the_merge_keeps_the_earliest_memory_of_a_fact_and_supersedes_its_
     assert rows[other_thread.id] == other_thread
     [audit] = [event for event in events if event.event_type == "email.memory.merged"]
     assert audit.payload == {
-        "kept": str(kept.id),
-        "superseded": sorted([str(same_message.id), str(later.id)]),
+        "merged": [
+            {"kept": str(kept.id), "superseded": sorted([str(same_message.id), str(later.id)])}
+        ]
     }
     again = await service.merge_duplicates(apply=True)
     assert (again.facts, again.superseded) == (0, 0)
@@ -641,6 +708,116 @@ async def test_the_merge_leaves_a_copy_whose_latest_evidence_it_cannot_place(
     assert survivor.last_evidence_at == late_mail.sent_at
     assert linked is not None and linked.payload["facts"][f"renewed:{kept.id}"] == str(kept.id)
     assert (await service.merge_duplicates(apply=True)).superseded == 0
+
+
+async def test_the_merge_checks_each_later_copy_before_superseding_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two copies hold later evidence than the memory kept. One was renewed after the
+    listing was read, by a message older than the other copy's evidence: nothing that
+    reading saw answers for it, whatever answers for the newest copy."""
+    from agent_core.memory.email_people import EmailPeopleFormationService
+
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    first_mail = await mail(factory, message_id="m-1", sender=ALEX, body=SENTENCE, days_ago=9)
+    newest_mail = await mail(factory, message_id="m-2", sender=SAM, body="A note.", days_ago=3)
+    middle_mail = await mail(factory, message_id="m-3", sender=SAM, body="A memo.", days_ago=7)
+    confirming = "Confirming the Atlas vote is now Friday."
+    late_mail = await mail(factory, message_id="m-4", sender=SAM, body=confirming, days_ago=5)
+    [kept] = await service.form(first_mail, [fact_for(first_mail)])
+    await service.register_source(newest_mail)
+    await service.register_source(middle_mail)
+    newest = await _copy(factory, newest_mail, kept, 2)
+    # Stored last, so it is the memory of the fact a later message renews.
+    middle = await _copy(factory, middle_mail, kept, 3)
+    other = EmailPeopleFormationService(
+        factory, service._clock, service._ids, principal(), provider="fake", model="scripted"
+    )
+    opened = 0
+
+    @asynccontextmanager
+    async def racing() -> Any:
+        nonlocal opened
+        opened += 1
+        if opened == 2:
+            [renewed] = await other.form(late_mail, [fact_for(late_mail, quote=confirming)])
+            assert renewed.id == middle.id and renewed.last_evidence_at == late_mail.sent_at
+        async with factory() as uow:
+            yield uow
+
+    monkeypatch.setattr(service, "_uow_factory", racing)
+    report = await service.merge_duplicates(apply=True)
+    monkeypatch.undo()
+    # The newest copy's message was listed and answers for it; the renewed copy waits.
+    assert (report.facts, report.superseded) == (1, 1)
+    async with factory() as uow:
+        survivor = await uow.memories.get(kept.id, principal())
+        merged = await uow.memories.get(newest.id, principal())
+        waiting = await uow.memories.get(middle.id, principal())
+    assert merged.status is MemoryStatus.SUPERSEDED and merged.superseded_by == kept.id
+    assert survivor.last_evidence_at == newest_mail.sent_at
+    assert waiting.status is MemoryStatus.PROVISIONAL and waiting.superseded_by is None
+    assert waiting.last_evidence_at == late_mail.sent_at
+
+    # The next run reads the renewing message's listing and places the copy.
+    assert (await service.merge_duplicates(apply=True)).superseded == 1
+    async with factory() as uow:
+        placed = await uow.memories.get(middle.id, principal())
+        survivor = await uow.memories.get(kept.id, principal())
+    assert placed.status is MemoryStatus.SUPERSEDED and placed.superseded_by == kept.id
+    assert survivor.last_evidence_at == newest_mail.sent_at
+
+
+async def test_the_merge_appends_one_event_for_a_thread_however_many_facts_it_merges() -> None:
+    """The audit trail holds one content-free event per thread a merge changed, naming
+    every fact it merged there; a preview appends none."""
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    due = "The diligence package is due Monday."
+    first_mail = await mail(
+        factory, message_id="m-1", sender=ALEX, body=f"{SENTENCE} {due}", days_ago=6
+    )
+    later_mail = await mail(factory, message_id="m-2", sender=SAM, body="A note.", days_ago=2)
+    [vote, package] = await service.form(
+        first_mail,
+        [
+            fact_for(first_mail),
+            fact_for(
+                first_mail,
+                quote=due,
+                subject="Diligence package",
+                predicate="is due",
+                value="Monday",
+            ),
+        ],
+    )
+    await service.register_source(later_mail)
+    vote_copy = await _copy(factory, later_mail, vote, 1)
+    package_copy = await _copy(factory, later_mail, package, 2)
+
+    async def audits() -> list[Any]:
+        async with factory() as uow:
+            events = await uow.events.list_after(vote.source_session_id, 0, principal())
+        return [event for event in events if event.event_type == "email.memory.merged"]
+
+    preview = await service.merge_duplicates(apply=False)
+    assert (preview.facts, preview.superseded) == (2, 2) and await audits() == []
+    applied = await service.merge_duplicates(apply=True)
+    assert (applied.facts, applied.superseded) == (2, 2)
+    merged = await audits()
+    assert len(merged) == 1
+    assert merged[0].payload == {
+        "merged": sorted(
+            [
+                {"kept": str(vote.id), "superseded": [str(vote_copy.id)]},
+                {"kept": str(package.id), "superseded": [str(package_copy.id)]},
+            ],
+            key=lambda group: str(group["kept"]),
+        )
+    }
+    assert (await service.merge_duplicates(apply=True)).superseded == 0
+    assert len(await audits()) == 1
 
 
 async def test_the_merge_command_previews_unless_confirmed(monkeypatch: pytest.MonkeyPatch) -> None:
