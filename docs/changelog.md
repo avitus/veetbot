@@ -121,6 +121,14 @@ title: Changelog
   leave Email and come back. If you need to sign in again while Email is
   checking which accounts can still be read, you are asked to. A second
   archive of the same conversation stays hidden when the first is confirmed.
+- Email on Mac, iPad and iPhone: the mail list stays as deep as you had loaded
+  it when a row leaves it, so a conversation further down does not drop out
+  when new mail arrives after an archive is confirmed. A second archive of the
+  same conversation keeps being followed when the first one's check ends.
+  While Email is checking which accounts can still be read, a request you
+  have already left behind no longer clears your other accounts' mail, mail
+  asked for before the account stopped being readable is not shown, and each
+  regular refresh asks for the list first, so the check always finishes.
 - An importance judgment on a person or topic re-rates its own thread a second
   time even when the pass over that person's other threads fails part-way.
 
