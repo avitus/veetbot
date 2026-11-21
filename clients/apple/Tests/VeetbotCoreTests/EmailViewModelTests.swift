@@ -1070,6 +1070,261 @@ import SwiftUI
         #expect(model.listTotal == (restored ? 7 : 6))
     }
 
+    /// Counts as the server reports them in the pending-archive tests below. Their one
+    /// conversation is Important, unhandled, awaiting a reply and not suspected spam, so
+    /// three counts include it until Gmail confirms its archive.
+    nonisolated private static func archiveCountsJSON(counted: Bool, inbox: Int = 23) -> String {
+        "{\"priority\":\(counted ? 7 : 6),\"inbox\":\(counted ? inbox : inbox - 1),"
+            + "\"needs_you\":\(counted ? 9 : 8),\"handled\":0,\"suspected_spam\":2}"
+    }
+
+    /// What Email shows while that conversation is hidden, and once Gmail has removed it.
+    nonisolated private static func archiveCountsWithoutIt(inbox: Int = 23) -> EmailCollectionCounts {
+        EmailCollectionCounts(inbox: inbox - 1, needsYou: 8, handled: 0, priority: 6, suspectedSpam: 2)
+    }
+
+    /// Handled cannot list an unhandled conversation whose archive is pending, but its counts
+    /// still include it: the adjustment holds there until that archive settles.
+    @Test(arguments: ["completed", "failed"])
+    func testPendingArchiveKeepsItsCountAdjustmentInAnotherCollection(outcome: String) async throws {
+        let requests = EmailRequestRecorder()
+        let statusRead = EmailArchiveResponseGate()
+        let settled = EmailTestFlag()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), nil) }
+            let requested = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
+            let status: String? = !requested ? nil : settled.isSet ? outcome : "pending"
+            let archived = status == "completed"
+            let row = self.archiveThreadJSON(inInbox: !archived, status: status)
+            guard request.url!.path.hasSuffix("threads") else {
+                return (200, row, requested && !settled.isSet ? statusRead : nil)
+            }
+            let listed = !archived && request.url?.query?.contains("view=handled") != true
+            return (200, "{\"items\":[\(listed ? row : "")],\"next_cursor\":null,"
+                + "\"collection_counts\":\(Self.archiveCountsJSON(counted: !archived)),"
+                + "\"total_count\":\(listed ? 7 : 0)}", nil)
+        }
+        defer { statusRead.release(); model.resetConnection() }
+        await model.reload()
+        let row = try #require(model.items.first)
+        let archiving = Task { await model.setThreadArchived(row, archived: true) }
+        try await waitForEmailTestCondition { statusRead.isWaiting }
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt())
+        model.setCollection(.handled)
+        try await waitForEmailTestCondition { model.collectionCounts != nil }
+        #expect(requests.snapshot.contains { $0.url?.query?.contains("view=handled") == true })
+        #expect(model.items.isEmpty)
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt(),
+                "Gmail has not confirmed the archive, so the hidden conversation stays out of the counts")
+        #expect(model.listTotal == 0)
+        statusRead.release()
+        await archiving.value
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt())
+        settled.set()
+        await model.checkArchiveStatus(threadID)
+        let restored = outcome == "failed"
+        #expect(model.collectionCounts == EmailCollectionCounts(
+            inbox: restored ? 23 : 22, needsYou: restored ? 9 : 8, handled: 0,
+            priority: restored ? 7 : 6, suspectedSpam: 2))
+    }
+
+    /// A collection that lists the hidden conversation answers for it only when the read
+    /// reaches the end of the list: a first page of many leaves the adjustment alone, and a
+    /// whole list without the row shows the server has already stopped counting it.
+    @Test(arguments: [false, true])
+    func testPendingArchiveCountAdjustmentFollowsWhatAReadCanShow(wholeList: Bool) async throws {
+        let requests = EmailRequestRecorder()
+        let statusRead = EmailArchiveResponseGate()
+        let inbox = wholeList ? 23 : 150
+        let other = archiveThreadJSON(inInbox: true)
+            .replacingOccurrences(of: "\(threadID)", with: "00000000-0000-0000-0000-000000000899")
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), nil) }
+            let requested = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
+            let row = self.archiveThreadJSON(inInbox: true, status: requested ? "pending" : nil)
+            guard request.url!.path.hasSuffix("threads") else { return (200, row, requested ? statusRead : nil) }
+            guard request.url?.query?.contains("view=inbox") == true else {
+                return (200, "{\"items\":[\(row)],\"next_cursor\":null,\"collection_counts\":"
+                    + "\(Self.archiveCountsJSON(counted: true, inbox: inbox)),\"total_count\":7}", nil)
+            }
+            // Inbox pages by latest activity: the hidden row waits on a later page, or is gone.
+            return (200, "{\"items\":[\(other)],\"next_cursor\":\(wholeList ? "null" : "\"100\""),"
+                + "\"collection_counts\":\(Self.archiveCountsJSON(counted: !wholeList, inbox: inbox)),"
+                + "\"total_count\":\(wholeList ? inbox - 1 : inbox)}", nil)
+        }
+        defer { statusRead.release(); model.resetConnection() }
+        await model.reload()
+        let row = try #require(model.items.first)
+        let archiving = Task { await model.setThreadArchived(row, archived: true) }
+        try await waitForEmailTestCondition { statusRead.isWaiting }
+        model.setCollection(.inbox)
+        try await waitForEmailTestCondition { model.collectionCounts != nil }
+        #expect(model.items.count == 1)
+        #expect(model.items.first?.id != threadID)
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt(inbox: inbox))
+        #expect(model.listTotal == inbox - 1)
+        statusRead.release()
+        await archiving.value
+    }
+
+    /// A refresh of the list that held the row speaks for it even when more pages remain: the
+    /// row is gone from the rows it read again, so those counts no longer include it.
+    @Test func testRefreshOfThePagedListThatHeldTheRowEndsItsCountAdjustment() async throws {
+        let requests = EmailRequestRecorder()
+        let statusRead = EmailArchiveResponseGate()
+        let confirmed = EmailTestFlag()
+        let other = archiveThreadJSON(inInbox: true)
+            .replacingOccurrences(of: "\(threadID)", with: "00000000-0000-0000-0000-000000000899")
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), nil) }
+            let requested = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
+            let row = self.archiveThreadJSON(inInbox: true, status: requested ? "pending" : nil)
+            guard request.url!.path.hasSuffix("threads") else { return (200, row, requested ? statusRead : nil) }
+            // Gmail confirms before the held status read can say so; the list reads see it first.
+            let listed = confirmed.isSet ? other : "\(row),\(other)"
+            return (200, "{\"items\":[\(listed)],\"next_cursor\":\"100\",\"collection_counts\":"
+                + "\(Self.archiveCountsJSON(counted: !confirmed.isSet, inbox: 150)),"
+                + "\"total_count\":\(confirmed.isSet ? 149 : 150)}", nil)
+        }
+        defer { statusRead.release(); model.resetConnection() }
+        model.setCollection(.inbox)
+        try await waitForEmailTestCondition { model.items.count == 2 }
+        let row = try #require(model.items.first { $0.id == threadID })
+        let archiving = Task { await model.setThreadArchived(row, archived: true) }
+        try await waitForEmailTestCondition { statusRead.isWaiting }
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt(inbox: 150))
+        confirmed.set()
+        await model.reload(preserveOrder: true)
+        #expect(model.items.count == 1)
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt(inbox: 150))
+        #expect(model.listTotal == 149)
+        statusRead.release()
+        await archiving.value
+    }
+
+    /// Once the status read shows Gmail removed the conversation, the list read that follows
+    /// no longer counts it: the adjustment ends with those counts, not a moment after them.
+    @Test func testConfirmedArchiveEndsItsCountAdjustmentWithTheReadThatFollows() async throws {
+        let requests = EmailRequestRecorder()
+        let admission = EmailArchiveResponseGate()
+        let accounts = EmailArchiveResponseGate()
+        let confirmed = EmailTestFlag()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") {
+                return (200, Self.archiveAccountsJSON, confirmed.isSet ? accounts : nil)
+            }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), admission) }
+            let row = self.archiveThreadJSON(inInbox: !confirmed.isSet, status: confirmed.isSet ? "completed" : nil)
+            guard request.url!.path.hasSuffix("threads") else { return (200, row, nil) }
+            let listed = !confirmed.isSet && request.url?.query?.contains("view=handled") != true
+            return (200, "{\"items\":[\(listed ? row : "")],\"next_cursor\":null,"
+                + "\"collection_counts\":\(Self.archiveCountsJSON(counted: !confirmed.isSet)),"
+                + "\"total_count\":\(listed ? 7 : 0)}", nil)
+        }
+        defer { admission.release(); accounts.release(); model.resetConnection() }
+        await model.reload()
+        let row = try #require(model.items.first)
+        let archiving = Task { await model.setThreadArchived(row, archived: true) }
+        try await waitForEmailTestCondition { admission.isWaiting }
+        model.setCollection(.handled)
+        try await waitForEmailTestCondition { model.collectionCounts != nil }
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt())
+        confirmed.set()
+        admission.release()
+        // The list read after the confirmation has been applied; its account read is still out.
+        try await waitForEmailTestCondition { accounts.isWaiting && !model.isReadingList }
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt(),
+                "The confirmed counts already leave the conversation out")
+        accounts.release()
+        await archiving.value
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt())
+    }
+
+    /// The adjustment belongs to the counts that include the conversation: another account's
+    /// counts are shown as read, and a search starts again from what its own pages show.
+    @Test func testPendingArchiveCountAdjustmentStaysWithinItsAccountAndSearch() async throws {
+        let requests = EmailRequestRecorder()
+        let statusRead = EmailArchiveResponseGate()
+        let workCounts = "{\"priority\":3,\"inbox\":10,\"needs_you\":2,\"handled\":0,\"suspected_spam\":0}"
+        let searchCounts = "{\"priority\":1,\"inbox\":2,\"needs_you\":1,\"handled\":0,\"suspected_spam\":0}"
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), nil) }
+            let requested = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
+            let row = self.archiveThreadJSON(inInbox: true, status: requested ? "pending" : nil)
+            guard request.url!.path.hasSuffix("threads") else { return (200, row, requested ? statusRead : nil) }
+            // Only the personal account's unsearched Important list holds the conversation.
+            let query = request.url?.query ?? ""
+            let scoped = query.contains("account_id=work") ? workCounts : query.contains("text=") ? searchCounts : nil
+            let listed = scoped == nil && query.contains("view=priority")
+            return (200, "{\"items\":[\(listed ? row : "")],\"next_cursor\":null,"
+                + "\"collection_counts\":\(scoped ?? Self.archiveCountsJSON(counted: true)),"
+                + "\"total_count\":\(listed ? 7 : 0)}", nil)
+        }
+        defer { statusRead.release(); model.resetConnection() }
+        await model.reload()
+        let row = try #require(model.items.first)
+        let archiving = Task { await model.setThreadArchived(row, archived: true) }
+        try await waitForEmailTestCondition { statusRead.isWaiting }
+        model.setCollection(.handled)
+        try await waitForEmailTestCondition { model.collectionCounts != nil }
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt())
+        model.setAccount("work")
+        try await waitForEmailTestCondition { model.collectionCounts != nil }
+        #expect(model.collectionCounts == EmailCollectionCounts(
+            inbox: 10, needsYou: 2, handled: 0, priority: 3, suspectedSpam: 0))
+        model.setAccount(nil)
+        try await waitForEmailTestCondition { model.collectionCounts != nil }
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt())
+        model.setSearchText("agenda")
+        try await waitForEmailTestCondition { model.collectionCounts != nil }
+        #expect(model.collectionCounts == EmailCollectionCounts(
+            inbox: 2, needsYou: 1, handled: 0, priority: 1, suspectedSpam: 0))
+        statusRead.release()
+        await archiving.value
+    }
+
+    /// Nothing would end an adjustment for an archive this client has stopped following, so
+    /// the next read that cannot show the conversation is taken at its word. Email is not in
+    /// the foreground here, which leaves no status read running once the first one returns.
+    @Test func testPendingArchiveCountAdjustmentEndsWhenTheArchiveIsNoLongerFollowed() async throws {
+        let requests = EmailRequestRecorder()
+        let statusRead = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), nil) }
+            let requested = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
+            let row = self.archiveThreadJSON(inInbox: true, status: requested ? "pending" : nil)
+            guard request.url!.path.hasSuffix("threads") else { return (200, row, requested ? statusRead : nil) }
+            let listed = request.url?.query?.contains("view=handled") != true
+            return (200, "{\"items\":[\(listed ? row : "")],\"next_cursor\":null,"
+                + "\"collection_counts\":\(Self.archiveCountsJSON(counted: true)),"
+                + "\"total_count\":\(listed ? 7 : 0)}", nil)
+        }
+        defer { statusRead.release(); model.resetConnection() }
+        await model.reload()
+        let row = try #require(model.items.first)
+        let archiving = Task { await model.setThreadArchived(row, archived: true) }
+        try await waitForEmailTestCondition { statusRead.isWaiting }
+        statusRead.release()
+        await archiving.value
+        #expect(model.items.isEmpty)
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt())
+        model.setCollection(.handled)
+        try await waitForEmailTestCondition { model.collectionCounts != nil }
+        #expect(model.collectionCounts == EmailCollectionCounts(
+            inbox: 23, needsYou: 9, handled: 0, priority: 7, suspectedSpam: 2))
+    }
+
     /// A clearly labelled archive gesture must reach the originating thread's remote command.
     @Test(arguments: ["personal", "work"])
     func testArchiveUsesAccountBoundCommandAndPreservesDraft(account: String) async throws {
