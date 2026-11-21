@@ -1219,10 +1219,37 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     /// Reply opens a blank owner-written draft, without asking Veetbot to write.
+    /// Discarding it brings the reply choices back for another.
     func testEmailReplyCreatesAMissingDraft() {
         app.launchArguments.append("--ui-testing-email-no-draft")
         app.launch()
-        checkEmailReadingFlow()
+        checkEmailReadingFlow(beforeLeavingEmail: checkDiscardingTheReplyRestoresTheReplyChoices)
+    }
+
+    /// The composer hides the reply choices while the owner writes. A discarded reply keeps
+    /// its place on the thread, so the choices must return without opening another thread.
+    private func checkDiscardingTheReplyRestoresTheReplyChoices() {
+        #if os(macOS)
+        // Folding the envelope puts the actions row back where Send was hittable.
+        activate(app.buttons["email.draft-envelope"])
+        let options = element("email.draft-options").firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 5), app.debugDescription)
+        activate(options)
+        let discard = app.menuItems["Discard draft"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 5), app.debugDescription)
+        activate(discard)
+        let confirm = app.sheets.buttons["Discard draft"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
+        activate(confirm)
+        let reply = app.buttons["email.jump-to-reply"]
+        XCTAssertTrue(reply.waitForExistence(timeout: 5), "Discarding a reply must bring the reply choices back")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "enabled == true"), object: reply)], timeout: 5), .completed)
+        activate(reply)
+        let editor = app.textViews["email.draft-body"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertEqual(editor.value as? String, "", "A discarded reply's text must not carry into the next one")
+        #endif
     }
 
     func testClosedEmailComposerKeepsSendUndoVisible() {
@@ -1260,7 +1287,8 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     /// Checks inbox discovery, optional feedback, direct reply access and toolbar isolation.
-    private func checkEmailReadingFlow() {
+    /// A journey with more to prove about the open reply does so before the flow leaves Email.
+    private func checkEmailReadingFlow(beforeLeavingEmail: (() -> Void)? = nil) {
         let emailMode = app.buttons["mode.email"]
         XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
         #if os(macOS)
@@ -1374,6 +1402,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.textFields["email.draft-cc"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.textFields["email.draft-bcc"].exists)
         XCTAssertTrue(app.textFields["email.draft-subject"].exists)
+        beforeLeavingEmail?()
         activate(app.buttons["mode.chat"])
         XCTAssertFalse(app.textFields["email.search"].isHittable, "Mail search belongs to Email mode")
         #if os(macOS)

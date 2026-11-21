@@ -130,7 +130,7 @@ import Testing
         #expect(source.contains(".menuIndicator(.hidden)"))
         for identifier in [
             "email.draft-to", "email.draft-envelope", "email.draft-history", "email.endorse-style",
-            "email.action-error", "email.draft-conflict",
+            "email.action-error", "email.draft-conflict", "email.draft-options",
         ] {
             #expect(source.contains("\"\(identifier)\")"), "\(identifier)")
         }

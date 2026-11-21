@@ -831,6 +831,17 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         case ("POST", "/v1/email/threads/\(Self.emailThreadID)/reply"):
             let kind = requestJSON()["kind"] as? String ?? "manual"
             let selected = Self.emailLock.withLock {
+                // A discarded reply is over: no Veetbot draft remains, and Reply starts a blank one.
+                if Self.emailStatus == "discarded" {
+                    if kind == "veetbot" { return false }
+                    Self.emailStatus = "ready"
+                    Self.emailHasVeetbotDraft = false
+                    Self.emailComposition = "manual"
+                    Self.emailManualBody = ""
+                    Self.emailBody = ""
+                    Self.emailRevision += 1
+                    return true
+                }
                 if kind == "veetbot" && !Self.emailHasVeetbotDraft { return false }
                 if Self.emailComposition == "manual" { Self.emailManualBody = Self.emailBody }
                 else { Self.emailVeetbotBody = Self.emailBody }
@@ -844,6 +855,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             body = selected ? Self.emailDraftJSON : "{\"error\":{\"code\":\"not_found\",\"message\":\"No Veetbot draft\",\"details\":{},\"request_id\":\"fixture\"}}"
         case ("POST", "/v1/email/threads/\(Self.emailThreadID)/drafts"):
             Self.emailLock.withLock {
+                if Self.emailStatus == "discarded" { Self.emailStatus = "ready" }
                 if Self.emailComposition == "manual" { Self.emailManualBody = Self.emailBody }
                 Self.emailHasDraft = true
                 Self.emailHasVeetbotDraft = true
@@ -864,6 +876,11 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             }
             Self.emailRevision += 1
             Self.emailLock.unlock()
+            statusCode = 200
+            body = Self.emailDraftJSON
+        case ("DELETE", "/v1/email/drafts/\(Self.emailDraftID)"):
+            // The thread keeps the same draft, marked discarded, as the server does.
+            Self.emailLock.withLock { Self.emailStatus = "discarded" }
             statusCode = 200
             body = Self.emailDraftJSON
         case ("POST", "/v1/email/drafts/\(Self.emailDraftID)/send"):

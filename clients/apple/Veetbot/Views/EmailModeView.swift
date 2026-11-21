@@ -1398,7 +1398,10 @@ private struct EmailThreadScreen: View {
         .onChange(of: model.draft?.sendUndoUntil, initial: true) { undoWindowShownAt = .now }
         .onChange(of: model.selectedThreadID) { composerClosed = false; composing = false }
         .onChange(of: model.draft?.id) { if model.draft == nil { composing = false } }
-        .onChange(of: model.draft?.status) { if model.draft?.status == "sent" { composing = false } }
+        // A sent or discarded reply keeps its place on the thread, so the draft itself never clears.
+        .onChange(of: model.draft?.status) {
+            if model.draft?.status == "sent" || model.draft?.status == "discarded" { composing = false }
+        }
         .onChange(of: focusedField) { if focusedField == .body { composing = true } }
         .confirmationDialog("Discard this reply?", isPresented: $showingDiscard, titleVisibility: .visible) {
             Button("Discard draft", role: .destructive) { Task { await model.discardDraft() } }
@@ -1861,6 +1864,7 @@ private struct EmailThreadScreen: View {
             .menuStyle(.button).buttonStyle(.borderless).menuIndicator(.hidden).fixedSize()
             .foregroundColor(AppTheme.inkSoft).tint(AppTheme.inkSoft)
             .help("Draft options")
+            .accessibilityIdentifier("email.draft-options")
             Spacer()
             if draft.status == "sending", let deadline = draft.sendUndoUntil {
                 TimelineView(.periodic(from: .now, by: reduceMotion ? 1 : 0.05)) { context in
