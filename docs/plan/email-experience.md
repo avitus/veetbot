@@ -390,9 +390,32 @@ Native message and conversation parsing runs off the UI thread. Conversation
 parses use a nine-entry least-recently-used cache with exact source and owner
 matching; reset, exclusion and cancellation prevent stale publication. The
 first inbox page renders before independent account freshness finishes loading;
-late account errors remain visible and revoked access clears the cached state. A refused read of one conversation drops that account's mail at once; other accounts' mail stays only once a list read after the refusal has answered, and a refused or failed list read clears everything.
+late account errors remain visible and revoked access clears the cached state. A refused read of one conversation drops that account's mail at once and lets the next list read decide what else is kept, as the table below sets out.
 Access bookkeeping reuses the source record read under the owner lock unless
 archive recovery has written a newer revision; retention timestamps remain exact.
+
+**After a refused read of one conversation.** That account's mail goes at once:
+its rows, kept lists, counts, hidden archives, archive requests still waiting,
+their polls and status reads, and the reader if it shows one of its
+conversations. An unsaved edit goes only with a conversation known to be that
+account's. Any answer for something retired this way is ignored. The list is
+then asked again, and the latest list read asked after the refusal decides, by
+the way it ends:
+
+| The list read ends by | What is cleared | Email's visit | Error route |
+| --- | --- | --- | --- |
+| answering | nothing more | goes on | the refusal's message above the list |
+| being refused | everything | goes on while Email is on screen | the refusal's message; no sign-in is asked for |
+| needing the owner to sign in again | everything | ends, as after any such answer | the usual one: the connection asks the owner to sign in |
+| failing for any other reason | everything | goes on while Email is on screen | the refusal's message; no sign-in is asked for |
+| being replaced by another list read | nothing | goes on | none; the newer read decides |
+| not being able to start, including the read a collection or search change asks for | everything | goes on while Email is on screen | the refusal's message |
+| the owner leaving Email first | everything | ends | the refusal's message |
+
+A visit that goes on after a clear keeps Refresh and the regular refreshes
+working; nothing is read at once, and the refusal's message stays until the
+next read. A refused read of the conversation open in the reader, or of the
+list itself with no refusal waiting, clears everything as before.
 
 An empty inbox does not restart its initial loading indicator on each projection
 poll. A failed refresh remains visible across successful reads of cached

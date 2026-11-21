@@ -112,6 +112,11 @@ title: Changelog
   anything you were typing are kept once the new list loads. An archive that
   was still being sent when its account stopped being readable no longer
   closes a conversation you have open from another account.
+- Email on Mac, iPad and iPhone: if mail cannot be reloaded after an account
+  stops being readable, Refresh works straight away; you no longer have to
+  leave Email and come back. If you need to sign in again while Email is
+  checking which accounts can still be read, you are asked to. A second
+  archive of the same conversation stays hidden when the first is confirmed.
 - An importance judgment on a person or topic re-rates its own thread a second
   time even when the pass over that person's other threads fails part-way.
 
