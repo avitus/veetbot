@@ -64,6 +64,11 @@ title: Changelog
   as a signature, so the names stay in the Email reading text and People no
   longer stores the next entry as the sender's title. Where nothing ends such
   a list, a signature below it stays in the reading text.
+- A signature-shaped example inside a code block (fenced, or indented in plain
+  text) is no longer taken for the sender's signature: it stays in the Email
+  reading text and People reads nothing from it.
+- The Email reader finds link destinations in one pass, so a message with a
+  long run of unfinished links can no longer slow it down.
 - The Email reading text now applies both of two reader rules that were made
   separately: a plain paragraph the HTML version lacks keeps its place below
   the note it followed, and a paragraph is judged line by line, so quoted
