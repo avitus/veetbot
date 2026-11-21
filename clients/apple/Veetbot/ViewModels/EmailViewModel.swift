@@ -355,9 +355,9 @@ public final class EmailViewModel: ObservableObject {
     ///    numbers, its archives with their requests, polls and status reads, and the reader if
     ///    it shows one of its conversations (`forgetDeniedAccount`).
     /// 3. An answer for something retired changes nothing and reports nothing.
-    /// 4. Every list read in flight is retired with them: those were asked before the refusal
-    ///    and are never shown. The list is then asked again, and the latest list read asked
-    ///    after the refusal decides, by the way it ends:
+    /// 4. The list read that answers the refusal takes the list's request in that same step,
+    ///    which retires every list read in flight: those were asked before the refusal and are
+    ///    never shown. The latest list read asked after the refusal decides, by the way it ends:
     ///    - It answers: nothing more is cleared, the visit goes on, and the refusal's message
     ///      is shown with the list.
     ///    - It is refused, or fails in any way but the next: everything is cleared and the
@@ -461,6 +461,16 @@ public final class EmailViewModel: ObservableObject {
     let restoreScrollAnchor = PassthroughSubject<UUID, Never>()
     /// Every list on every device loads 100 rows a page and scrolls (ADR-0303, ADR-0326).
     private let pageSize = 100
+    /// How deep the list on screen is loaded: the number of rows the server has returned for
+    /// it, counted as they arrive. A list read sets it and More mail adds to it. The rows on
+    /// screen are not the measure, because rows leave the screen ahead of the read that
+    /// follows: a confirmed archive, a refused account, an opened conversation that has left
+    /// the list, an exclusion. Every list read that keeps the rows on screen reads at least
+    /// this deep, and at least as deep as those rows go, whichever caller asks: the read asked
+    /// for the row that left, a regular refresh that replaces it, Try again. Nothing else
+    /// holds a depth, and no caller passes one. It belongs to the list on screen: with another
+    /// account, collection or search it starts again from nothing.
+    private var loadedDepth = 0
 
     /// Do not search later pages for a row already confirmed absent from the current list.
     private var eligibleScrollAnchor: UUID? {
@@ -905,6 +915,7 @@ public final class EmailViewModel: ObservableObject {
         loadedCounts = nil
         scrollAnchor = nil
         nextCursor = nil
+        loadedDepth = 0
         hasMore = false
         pagingFailed = false
     }
@@ -926,9 +937,8 @@ public final class EmailViewModel: ObservableObject {
     }
 
     /// Retains the initiating visit through every asynchronous projection read and error path.
-    /// A caller that has just taken rows off the list passes `depth`, the number of rows loaded
-    /// before it did, so that the list is read again as deep as it was.
-    private func reload(preserveOrder: Bool = false, activation foreground: UUID?, atLeast depth: Int = 0) async {
+    /// A refusal takes the list's request for the read it asks for, and passes it as `claimed`.
+    private func reload(preserveOrder: Bool = false, activation foreground: UUID?, as claimed: UUID? = nil) async {
         let connection = generation
         let projection = projectionGeneration
         let mailboxVersions = archiveVersions
@@ -936,19 +946,22 @@ public final class EmailViewModel: ObservableObject {
         // nothing, and says nothing about whether the list can be read. Nothing changes for it,
         // and whatever list read is out still decides for a refusal that is waiting.
         guard acceptsRead(connection: connection, activation: foreground) else { return }
+        // The request taken for this read has since been taken over by another list read.
+        // That newer read decides, and this one asks nothing.
+        if let claimed, listRequest != claimed { return }
         guard let api = makeAPIClient() else {
             // A refusal is waiting for the list, and there is no connection to ask it through.
             // That stops every other list read too, so none is left to answer.
             if refusalAwaitingList != nil { clearAfterRefusal() }
             return
         }
-        let requestID = UUID()
+        let requestID = claimed ?? UUID()
         listRequest = requestID
         if !preserveOrder {
             loadedListVersion = nil
             loadedCounts = nil
         }
-        let visibleCount = preserveOrder ? max(pageSize, inboxItems.count, depth) : pageSize
+        let visibleCount = preserveOrder ? max(pageSize, inboxItems.count, loadedDepth) : pageSize
         // An unchanged page says nothing new about a hidden conversation it does not hold.
         let listed = Set(inboxItems.map(\.id))
         let reusable = preserveOrder && archiveHiddenThreads.isSubset(of: listed)
@@ -981,6 +994,7 @@ public final class EmailViewModel: ObservableObject {
                 let page = read.page
                 let loadedThreads = shown(page.items, since: mailboxVersions)
                 loadedCounts = numbers
+                loadedDepth = page.items.count
                 pagingFailed = false
                 seenCursors = []
                 nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
@@ -1107,6 +1121,7 @@ public final class EmailViewModel: ObservableObject {
             var ids = Set(inboxItems.map(\.id))
             let loaded = shown(page.items, since: mailboxVersions)
             inboxItems.append(contentsOf: loaded.filter { ids.insert($0.id).inserted })
+            loadedDepth += page.items.count
             for value in loaded { observeArchive(value) }
             nextCursor = nil
             hasMore = false
@@ -1392,10 +1407,11 @@ public final class EmailViewModel: ObservableObject {
                 || previousMailbox.dismissedRevision != result.dismissedRevision
                 || previousMailbox.isHandled != result.isHandled {
                 invalidateMailSnapshots()
+                // The list is the same list, read again for what changed: it keeps its depth.
+                let depth = loadedDepth
                 resetListQuery()
+                loadedDepth = depth
                 isLoading = false
-                // The row may leave the list here, so the depth to read again is taken first.
-                let depth = inboxItems.count
                 if let index = inboxItems.firstIndex(where: { $0.id == id }) {
                     if Self.staysListed(result, in: queryListView) {
                         inboxItems[index] = result
@@ -1408,7 +1424,7 @@ public final class EmailViewModel: ObservableObject {
                 Task { [weak self] in
                     guard let self, self.generation == connection, self.activation == visit,
                           self.listRequest == query else { return }
-                    await self.reload(preserveOrder: true, activation: foreground, atLeast: depth)
+                    await self.reload(preserveOrder: true, activation: foreground)
                 }
             }
             thread = result
@@ -2249,15 +2265,13 @@ public final class EmailViewModel: ObservableObject {
             guard acceptsArchiveOperation(value) else { return value }
             mergeArchive(value)
             // The outcome is applied before the list is read. A newer archive of the same
-            // conversation that the list then shows is that read's to follow. Applying it can
-            // take the row off the list, so the depth to read again is taken first.
-            let depth = inboxItems.count
+            // conversation that the list then shows is that read's to follow.
             observeArchive(value)
             if value.archiveOperation?.status == "completed", owner == nil {
                 // Applying the outcome ended this conversation's poll, which may be the task
                 // running this. The list is read in a task of its own, so that it still runs.
                 await Task { [weak self] in
-                    await self?.reload(preserveOrder: true, activation: foreground, atLeast: depth)
+                    await self?.reload(preserveOrder: true, activation: foreground)
                 }.value
             }
             return value
@@ -2266,18 +2280,20 @@ public final class EmailViewModel: ObservableObject {
             if case HTTPTransportError.authorizationDenied = error {
                 // One refused conversation does not say that all of Email was revoked. Its
                 // account's mail goes at once, and the list is asked what still reads.
-                let depth = inboxItems.count
                 forgetDeniedAccount(holding: threadID)
                 refusalAwaitingList = error.localizedDescription
-                // Every list read in flight was asked before the refusal. They are retired
-                // here and now: the list is asked from another task, and an answer already on
-                // its way could otherwise be shown, and taken for the list's answer, first.
-                listRequest = UUID()
+                // The list read that answers the refusal takes the list's request here, in the
+                // same step as the refusal. Every list read in flight was asked before the
+                // refusal and is retired by that. The read starts a moment later, from another
+                // task, under the request taken here and no other, so no earlier answer can be
+                // shown, or taken for the list's answer, in between.
+                let request = UUID()
+                listRequest = request
                 // The refused conversation's poll was retired with it, and may be the task
                 // running this. The list is read in a task of its own, so that it still runs,
                 // and whatever poll that read starts is left alone afterwards.
                 await Task { [weak self] in
-                    await self?.reload(preserveOrder: true, activation: foreground, atLeast: depth)
+                    await self?.reload(preserveOrder: true, activation: foreground, as: request)
                 }.value
                 return nil
             }
@@ -2473,11 +2489,9 @@ public final class EmailViewModel: ObservableObject {
             invalidateMailSnapshots()
             edits = edits.filter { $0.value.base.threadID != thread.id }
             // The row goes now: a failed reload must not leave the excluded summary in view.
-            // The list is read again as deep as it was with the row.
-            let depth = inboxItems.count
             inboxItems.removeAll { $0.id == thread.id }
             clearSelection()
-            await reload(preserveOrder: true, activation: active ? activation : nil, atLeast: depth)
+            await reload(preserveOrder: true)
         } catch { if generation == connection { report(error, draft: true) } }
     }
 
