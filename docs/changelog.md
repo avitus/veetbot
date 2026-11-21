@@ -34,6 +34,16 @@ title: Changelog
   quotation.
 - The records now say plainly that Gmail's sender check vouches for the
   sending domain, not the mailbox, and what that leaves open.
+- A stored statement is read for its sender, date and message only in its own
+  attribution, never in text quoted inside the claim. A memory your feedback
+  left past due returns with the standing its forming message earns, whichever
+  message is read first. A rating saved for an earlier revision of a thread
+  only lengthens.
+- Re-ratings that follow an assessment write nothing while learning is paused,
+  ones that keep failing are put off so they cannot hold back the rest, and a
+  new-mail check whose follow-up changed a memory keeps its audit trail. The
+  merge of repeated facts checks each later copy by itself and records one
+  event per thread.
 - A paged listing of a person's identifiers returns each one once; a later
   copy could reappear on another page.
 - The Email reading text keeps a postscript written under a `-- ` signature
@@ -51,6 +61,11 @@ title: Changelog
   archive from the open conversation. What you typed into Teach Veetbot is
   still there after you reply and close the reply. On iPhone, pressing Reply
   brings the reply into view above the keyboard.
+- Email on Mac, iPad and iPhone: going back to a list you had open shows its
+  sidebar counts with archived-but-unconfirmed conversations taken off as they
+  stood when the list was read. If such a conversation changes while the
+  counts are being read, the counts are read again so Needs you does not stay
+  one too high.
 
 ## 2026-11-20 — A recorded run belongs to the question content it tested (ADR-0338, ADR-0339)
 
@@ -64,7 +79,7 @@ title: Changelog
   destination's place. An existing file with wider permissions used to keep
   them.
 - A run recorded while a note or status edit was open is no longer written
-  over by that edit.
+  over by that edit, and the edit answers with the result the store holds.
 - In the in-memory store a failed import or a failed erasure now leaves every
   question as it was, an owner's questions are locked until the unit of work
   ends, and two owners' questions with one identifier keep separate histories.

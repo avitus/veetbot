@@ -124,7 +124,7 @@ single-action owner consent under ADR-0095. Remove the row immediately while
 the archive request and durable operation finish asynchronously. Normal progress
 and successful completion are silent; other rows remain actionable. Collection
 counts and list totals stay visible meanwhile, each reduced by the hidden
-conversation it counted, and return to the confirmed value if the row is
+conversation it counted as it stood for that read (its status is read with each read of the counts, and the counts again, at most twice, when it changed in between), and return to the confirmed value if the row is
 restored. Keep the
 last confirmed mailbox state separate from this optimistic presentation, retain
 draft edits, and restore the row with an actionable error if admission, status
