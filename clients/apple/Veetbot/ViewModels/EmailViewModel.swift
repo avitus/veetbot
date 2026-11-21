@@ -409,10 +409,7 @@ public final class EmailViewModel: ObservableObject {
             archiveReadErrors.remove(retired)
             archiveStates[retired] = nil
             archiveVersions[retired] = UUID()
-            if retired != id {
-                archiveTasks[retired]?.cancel()
-                archiveTasks[retired] = nil
-            }
+            archiveTasks.removeValue(forKey: retired)?.task.cancel()
         }
         invalidateMailSnapshots()
         EmailConversationCache.shared.removeAll()
@@ -558,7 +555,14 @@ public final class EmailViewModel: ObservableObject {
         var operationID: UUID?
     }
     private var archiveRequests: [UUID: ArchiveRequest] = [:]
-    private var archiveTasks: [UUID: Task<Void, Never>] = [:]
+    /// The poll that follows one conversation's pending archive. The token is its own: a poll
+    /// that ends removes the entry only while the entry is still that poll's, since a newer
+    /// archive of the same conversation may have started a poll under the same key.
+    private struct ArchivePoll {
+        let token: UUID
+        let task: Task<Void, Never>
+    }
+    private var archiveTasks: [UUID: ArchivePoll] = [:]
     private struct ArchiveMailboxState {
         var inInbox: Bool?
         var operation: EmailArchiveOperation?
@@ -616,7 +620,7 @@ public final class EmailViewModel: ObservableObject {
         operationTask?.cancel()
         autosaveTask?.cancel()
         searchTask?.cancel()
-        archiveTasks.values.forEach { $0.cancel() }
+        archiveTasks.values.forEach { $0.task.cancel() }
     }
 
     /// The rows as the list shows them: newest first by each conversation's latest
@@ -719,7 +723,7 @@ public final class EmailViewModel: ObservableObject {
         isRefreshing = false
         refreshTask?.cancel()
         operationTask?.cancel()
-        archiveTasks.values.forEach { $0.cancel() }
+        archiveTasks.values.forEach { $0.task.cancel() }
         archiveTasks = [:]
         guard value else { return }
         startVisit(readingAtOnce: true)
@@ -765,7 +769,7 @@ public final class EmailViewModel: ObservableObject {
         sendWatchTask?.cancel()
         sendWatchTask = nil
         searchTask?.cancel()
-        archiveTasks.values.forEach { $0.cancel() }
+        archiveTasks.values.forEach { $0.task.cancel() }
         archiveTasks = [:]
         archiveRequests = [:]
         archiveErrors = [:]
@@ -2243,11 +2247,12 @@ public final class EmailViewModel: ObservableObject {
                 // account's mail goes at once, and the list is asked what still reads.
                 forgetDeniedAccount(holding: threadID)
                 refusalAwaitingList = error.localizedDescription
-                await reload(preserveOrder: true, activation: foreground)
-                // A list read that failed, was refused or could not start has cleared everything.
-                guard generation == connection else { return nil }
-                archiveTasks[threadID]?.cancel()
-                archiveTasks[threadID] = nil
+                // The refused conversation's poll was retired with it, and may be the task
+                // running this. The list is read in a task of its own, so that it still runs,
+                // and whatever poll that read starts is left alone afterwards.
+                await Task { [weak self] in
+                    await self?.reload(preserveOrder: true, activation: foreground)
+                }.value
                 return nil
             }
             archiveReadErrors.insert(threadID)
@@ -2312,8 +2317,7 @@ public final class EmailViewModel: ObservableObject {
             archiveRequests[value.id] = nil
             archiveErrors[value.id] = nil
             archiveReadErrors.remove(value.id)
-            archiveTasks[value.id]?.cancel()
-            archiveTasks[value.id] = nil
+            archiveTasks.removeValue(forKey: value.id)?.task.cancel()
         } else {
             if operation.targetArchived, archiveHiddenThreads.insert(value.id).inserted {
                 // An archive begun on another device and first seen here. A kept list's numbers
@@ -2325,16 +2329,19 @@ public final class EmailViewModel: ObservableObject {
             guard active, archiveTasks[value.id] == nil else { return }
             let connection = generation
             let foreground = activation
-            archiveTasks[value.id] = Task { [weak self] in
+            let token = UUID()
+            archiveTasks[value.id] = ArchivePoll(token: token, task: Task { [weak self] in
                 guard let self else { return }
-                defer { if self.activation == foreground, self.generation == connection { self.archiveTasks[value.id] = nil } }
+                // Only its own entry: the outcome it applied may have let a newer archive of
+                // this conversation start a poll under the same key.
+                defer { if self.archiveTasks[value.id]?.token == token { self.archiveTasks[value.id] = nil } }
                 for _ in 0..<60 {
                     do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
                     guard self.acceptsRead(connection: connection, activation: foreground) else { return }
                     await self.checkArchiveStatus(value.id)
                     if self.archiveErrors[value.id] != nil { return }
                 }
-            }
+            })
         }
     }
 

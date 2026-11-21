@@ -1984,6 +1984,11 @@ import SwiftUI
         #expect(model.items.map(\.id) == (list == 200 ? [personalID] : []))
         #expect(model.accounts.count == (list == 200 ? 2 : 0))
         #expect(model.errorMessage != nil)
+        // The refused conversation's poll went with it. Left running, it would ask again within a second.
+        let statusReads = { requests.snapshot.filter { $0.url!.path.contains("/threads/") }.count }
+        let before = statusReads()
+        try await Task.sleep(nanoseconds: 1_300_000_000)
+        #expect(statusReads() == before, "Nothing follows a conversation that was refused")
     }
 
     /// Two conversations of a revoked account can be refused one after the other. Each refusal
@@ -2624,6 +2629,84 @@ import SwiftUI
         // The poll reads the status a second after the archive was first seen, and then the list.
         try await waitForEmailTestCondition { model.items.map(\.id) == [arrivalID] }
         #expect(model.items.map(\.id) == [arrivalID], "The list was read after the confirmation")
+    }
+
+    /// The poll learns that an archive was confirmed and reads the list, which shows a newer
+    /// archive of the same conversation and starts a poll for it. The first poll then ends, and
+    /// must leave the newer one in place: when the newer archive is confirmed in its turn, that
+    /// poll is stopped, and nothing reads the conversation's status or the list any more.
+    @Test func testPollThatEndsLeavesTheNewerArchivesPollInPlace() async throws {
+        let requests = EmailRequestRecorder()
+        let newerOperation = UUID(uuidString: "00000000-0000-0000-0000-000000000877")!
+        let arrivalID = UUID(uuidString: "00000000-0000-0000-0000-000000000898")!
+        let arrival = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(arrivalID)")
+        let statusReads = { requests.snapshot.filter { $0.url!.path.contains("/threads/") }.count }
+        let listReads = { requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count }
+        let model = try makeModel { request in
+            requests.append(request)
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if path.hasSuffix("refresh") || path.contains("/operations/") {
+                return (200, self.operationJSON(status: "COMPLETED"))
+            }
+            guard path.hasSuffix("threads") else {
+                // The first status read confirms the first archive, the second the newer one.
+                return (200, self.archiveThreadJSON(
+                    inInbox: false, status: "completed", operationID: statusReads() == 1 ? nil : newerOperation))
+            }
+            // The list follows: the first archive pending, then the conversation back in the
+            // Inbox with the newer archive pending, then new mail in its place.
+            switch statusReads() {
+            case 0: return (200, "{\"items\":[\(self.archiveThreadJSON(inInbox: true, status: "pending"))],\"next_cursor\":null}")
+            case 1: return (200, "{\"items\":[\(self.archiveThreadJSON(inInbox: true, status: "pending", operationID: newerOperation))],\"next_cursor\":null}")
+            default: return (200, "{\"items\":[\(arrival)],\"next_cursor\":null}")
+            }
+        }
+        defer { model.resetConnection() }
+        model.setActive(true)
+        // Each poll reads its conversation's status a second after it began.
+        try await waitForEmailTestCondition {
+            statusReads() == 2 && model.items.map(\.id) == [arrivalID] && !model.isReadingList
+        }
+        #expect(statusReads() == 2, "Each archive was followed by a poll of its own")
+        let before = (statusReads(), listReads())
+        // A poll that had not been stopped would read again within a second.
+        try await Task.sleep(nanoseconds: 1_600_000_000)
+        #expect(statusReads() == before.0, "The newer archive's poll stopped when its archive was confirmed")
+        #expect(listReads() == before.1)
+    }
+
+    /// A poll's status read is refused and the list is asked. If the list then still returns
+    /// the conversation with its archive pending, a poll is started for it again. The refused
+    /// read's own poll has ended, and ending it must not stop the new one.
+    @Test func testRefusedPollLeavesAPollStartedByTheListReadInPlace() async throws {
+        let requests = EmailRequestRecorder()
+        let personalID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let personal = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(personalID)")
+        let statusReads = { requests.snapshot.filter { $0.url!.path.contains("/threads/") }.count }
+        let model = try makeModel { request in
+            requests.append(request)
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if path.hasSuffix("refresh") || path.contains("/operations/") {
+                return (200, self.operationJSON(status: "COMPLETED"))
+            }
+            guard path.hasSuffix("threads") else {
+                // Refused once; by the next read the account reads again and Gmail has confirmed.
+                return statusReads() == 1
+                    ? (403, Self.error("permission_denied", "Work mail can no longer be read."))
+                    : (200, self.archiveThreadJSON(account: "work", inInbox: false, status: "completed"))
+            }
+            let work = self.archiveThreadJSON(account: "work", inInbox: true, status: "pending")
+            return (200, "{\"items\":[\(statusReads() < 2 ? "\(work),\(personal)" : personal)],\"next_cursor\":null}")
+        }
+        defer { model.resetConnection() }
+        model.setActive(true)
+        // The first poll is refused a second after it began; the poll the list read then
+        // starts reads the status a second after that.
+        try await waitForEmailTestCondition { statusReads() == 2 && !model.isReadingList }
+        #expect(statusReads() == 2, "The archive the list still showed is followed by a poll of its own")
+        #expect(model.items.map(\.id) == [personalID])
     }
 
     /// A refusal waits only while a list read asked after it is out. When the owner changes
