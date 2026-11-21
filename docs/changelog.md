@@ -70,7 +70,9 @@ title: Changelog
 - An indented code example that begins with a `-- ` line also stays in the
   Email reading text, and one such example no longer keeps the message's real
   signature in view: a signature beside a code block, or one a mail program
-  indents under a list or in quoted history, is left out as before.
+  indents under a list or in quoted history, is left out as before. A line of
+  indented code under a long line keeps its own line, and is no longer left
+  out for repeating a paragraph above it.
 - The Email reader finds link destinations in one pass, so a message with a
   long run of unfinished links can no longer slow it down.
 - The Email reading text now applies both of two reader rules that were made

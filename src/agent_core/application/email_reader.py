@@ -137,6 +137,8 @@ def _unwrap(lines: list[str], coded: list[bool]) -> tuple[list[str], list[bool]]
     """Rejoin what a mailer wrapped; a line with room for the next word ended on purpose.
 
     `coded` says which lines are code and is returned for the lines that remain.
+    A line of code is the writer's own line: it joins no line above it and no
+    line below joins it, so each remaining line is code as a whole or not at all.
     """
     # Each line's pieces join once at the end: growing a string here is quadratic.
     result: list[list[str]] = []
@@ -151,7 +153,9 @@ def _unwrap(lines: list[str], coded: list[bool]) -> tuple[list[str], list[bool]]
                 result.append([prefix.rstrip()])
                 kept.append(False)
             elif (
-                not _starts_block(content)
+                not coded[index]
+                and not coded[index - 1]
+                and not _starts_block(content)
                 and not _RULE.fullmatch(before)
                 and not _UNDERLINE.fullmatch(before)
                 and not _URL_LINE.fullmatch(before)
@@ -636,6 +640,8 @@ def reading_body(
             previous_prefix, before = _quoted(result[-1]) if result else ("", "")
             if before and previous_prefix.count(">") == prefix.count(">") and "](" not in before:
                 result[-1] = prefix + _link(before + closing_emphasis, url)
+                # The line it labels now holds a line of code, so it is code.
+                kept[-1] = kept[-1] or coded[index]
                 flowing.add(len(result) - 1)
             else:
                 result.append(prefix + _link(_host(url), url) + closing_emphasis)

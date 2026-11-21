@@ -1269,6 +1269,30 @@ def test_code_block_lines_keep_their_place_through_every_reflow() -> None:
     assert reading_body(flush).count("Acme Rocket Company") == 1
 
 
+def test_a_code_line_stays_code_wherever_the_reader_joins_lines() -> None:
+    """Reflow joins no code line to its neighbour, and a line labelled by code is code."""
+    heading = "Copy this command exactly, including every argument shown in the example below:"
+    assert len(heading) > 70
+    # The example repeats a paragraph above it word for word, and it is code, so it stays.
+    body = f"Header\nDetails\n{heading} echo hello\n\nHeader\nDetails\n{heading}\n    echo hello"
+    result = reading_body(body)
+    assert result.count("echo hello") == 2
+    assert [line.rstrip("\\") for line in result.split("\n")][-2:] == [heading, "echo hello"]
+    # The same repeat with nothing indented is ordinary prose and is shown once.
+    assert reading_body(body.replace("    ", "")).count("echo hello") == 1
+    # A line under a long code line is not drawn up into it either.
+    command = "make-everything --with --many --flags --that --run --well --past --seventy --columns"
+    assert len(command) > 70
+    below = f"Run this:\n\n    {command}\nand tell me what it printed."
+    lines = [line.rstrip("\\") for line in reading_body(below).split("\n")]
+    assert command in lines and "and tell me what it printed." in lines
+    # A code line that is a lone address labels the line above it, as any lone
+    # address does, and the line it made is still code: its repeat of a block stays.
+    linked = "Alpha\nBeta\nGamma:\nhttps://example.com/x\n\nAlpha\nBeta\nGamma:\n"
+    assert reading_body(linked + "    https://example.com/x").count("example.com/x") == 2
+    assert reading_body(linked + "https://example.com/x").count("example.com/x") == 1
+
+
 @pytest.mark.parametrize(
     "body, kept",
     [

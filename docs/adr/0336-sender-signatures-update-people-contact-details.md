@@ -181,6 +181,11 @@ Four existing rules bound the design:
       does code under a delimiter. A signature after a code block is removed
       and read as before, and a fence elsewhere in a message no longer keeps
       a `-- ` signature in view: code is decided line by line.
+    - Where the reader joins lines, a line stays code as a whole or not at
+      all. Reflow joins no line of code to the line above it and no line to a
+      line of code, however long either is. A line of code that is a lone
+      address still labels the line above it, as any lone address does, and
+      the line it made is code.
     - *Limits.* A real signature that its writer sets four columns in under a
       blank line reads as an indented block, so it stays and gives nothing.
       An indented example of mail headers that begins `From:` reads as a
