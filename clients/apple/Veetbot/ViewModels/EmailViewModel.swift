@@ -341,25 +341,45 @@ public final class EmailViewModel: ObservableObject {
         loadedCounts?.settled[value.id] = holdings(read.held(value.id)).subtracting(holdings(value))
     }
 
-    /// How many times a refused conversation has made Email ask the list what still reads.
-    /// Only the latest of those requests decides whether the other accounts keep their mail.
-    private var refusalChecks = 0
-
     /// The account of each conversation a pending archive hides, noted when it was hidden. It
     /// outlasts the rows and numbers a refusal clears, so a second archive of a refused account
     /// is still known to be that account's.
     private var hiddenAccounts: [UUID: String] = [:]
 
+    /// The message of a refusal that is still waiting for the list. From a refusal until a list
+    /// read asked after it has answered, nothing has confirmed which accounts can still be read.
+    ///
+    /// A refused conversation follows one rule, whichever read was refused:
+    /// 1. Its account is whatever any part of the model knows of it (`knownAccount`).
+    /// 2. Everything of that account is retired at once: its rows, the kept lists and the
+    ///    numbers, its archives with their requests, polls and status reads, and the reader if
+    ///    it shows one of its conversations (`forgetDeniedAccount`).
+    /// 3. An answer for something retired changes nothing and reports nothing.
+    /// 4. The list is asked at once, which replaces every list read in flight: those were asked
+    ///    before the refusal and are never shown. The latest list read asked after it decides.
+    ///    When it answers, the other accounts keep their mail; when it fails or is refused,
+    ///    everything is cleared. A read that another list read replaced decides nothing. When
+    ///    none is left to answer, because none could start or the owner left Email, everything
+    ///    is cleared.
+    private var refusalAwaitingList: String?
+
+    /// The account of a conversation, from every place the model can know it: the note made
+    /// when it was hidden, its row, the reader, the numbers, its archive request, and the
+    /// read of it that is still out.
+    private func knownAccount(of id: UUID) -> String? {
+        if let noted = hiddenAccounts[id] { return noted }
+        let copy = inboxItems.first { $0.id == id } ?? (thread?.id == id ? thread : nil)
+            ?? loadedCounts?.held(id) ?? archiveRequests[id]?.thread
+        return copy?.accountID ?? (threadRead?.id == id ? threadRead?.account : nil)
+    }
+
     /// The server refused to show this conversation, so its account can no longer be read. What
-    /// is held from that account goes at once, and the numbers with it: they stay gone until a
-    /// list read asked for after the refusal answers, which is how the caller knows one has.
+    /// is held from that account goes at once.
     private func forgetDeniedAccount(holding id: UUID) {
-        let account = hiddenAccounts[id]
-            ?? (inboxItems.first { $0.id == id } ?? loadedCounts?.held(id) ?? archiveRequests[id]?.thread)?.accountID
+        let account = knownAccount(of: id)
         let gone = { (row: EmailThreadView) in row.id == id || row.accountID == account }
         if let selected = selectedThreadID {
-            let selectedAccount = thread?.id == selected ? thread?.accountID
-                : threadRead?.id == selected ? threadRead?.account : nil
+            let selectedAccount = knownAccount(of: selected)
             let refused = selected == id || (account != nil && selectedAccount == account)
             // The owner's unsaved words go only with a conversation known to be the refused
             // account's. Any other edit waits with its draft.
@@ -369,10 +389,12 @@ public final class EmailViewModel: ObservableObject {
             // for before the refusal; its request is retired with the selection.
             if refused || account == nil || selectedAccount == nil { clearSelection() }
         }
-        // Every archive known to be that account's is retired with this one, and so is any
-        // status read still out for it. None of them can come back as another refusal with
-        // nothing left to say whose it was.
-        for retired in Set(hiddenAccounts.filter { $0.value == account }.keys).union([id]) {
+        // Every archive known to be that account's is retired with this one: those hidden,
+        // those still waiting to be admitted, and any status read still out for one of them.
+        // None of them can come back as another refusal with nothing left to say whose it was.
+        let retiring = Set(hiddenAccounts.filter { $0.value == account }.keys)
+            .union(archiveRequests.filter { $0.value.thread.accountID == account }.keys).union([id])
+        for retired in retiring {
             archiveHiddenThreads.remove(retired)
             hiddenAccounts[retired] = nil
             archiveRequests[retired] = nil
@@ -389,6 +411,21 @@ public final class EmailViewModel: ObservableObject {
         EmailConversationCache.shared.removeAll()
         loadedCounts = nil
         inboxItems.removeAll(where: gone)
+    }
+
+    /// A list read asked after a refusal has answered, so what it returned may be read.
+    private func listAnsweredAfterRefusal() {
+        guard let message = refusalAwaitingList else { return }
+        refusalAwaitingList = nil
+        errorMessage = message
+    }
+
+    /// Nothing confirmed what may still be read after a refusal, so everything is cleared, as
+    /// after every refusal.
+    private func clearAfterRefusal() {
+        let message = refusalAwaitingList
+        resetConnection()
+        errorMessage = message
     }
 
     /// The numbers on screen were read before a conversation was hidden, without its status and
@@ -658,6 +695,11 @@ public final class EmailViewModel: ObservableObject {
     /// Starts foreground refreshes for a new visit or invalidates reads when Email is hidden.
     public func setActive(_ value: Bool) {
         guard active != value else { return }
+        // Leaving Email leaves no list read to answer a refusal that is still waiting for one.
+        if !value, refusalAwaitingList != nil {
+            clearAfterRefusal()
+            return
+        }
         active = value
         activation = UUID()
         isRefreshing = false
@@ -709,6 +751,7 @@ public final class EmailViewModel: ObservableObject {
         archiveSubmitting = []
         archiveHiddenThreads = []
         hiddenAccounts = [:]
+        refusalAwaitingList = nil
         archiveUnsupportedAccounts = []
         archiveUnavailableThreads = []
         archiveReadErrors = []
@@ -918,6 +961,7 @@ public final class EmailViewModel: ObservableObject {
                 // the server's mailbox snapshot has not changed.
                 for value in inboxItems { observeArchive(value) }
             }
+            listAnsweredAfterRefusal()
             isLoading = false
             isReadingList = false
             listFinished = true
@@ -927,6 +971,11 @@ public final class EmailViewModel: ObservableObject {
             recordAccountFreshness(loadedAccounts.items)
         } catch {
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
+            // The list read that was to say what still reads after a refusal has failed.
+            if refusalAwaitingList != nil {
+                clearAfterRefusal()
+                return
+            }
             if isUnavailable(error) {
                 invalidateMailSnapshots()
                 resetListQuery()
@@ -2068,6 +2117,9 @@ public final class EmailViewModel: ObservableObject {
                 ? try await api.reportEmailThreadSpam(request.thread, spam: request.archived, idempotencyKey: request.key)
                 : try await api.archiveEmailThread(request.thread, archived: request.archived, idempotencyKey: request.key)
             guard generation == connection else { return }
+            // The request was retired meanwhile: its account was refused, or its outcome is
+            // already known. Its answer is for nothing that is still followed.
+            guard archiveRequests[thread.id]?.key == request.key else { return }
             archiveRequests[thread.id]?.operationID = operation.operationID
             let pending = EmailArchiveOperation(operationID: operation.operationID, runID: operation.runID,
                 targetArchived: request.archived, targetSpam: request.spam ? true : nil, status: "pending", error: nil)
@@ -2082,6 +2134,7 @@ public final class EmailViewModel: ObservableObject {
             await checkArchiveStatus(thread.id)
         } catch {
             guard generation == connection, !(error is CancellationError), !Task.isCancelled else { return }
+            guard archiveRequests[thread.id]?.key == request.key else { return }
             if isUnavailable(error), request.spam {
                 // A missing spam route means this server or account cannot report; never archive instead.
                 spamUnsupportedAccounts.insert(thread.accountID)
@@ -2153,21 +2206,15 @@ public final class EmailViewModel: ObservableObject {
                 // One refused conversation does not say that all of Email was revoked. Its
                 // account's mail goes at once, and the list is asked what still reads.
                 forgetDeniedAccount(holding: threadID)
-                refusalChecks += 1
-                let check = refusalChecks
+                refusalAwaitingList = error.localizedDescription
+                let unasked = listRequest
                 await reload(preserveOrder: true, activation: foreground)
-                // A list that was refused as well has cleared everything by itself.
+                // A list read that failed or was refused has cleared everything by itself.
                 guard generation == connection else { return nil }
                 archiveTasks[threadID]?.cancel()
                 archiveTasks[threadID] = nil
-                // A later refusal asked the list again and replaced this request. It decides.
-                guard check == refusalChecks else { return nil }
-                // Other accounts keep their mail only once a list read asked for after the
-                // refusal has answered, which is the only thing that brings the numbers back.
-                // Unanswered for any reason, nothing confirms what may still be read, so
-                // everything is cleared, as after every refusal.
-                if loadedCounts == nil { resetConnection() }
-                errorMessage = error.localizedDescription
+                // The list read could not even start, and no other has taken its place.
+                if refusalAwaitingList != nil, listRequest == unasked { clearAfterRefusal() }
                 return nil
             }
             archiveReadErrors.insert(threadID)
