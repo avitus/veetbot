@@ -124,7 +124,7 @@ single-action owner consent under ADR-0095. Remove the row immediately while
 the archive request and durable operation finish asynchronously. Normal progress
 and successful completion are silent; other rows remain actionable. Collection
 counts and list totals stay visible meanwhile, each reduced by the hidden
-conversation it counted as it stood for that read (its status is read with each read of the counts, and the counts again, at most twice, when it changed in between), and return to the confirmed value if the row is
+conversation it counted as it stood for that read (its status is read with each read of the counts; if it changed in between, a count is off by one until the next refresh), and return to the confirmed value if the row is
 restored. Keep the
 last confirmed mailbox state separate from this optimistic presentation, retain
 draft edits, and restore the row with an actionable error if admission, status
@@ -143,33 +143,37 @@ unanswered request remains.
 
 **What the counts guarantee while an archive is pending.** The five sidebar
 counts and the total of the list on screen are lowered by what the server's
-numbers held of each hidden conversation. Other mail is totalled as everything
-not Important and a search of all mail as everything that matches; the other
-lists are totalled as they are counted. Numbers are shown only with what the
-same read says of each hidden conversation: its row in the response that
-carried the numbers, or its own status read after them. When that status
-disagrees with what the client held before asking, or another conversation was
-hidden meanwhile, the list is read again, at most twice. A list kept for quick
-return comes back with the membership its numbers had. Once Gmail confirms, the
-conversation leaves the lists that no longer hold it before its hide is lifted,
-and the numbers stay lowered until the next read; Other mail and search still
-list archived mail, so there the row comes back.
+numbers held of each hidden conversation, each count by the server's own rule
+for it. Other mail is totalled as everything not Important and a search of all
+mail as everything that matches; the other lists are totalled as they are
+counted. A conversation comes off each number once. Numbers are shown with
+what the same read says of each hidden conversation: its row in the response
+that carried the numbers, or its own status read after them. When an archive
+starts and the numbers on screen hold nothing for that conversation (an
+archive from the reader while its row is not in the list shown, a row from an
+earlier page, or an archive begun on another device), the client lowers the
+numbers at once by the copy it has in hand and asks for the list again. That
+read replaces the provisional copy with the conversation's row or its status;
+if the read fails or is replaced, the provisional copy stands until the next
+refresh. A list kept for quick return comes back with the membership its
+numbers had. Once Gmail confirms, the conversation leaves the lists that no
+longer hold it before its hide is lifted, and the numbers stay lowered until
+the next read; Other mail and search still list archived mail, so there the
+row comes back.
 
-The client cannot guarantee exact numbers, for two reasons it cannot remove.
-The numbers and a conversation's status come from separate requests: a
-conversation that changes and changes back between two reads with the numbers
-taken in between, or that is still changing after the second repeat, is counted
-as last read, so a number can be off by one per hidden conversation until the
-next refresh. And the client decides which numbers hold a conversation by its
-own copy of the server's rules (the Important and Inbox thresholds, Needs you,
+These numbers are eventually consistent, by the owner's decision of
+2026-11-21. The numbers and a conversation's status come from separate
+requests, so a conversation that changes between the two, or is hidden while a
+refresh is reading statuses, is counted as last read and is right again at the
+next refresh. The client decides which numbers hold a conversation by its own
+copy of the server's rules (the Important and Inbox thresholds, Needs you,
 Handled, Suspected spam, Other mail, the account filter and the search match),
 so a server rule that changes first makes the adjustment wrong for as long as
-an archive is pending. Removing either would need the server: a list response
-that says, with its numbers, which of them hold each conversation that has a
-pending archive. The owner decided on 2026-11-21 that this is not needed:
-these numbers are eventually consistent. They may be off by one per hidden
-conversation for a moment and are right again at the next refresh, and the
-client adds no further machinery to make them exact in between.
+an archive is pending. A number may therefore be off by one per hidden
+conversation for a moment. Making it exact would need a list response that
+says, with its numbers, which of them hold each conversation that has a
+pending archive; that is not planned, and the client adds no further machinery
+to make the numbers exact in between.
 
 Legacy clients' **Mark handled** command remains a local, reversible dismissal
 of that source revision. It does not archive Gmail and is not evidence that a

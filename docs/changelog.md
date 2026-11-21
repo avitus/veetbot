@@ -80,6 +80,17 @@ title: Changelog
   be refreshed right afterwards. If one account can no longer be read while an
   archive in it is pending, that account's mail is removed and your other
   accounts' mail stays once the list has confirmed they can still be read.
+- Email on Mac, iPad and iPhone: if an account can no longer be read while one
+  of its conversations is still opening, that conversation is no longer shown
+  when it arrives. After signing out or switching connection, requests still
+  in flight for the old connection stop and their errors are not shown on the
+  new one. A refresh that learns Gmail confirmed an archive shows the mail it
+  brought even if the next refresh fails. The sidebar counts follow the
+  server's rule for mail that is also in Spam, and a retried archive no longer
+  lowers a count twice. A count can be one off for a moment and is right at
+  the next refresh.
+- An importance judgment on a person or topic re-rates its own thread a second
+  time even when the pass over that person's other threads fails part-way.
 
 ## 2026-11-20 — A recorded run belongs to the question content it tested (ADR-0338, ADR-0339)
 
