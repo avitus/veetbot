@@ -59,6 +59,15 @@ title: Changelog
   list of names under a heading as a signature. People places a signature read
   out of order between the ones already recorded, so only one title holds at
   a time.
+- The sender's name inside a list of names (under a colon, a `Cc:` style
+  label, a bold line or a heading, or as a bulleted entry) is no longer read
+  as a signature, so the names stay in the Email reading text and People no
+  longer stores the next entry as the sender's title. Where nothing ends such
+  a list, a signature below it stays in the reading text.
+- The Email reading text now applies both of two reader rules that were made
+  separately: a plain paragraph the HTML version lacks keeps its place below
+  the note it followed, and a paragraph is judged line by line, so quoted
+  history is not repeated for a line shown once.
 - Email on Mac, iPad and iPhone: archiving a conversation and then opening
   another collection, account or page no longer puts it back into the sidebar
   counts while Gmail is still confirming the archive. Discarding a reply
