@@ -1270,9 +1270,11 @@ final class ConversationNavigationUITests: XCTestCase {
         #if os(iOS)
         activate(app.buttons["email.keyboard-done"])
         #endif
+        // The fixture holds the save that parks the send for eight seconds, so the composer is
+        // closed around it whether autosave or this press asked for it.
         activate(app.buttons["email.save-close"])
         let undo = app.buttons["email.send-undo"]
-        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertTrue(undo.waitForExistence(timeout: 20))
         XCTAssertEqual(undo.label, "Undo")
         activate(undo)
         XCTAssertTrue(editor.waitForExistence(timeout: 5))

@@ -270,6 +270,8 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var emailStatus = "ready"
     /// Run reads since a one-press send was parked; the third reports it sent.
     private static var emailSendReads = 0
+    /// How long the save that parks a send (`--ui-testing-email-send-on-save`) stays unanswered.
+    private static let emailSendOnSaveHold: TimeInterval = 8
     private static var learningPaused = false
     private static var callContentErased = false
     private static var emailHandled = false
@@ -1414,7 +1416,14 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             // long XCTest takes to query accessibility. Teardown cancels it.
             return
         }
-        if slowChat && (isSubmission || isRunStream) {
+        let parksSend = ProcessInfo.processInfo.arguments.contains("--ui-testing-email-send-on-save")
+            && request.httpMethod == "PUT" && url.path == "/v1/email/drafts/\(Self.emailDraftID)"
+        if parksSend {
+            // Autosave asks for this save 0.7 seconds after the last key, sooner than a journey
+            // can dismiss the keyboard and press Close. Holding the answer lets the composer be
+            // closed around the save, whichever of the two asked for it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.emailSendOnSaveHold, execute: deliver)
+        } else if slowChat && (isSubmission || isRunStream) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: deliver)
         } else {
             deliver.perform()
@@ -1608,9 +1617,11 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
     private static var emailDraftJSON: String {
         let (body, revision, status, composition) = emailLock.withLock { (emailBody, emailRevision, emailStatus, emailComposition) }
         let escapedBody = String(data: try! JSONEncoder().encode(body), encoding: .utf8)!
-        // A parked send carries its undo window so the composer shows Undo (ADR-0279).
+        // A parked send carries its undo window so the composer shows Undo (ADR-0279). The
+        // save that parks one is answered late, so its window is counted from that answer.
+        let held = ProcessInfo.processInfo.arguments.contains("--ui-testing-email-send-on-save") ? emailSendOnSaveHold : 0
         let undoUntil = status == "sending"
-            ? "\"\(ISO8601DateFormatter().string(from: Date().addingTimeInterval(10)))\"" : "null"
+            ? "\"\(ISO8601DateFormatter().string(from: Date().addingTimeInterval(10 + held)))\"" : "null"
         return """
             {"composition":"\(composition)","id":"\(emailDraftID)","thread_id":"\(emailThreadID)","account_id":"work","revision":\(revision),"source_revision":1,"provider_thread_id":"provider-thread","send_tool_name":"mcp.gmail_work_send.send_message","to":["alex@example.test"],"cc":[],"bcc":[],"subject":"Re: Board agenda","body":\(escapedBody),"status":"\(status)","stale":false,"send_undo_until":\(undoUntil),"run_id":"\(emailRunID)","approval_id":"\(emailApprovalID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","updated_at":"2026-09-11T00:00:00Z"}
             """

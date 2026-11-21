@@ -1265,6 +1265,8 @@ private struct EmailThreadScreen: View {
     @State private var showingEnvelope = false
     @State private var composerClosed = false
     @State private var composing = false
+    /// Reply or Draft with Veetbot has just opened the composer; see the keyboard observer.
+    @State private var revealsReplyWithKeyboard = false
     @State private var undoWindowShownAt = Date.now
     @State private var previewDraftFile: EmailDraftAttachment?
     @State private var peopleLookup: PeopleLookup?
@@ -1341,6 +1343,7 @@ private struct EmailThreadScreen: View {
                                         composing = true
                                         composerClosed = false
                                         withAnimation(replyScrollAnimation) { proxy.scrollTo("reply", anchor: .top) }
+                                        revealsReplyWithKeyboard = true
                                         focusedField = .body
                                     }
                                 } label: {
@@ -1358,6 +1361,7 @@ private struct EmailThreadScreen: View {
                                         composing = true
                                         composerClosed = false
                                         withAnimation(replyScrollAnimation) { proxy.scrollTo("reply", anchor: .top) }
+                                        revealsReplyWithKeyboard = true
                                         focusedField = .body
                                     }
                                 } label: {
@@ -1381,6 +1385,17 @@ private struct EmailThreadScreen: View {
                             .overlay(alignment: .top) { HairlineDivider() }
                         }
                     }
+                    #if os(iOS)
+                    // Opening a reply scrolls it to the top, but on an iPhone the short composing
+                    // page cannot move that far until the keyboard has taken its share of the
+                    // screen, which left one line of the reply showing above the keys. The
+                    // scroll is finished once the keyboard is up.
+                    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                        guard revealsReplyWithKeyboard, focusedField == .body else { return }
+                        revealsReplyWithKeyboard = false
+                        withAnimation(replyScrollAnimation) { proxy.scrollTo("reply", anchor: .top) }
+                    }
+                    #endif
                 }
             } else {
                 EmailEmptyState(
@@ -1402,7 +1417,9 @@ private struct EmailThreadScreen: View {
         .onChange(of: model.draft?.status) {
             if model.draft?.status == "sent" || model.draft?.status == "discarded" { composing = false }
         }
-        .onChange(of: focusedField) { if focusedField == .body { composing = true } }
+        .onChange(of: focusedField) {
+            if focusedField == .body { composing = true } else { revealsReplyWithKeyboard = false }
+        }
         .confirmationDialog("Discard this reply?", isPresented: $showingDiscard, titleVisibility: .visible) {
             Button("Discard draft", role: .destructive) { Task { await model.discardDraft() } }
             Button("Cancel", role: .cancel) {}
