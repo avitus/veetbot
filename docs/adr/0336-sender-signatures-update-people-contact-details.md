@@ -119,6 +119,21 @@ Four existing rules bound the design:
    - A detail the owner ended stays ended. A later signature repeating it
      adds nothing, and an older signature read late does not move the end the
      owner set.
+   - Erasing a message takes back the ends it set (added 2026-11-21). A copy
+     that message had ended is current again, or ends at the earliest later
+     remaining signature that omits it. The record is then what the remaining
+     mail alone would give, whatever order mail was read and erased in. This
+     holds for every erasure that removes a message: excluding it, erasing its
+     mailbox data, erasing its session, and People forget.
+     - An end the owner set is never moved, on the copy they ended or on
+       another copy of that detail their correction ended with it.
+     - A copy records when it ended, not which message ended it. Both People
+       stores therefore find those ends by the erased message's sent time and
+       recompute each from the remaining copies, by the one rule placement
+       uses.
+     - The erased end leaves every stored revision of the copy, so a
+       historical read cannot recover it. A copy whose current end changed
+       takes a new revision.
 6. **Extraction is deterministic and no model is called.**
    - The block is found by the reader's third sign: the sender's name line
      and the short lines under it. One function now serves both the reader
@@ -201,14 +216,23 @@ Four existing rules bound the design:
   see the omitted number end and return.
 - People already in the directory gain details from new mail. Retained mail
   from the last ninety days is read again by `agent people repair-directory`.
-- Erasing a message removes its copies but does not replay the sequence. An
-  end that message had set on an earlier copy stays as recorded, so an earlier
-  title can read as ended with no current one, until the sender's next signed
-  message. Recomputing those ends at erasure means rewriting surviving records
-  in both People stores and is left as follow-up work.
+- Erasure now rewrites a surviving record, which it did not before: a
+  signature copy that an erased message had ended. It removes exactly what it
+  removed before and reports the same count. Until 2026-11-21 such an end
+  stayed as recorded, so an earlier title could read as ended with no current
+  one until the sender's next signed message.
+- Two limits remain in what erasure takes back:
+  - A copy the owner ended is kept by their correction, as everywhere in
+    People, and outlives the mail that wrote it. It still marks that message's
+    place in the sequence, so an earlier copy that message ended stays ended
+    there.
+  - A retained message that left no copy is not part of the sequence. If it
+    was sent at the same instant as an erased message, an end that only it
+    supports is recomputed as the erased one's is.
 - `memory/people_correspondence.py` changes, so the email People
   implementation digest changes and an open People import job must be started
-  again.
+  again. The erasure follow-up changes `memory/people_signatures.py` and
+  `domain/email_signature.py`, which that digest also covers.
 - The Apple client shows the rows without a change, as "From context, email
   signature". A dedicated label is follow-up work.
 - Rolling back to a build that predates this decision leaves the rows in

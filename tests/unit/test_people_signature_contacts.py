@@ -357,13 +357,27 @@ _HISTORIES: dict[str, list[tuple[int, str]]] = {
 }
 
 
+async def _erase(factory: Any, service: Any, message_id: str, entry: str = "mailbox") -> None:
+    """Remove one message the way the product does: excluded, or erased with its mailbox data."""
+    if entry == "excluded":
+        await service.exclude_source("work", "t-mail", message_id)
+        return
+    async with factory() as uow:
+        await uow.session_deletions.erase_email_source(
+            principal(), "work", "t-mail", frozenset({message_id}), service._clock.now()
+        )
+
+
 async def _intervals(
-    history: list[tuple[int, str]], order: Iterable[int]
+    history: list[tuple[int, str]], order: Iterable[int], erase: tuple[int, int] | None = None
 ) -> dict[tuple[datetime, str, str], datetime | None]:
+    """The recorded intervals; `erase` is a message and how many are read before it goes."""
     factory, service = await _stack()
-    for index in order:
+    for count, index in enumerate(order, start=1):
         days_ago, body = history[index]
         await _receive(factory, service, f"m-{index}", days_ago=days_ago, body=body)
+        if erase is not None and erase[1] == count:
+            await _erase(factory, service, f"m-{erase[0]}")
     return {
         (row.valid_from, row.identifier_kind, row.value): row.valid_to
         for row in await _details(factory)
@@ -376,6 +390,87 @@ async def test_signatures_hold_the_same_intervals_in_any_processing_order(name: 
     chronological = await _intervals(history, range(len(history)))
     for order in permutations(range(len(history))):
         assert await _intervals(history, order) == chronological, order
+
+
+@pytest.mark.parametrize("name", list(_HISTORIES))
+async def test_an_erased_signature_leaves_what_the_remaining_mail_alone_gives(name: str) -> None:
+    """Read in any order and erased at any point after it was read."""
+    history = _HISTORIES[name]
+    for gone in range(len(history)):
+        never_read = await _intervals(history, [i for i in range(len(history)) if i != gone])
+        for order in permutations(range(len(history))):
+            for read in range(order.index(gone) + 1, len(history) + 1):
+                assert await _intervals(history, order, (gone, read)) == never_read, (
+                    gone,
+                    order,
+                    read,
+                )
+
+
+@pytest.mark.parametrize("entry", ["excluded", "mailbox"])
+async def test_erasing_the_newest_signature_makes_the_earlier_title_current_again(
+    entry: str,
+) -> None:
+    """Analyst, then Director: with the Director message gone, Analyst is the title again."""
+    factory, service = await _stack()
+    old = await _receive(
+        factory, service, "m-old", days_ago=6, body=_signed(title="Analyst, Scale")
+    )
+    await _receive(factory, service, "m-new", days_ago=2, body=_signed(title="Director, Scale"))
+
+    await _erase(factory, service, "m-new", entry)
+
+    assert {
+        (row.identifier_kind, row.value): (row.valid_from, row.valid_to)
+        for row in await _details(factory)
+    } == {
+        ("phone", "650.378.6038"): (old.sent_at, None),
+        ("role", "Analyst, Scale"): (old.sent_at, None),
+    }
+    rory = (await _people(factory))["Rory O'Driscoll"]
+    owner = principal().model_copy(update={"scopes": {"people.read"}})
+    profile = await PublicPeopleService(factory, service._clock).get(
+        owner, rory.id, ceiling=Sensitivity.SENSITIVE
+    )
+    assert [
+        (alias.value, alias.valid_to)
+        for alias in profile.aliases
+        if alias.identifier_kind == "role"
+    ] == [("Analyst, Scale", None)]
+
+
+async def test_erasing_a_signature_leaves_the_owners_ending_alone() -> None:
+    """The owner ended a number at the very moment a later message was sent."""
+    factory, service = await _stack()
+    await _receive(factory, service, "m-first", days_ago=5, body=_signed(phone="650.555.0100"))
+    rory = (await _people(factory))["Rory O'Driscoll"]
+    [number] = [row for row in await _details(factory) if row.identifier_kind == "phone"]
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    await PublicPeopleService(factory, service._clock).update(
+        owner,
+        rory.id,
+        UpdatePerson(
+            session_id=session().id,
+            expected_revision=rory.revision,
+            alias=EndPersonAlias(
+                operation="end",
+                identifier_id=number.id,
+                expected_revision=number.revision,
+                valid_to=(NOW - timedelta(days=2)).replace(microsecond=0),
+            ),
+        ),
+        key="end-signature-number",
+        ceiling=Sensitivity.SENSITIVE,
+    )
+    [ended] = [row for row in await _details(factory) if row.identifier_kind == "phone"]
+    later = await _receive(
+        factory, service, "m-later", days_ago=2, body=_signed(phone="650.555.0142")
+    )
+    assert ended.valid_to == later.sent_at
+
+    await _erase(factory, service, "m-later")
+
+    assert [row for row in await _details(factory) if row.identifier_kind == "phone"] == [ended]
 
 
 async def test_a_late_older_signature_leaves_the_owners_ending_alone() -> None:

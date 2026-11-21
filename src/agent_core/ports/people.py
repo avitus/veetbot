@@ -118,6 +118,11 @@ class PeopleStore(Protocol):
         By default every historical revision's links count as dependence. With
         ``preserve_independent`` only current heads do, and survivors lose the
         stale revisions that still named an erased record (ADR-0121 repair).
+
+        Every erasure, fenced or not, also takes back the end an erased message
+        had set on a surviving signature copy, in each stored revision; a copy
+        whose current end changes takes a new revision (ADR-0336). The count
+        is the records erased, never a survivor corrected this way.
         """
         ...
 

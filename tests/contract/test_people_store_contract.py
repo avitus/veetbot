@@ -8,6 +8,7 @@ import pytest
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.persistence.people import InMemoryPeopleStore
+from agent_core.domain.email_signature import SIGNATURE_CONTEXT, SIGNATURE_NAMESPACE
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.people import (
@@ -1337,3 +1338,219 @@ async def people_generated_summary_contract(store: PeopleStore) -> None:
 
 async def test_memory_people_generated_summary_contract() -> None:
     await people_generated_summary_contract(InMemoryPeopleStore(FixedClock(NOW)))
+
+
+async def people_erased_signature_contract(store: PeopleStore) -> None:
+    """An erased message takes back the end it set on another signature copy (ADR-0336).
+
+    The rows are written as placement writes them: one copy per message and
+    detail, an earlier copy ended at the sent time of the signature that omits it.
+    """
+    owner = principal()
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    restricted = Sensitivity.RESTRICTED
+
+    async def signer() -> tuple[Person, str]:
+        person = Person(id=uuid4(), display_name="Signer", **common)
+        await store.put(person, expected_revision=0)
+        return person, f"thread-{uuid4().hex}"
+
+    async def message(thread: str, days_ago: int) -> PeopleSource:
+        source = PeopleSource(
+            id=uuid4(),
+            session_id=uuid4(),
+            event_sequence=1,
+            source_kind="email",
+            account_id="work",
+            thread_id=thread,
+            message_id=uuid4().hex,
+            source_revision="email@1",
+            evidence_at=NOW - timedelta(days=days_ago),
+            **common,
+        )
+        await store.put(source, expected_revision=0)
+        return source
+
+    async def states(
+        person: Person, source: PeopleSource, kind: Literal["role", "phone"], value: str
+    ) -> PersonIdentifier:
+        copy = PersonIdentifier(
+            id=uuid4(),
+            person_id=person.id,
+            identifier_kind=kind,
+            namespace=SIGNATURE_NAMESPACE,
+            value=value,
+            context=SIGNATURE_CONTEXT,
+            verification="contextual",
+            valid_from=source.evidence_at,
+            support_ids=[source.id],
+            **common,
+        )
+        await store.put(copy, expected_revision=0)
+        return copy
+
+    async def ends(
+        copy: PersonIdentifier, source: PeopleSource, **changes: object
+    ) -> PersonIdentifier:
+        ended = copy.model_copy(
+            update={
+                "valid_to": source.evidence_at,
+                "revision": copy.revision + 1,
+                "updated_at": copy.updated_at + timedelta(seconds=1),
+                **changes,
+            }
+        )
+        await store.put(ended, expected_revision=copy.revision)
+        return ended
+
+    async def held(copy: PersonIdentifier, revision: int | None = None) -> PersonIdentifier | None:
+        row = await store.get(owner, copy.id, ceiling=restricted, at_revision=revision)
+        assert row is None or isinstance(row, PersonIdentifier)
+        return row
+
+    async def erase(source: PeopleSource) -> int:
+        assert source.thread_id is not None and source.message_id is not None
+        return await store.erase_email_source(
+            owner, "work", source.thread_id, frozenset({source.message_id})
+        )
+
+    # Analyst, then Director: whichever erasure takes the Director message, the
+    # earlier title is current again and no stored revision keeps the lost end.
+    for entry in ("email", "session", "records", "fence"):
+        person, thread = await signer()
+        first, second = await message(thread, 6), await message(thread, 2)
+        analyst = await ends(await states(person, first, "role", "Analyst"), second)
+        number = await states(person, first, "phone", "650.555.0100")
+        director = await states(person, second, "role", "Director")
+        if entry == "email":
+            # The count is still the message and its copy; a repaired survivor is not erased.
+            assert await erase(second) == 2
+        elif entry == "session":
+            assert await store.erase_session(owner, second.session_id) == 2
+        elif entry == "records":
+            assert await store.erase(owner, [second.id]) == 2
+        else:
+            assert await store.fence_for_erasure(owner, [second.id]) == 2
+        for cleaned in (False, True):
+            restored = await held(analyst)
+            assert restored is not None and restored.valid_to is None, entry
+            # The change is a new revision, so a reader holding the old one sees it.
+            assert restored.updated_at > analyst.updated_at
+            assert restored == analyst.model_copy(
+                update={"valid_to": None, "revision": 3, "updated_at": restored.updated_at}
+            )
+            for revision in (1, 2):
+                stored = await held(analyst, revision)
+                assert stored is not None and stored.valid_to is None, (entry, revision)
+            earlier = await store.get(
+                owner, analyst.id, ceiling=restricted, known_at=analyst.updated_at
+            )
+            assert isinstance(earlier, PersonIdentifier) and earlier.valid_to is None
+            assert await held(director) is None
+            # That message stated no number, so the number it never ended is as it was.
+            assert await held(number) == number
+            if entry != "fence" or cleaned:
+                break
+            # People forget hides at once and removes the payloads afterwards.
+            while await store.purge_erased(owner):
+                pass
+
+    # An end the owner set stays, even at the erased message's own sent time, and
+    # so does the end their correction gave another message's copy of that title.
+    person, thread = await signer()
+    older, first, second = [await message(thread, days) for days in (8, 6, 2)]
+    correction = PeopleSource(
+        id=uuid4(),
+        session_id=uuid4(),
+        event_sequence=1,
+        source_kind="owner",
+        source_revision="owner@1",
+        evidence_at=NOW,
+        **common,
+    )
+    await store.put(correction, expected_revision=0)
+    analyst = await ends(
+        await states(person, first, "role", "Analyst"), second, support_ids=[correction.id]
+    )
+    repeated = await ends(await states(person, older, "role", "analyst"), second)
+    await states(person, second, "role", "Director")
+    assert await erase(second) == 2
+    assert await held(analyst) == analyst
+    assert await held(repeated) == repeated
+
+    # The middle of three: the first title now ends where the third begins.
+    person, thread = await signer()
+    first, second, third = [await message(thread, days) for days in (6, 4, 2)]
+    analyst = await ends(await states(person, first, "role", "Analyst"), second)
+    partner = await ends(await states(person, second, "role", "Partner"), third)
+    director = await states(person, third, "role", "Director")
+    assert await erase(second) == 2
+    restored = await held(analyst)
+    assert restored is not None and restored.valid_to == third.evidence_at
+    assert await held(partner) is None
+    assert await held(director) == director
+
+    # Read out of order: Director ended Analyst before the Partner message sent
+    # between them was read. Analyst's current end is Partner's and stays; the
+    # erased end leaves the stored history, with no new revision.
+    person, thread = await signer()
+    first, second, third = [await message(thread, days) for days in (6, 4, 2)]
+    analyst = await ends(await states(person, first, "role", "Analyst"), third)
+    await states(person, third, "role", "Director")
+    analyst = await ends(analyst, second)
+    partner = await ends(await states(person, second, "role", "Partner"), third)
+    assert await erase(third) == 2
+    assert await held(analyst) == analyst
+    stored = await held(analyst, 2)
+    assert stored is not None and stored.valid_to == second.evidence_at
+    restored = await held(partner)
+    assert restored is not None and restored.valid_to is None
+
+    # A title that returns: the later signature states it, so nothing ends it.
+    person, thread = await signer()
+    first, second, third = [await message(thread, days) for days in (6, 4, 2)]
+    analyst = await ends(await states(person, first, "role", "Analyst"), second)
+    await ends(await states(person, second, "role", "Partner"), third)
+    again = await states(person, third, "role", "ANALYST")
+    assert await erase(second) == 2
+    restored = await held(analyst)
+    assert restored is not None and restored.valid_to is None
+    assert await held(again) == again
+
+    # Numbers follow the same rule, compared by their digits: a later signature
+    # that still omits the old number ends it, now at its own sent time.
+    person, thread = await signer()
+    first, second, third = [await message(thread, days) for days in (6, 4, 2)]
+    old = await ends(await states(person, first, "phone", "650.555.0100"), second)
+    await states(person, second, "phone", "650.555.0142")
+    kept = await states(person, third, "phone", "(650) 555-0142")
+    assert await erase(second) == 2
+    restored = await held(old)
+    assert restored is not None and restored.valid_to == third.evidence_at
+    assert await held(kept) == kept
+
+    # A message can end a copy and leave none of its own, when all it states is
+    # a detail the owner had ended. Its end goes with it too. Someone else whose
+    # own signature was sent at that same instant keeps the end it set.
+    person, thread = await signer()
+    first, second = await message(thread, 6), await message(thread, 2)
+    analyst = await ends(await states(person, first, "role", "Analyst"), second)
+    other, elsewhere = await signer()
+    theirs, later = await message(elsewhere, 6), await message(elsewhere, 2)
+    associate = await ends(await states(other, theirs, "role", "Associate"), later)
+    principal_title = await states(other, later, "role", "Principal")
+    assert later.evidence_at == second.evidence_at
+    assert await erase(second) == 1
+    restored = await held(analyst)
+    assert restored is not None and restored.valid_to is None
+    assert await held(associate) == associate
+    assert await held(principal_title) == principal_title
+
+
+async def test_memory_people_erased_signature_contract() -> None:
+    await people_erased_signature_contract(InMemoryPeopleStore(FixedClock(NOW)))

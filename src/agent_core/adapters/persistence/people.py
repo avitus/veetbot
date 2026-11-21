@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import AsyncIterator, Callable, MutableMapping, Sequence
+from collections.abc import AsyncIterator, Callable, Collection, MutableMapping, Sequence
+from collections.abc import Set as AbstractSet
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -53,6 +54,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 from agent_core.domain.agents import Principal
 from agent_core.domain.dreaming import ForwardDreamingBoundary
 from agent_core.domain.dreaming_recovery import LegacyAttributionManifest, LegacyRecoveryResult
+from agent_core.domain.email_signature import SIGNATURE_NAMESPACE, signature_end
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import (
     LIVE_MEMORY_STATUSES,
@@ -138,6 +140,44 @@ def _copy_rebased(
             "updated_at": max(now, record.updated_at + timedelta(microseconds=1)),
         }
     )
+
+
+def _signature_ends(
+    copies: Sequence[PersonIdentifier], erased: AbstractSet[datetime], owner_ended: Collection[UUID]
+) -> dict[UUID, tuple[AbstractSet[datetime], datetime | None]]:
+    """What erased mail leaves to correct on the surviving signature copies (ADR-0336).
+
+    A copy records when it ended, not which message ended it, so the sent times
+    of the erased mail are the key. For each copy this gives the stored ends one
+    of those messages may have set and the end that replaces them: the one the
+    remaining signatures give. An end the owner set is never among them, on the
+    copy they ended or on another copy of that detail their correction ended.
+    """
+    groups: dict[tuple[UUID | None, str], list[tuple[str, PersonIdentifier]]] = {}
+    for copy in copies:
+        groups.setdefault((copy.person_id, copy.identifier_kind), []).append((_name(copy), copy))
+    ends: dict[UUID, tuple[AbstractSet[datetime], datetime | None]] = {}
+    for rows in groups.values():
+        signatures: dict[datetime, set[str]] = {}
+        owner_set: dict[str, set[datetime]] = {}
+        for key, copy in rows:
+            signatures.setdefault(copy.valid_from, set()).add(key)
+            if copy.id in owner_ended and copy.valid_to is not None:
+                owner_set.setdefault(key, set()).add(copy.valid_to)
+        for key, copy in rows:
+            stale = erased - owner_set.get(key, set())
+            if stale and copy.id not in owner_ended:
+                ends[copy.id] = stale, signature_end(copy.valid_from, key, signatures)
+    return ends
+
+
+def _signature_restored(
+    row: PeopleRecord, stale: AbstractSet[datetime], end: datetime | None
+) -> PeopleRecord:
+    """This stored revision without an end that erased mail set."""
+    if isinstance(row, PersonIdentifier) and row.valid_to in stale and row.valid_to != end:
+        return row.model_copy(update={"valid_to": end})
+    return row
 
 
 class InMemoryPeopleStore:
@@ -906,6 +946,15 @@ class InMemoryPeopleStore:
             }
             beliefs, events = self._affected_attribution(owner, fresh)
             self._memory_index.attribution_changed(owner, beliefs, events)
+        owner_key = (principal.tenant_id, principal.principal_id)
+        # Read before the payloads go: when each erased message was sent.
+        mail_times = {
+            row.evidence_at
+            for record_id in doomed
+            if (*owner_key, record_id) not in self._erased
+            for row in self._records.get((*owner_key, record_id), [])[-1:]
+            if isinstance(row, PeopleSource) and row.source_kind == "email"
+        }
         count = 0
         for record_id in doomed:
             key = (principal.tenant_id, principal.principal_id, record_id)
@@ -926,9 +975,51 @@ class InMemoryPeopleStore:
                     self._records[key] = [
                         row for row in revisions if not dependencies(row) & doomed
                     ]
-        owner_key = (principal.tenant_id, principal.principal_id)
         self._positions[owner_key] = self._positions.get(owner_key, 0) + count
+        self._restore_signature_ends(principal, mail_times)
         return count
+
+    def _restore_signature_ends(self, principal: Principal, erased: set[datetime]) -> None:
+        """Take back the ends erased mail set on surviving signature copies (ADR-0336)."""
+        if not erased:
+            return
+        owner = (principal.tenant_id, principal.principal_id)
+        heads = {key: rows[-1] for key, rows in self._records.items() if key[:2] == owner and rows}
+        owner_sources = {
+            key[2]
+            for key, head in heads.items()
+            if isinstance(head, PeopleSource) and head.source_kind == "owner"
+        }
+        copies = [
+            head
+            for key, head in heads.items()
+            if key not in self._erased
+            and isinstance(head, PersonIdentifier)
+            and head.namespace == SIGNATURE_NAMESPACE
+        ]
+        ends = _signature_ends(
+            copies, erased, {copy.id for copy in copies if owner_sources & set(copy.support_ids)}
+        )
+        now = self._clock.now()
+        for copy_id, (stale, end) in ends.items():
+            key = (*owner, copy_id)
+            stored = self._records[key]
+            # Every stored revision, so a historical read cannot recover the end.
+            versions = [_signature_restored(row, stale, end) for row in stored]
+            if all(new is old for new, old in zip(versions, stored, strict=True)):
+                continue
+            if versions[-1] is not stored[-1]:
+                head = versions[-1]
+                versions.append(
+                    head.model_copy(
+                        update={
+                            "revision": head.revision + 1,
+                            "updated_at": max(now, head.updated_at + timedelta(microseconds=1)),
+                        }
+                    )
+                )
+                self._positions[owner] = self._positions.get(owner, 0) + 1
+            self._records[key] = versions
 
     def erase_session_locked(self, principal: Principal, session_id: UUID) -> int:
         ids = [
@@ -2128,6 +2219,8 @@ class PostgresPeopleStore:
             await advance_attribution_revisions(
                 self._session, principal, beliefs, events, self._clock.now()
             )
+            # Before the payloads go: they hold when each erased message was sent.
+            await self._restore_signature_ends(principal, ids)
             if fence_only:
                 return len(ids)
             if preserve_independent:
@@ -2162,6 +2255,117 @@ class PostgresPeopleStore:
                 )
             )
             return len(ids)
+
+    async def _restore_signature_ends(self, principal: Principal, ids: Sequence[UUID]) -> None:
+        """Take back the ends newly erased mail set on surviving signature copies (ADR-0336)."""
+        owned = (
+            PeopleRevisionRow.tenant_id == principal.tenant_id,
+            PeopleRevisionRow.principal_id == principal.principal_id,
+        )
+        moment = DateTime(timezone=True)
+        erased = set(
+            (
+                await self._session.scalars(
+                    select(cast(PeopleRevisionRow.payload["evidence_at"].astext, moment))
+                    .where(
+                        *owned,
+                        PeopleRevisionRow.entity_id
+                        == any_(bindparam(None, list(ids), type_=ARRAY(PGUUID(as_uuid=True)))),
+                        PeopleRevisionRow.kind == "source",
+                        PeopleRevisionRow.payload["source_kind"].astext == "email",
+                    )
+                    .distinct()
+                )
+            ).all()
+        )
+        if not erased:
+            return
+        # Stored revisions of the signature copies that are not themselves erased.
+        copies = (
+            select(PeopleRevisionRow)
+            .join(
+                PeopleHeadRow,
+                and_(
+                    PeopleHeadRow.tenant_id == PeopleRevisionRow.tenant_id,
+                    PeopleHeadRow.principal_id == PeopleRevisionRow.principal_id,
+                    PeopleHeadRow.id == PeopleRevisionRow.entity_id,
+                    ~PeopleHeadRow.erased,
+                ),
+            )
+            .where(
+                *owned,
+                PeopleRevisionRow.kind == "identifier",
+                PeopleRevisionRow.payload["namespace"].astext == SIGNATURE_NAMESPACE,
+            )
+        )
+        stale_rows = (
+            await self._session.scalars(
+                copies.where(
+                    cast(PeopleRevisionRow.payload["valid_to"].astext, moment).in_(erased)
+                ).order_by(PeopleRevisionRow.entity_id, PeopleRevisionRow.revision)
+            )
+        ).all()
+        if not stale_rows:
+            return
+        # The remaining signatures of each sender one of those ends belongs to.
+        current = copies.where(PeopleHeadRow.revision == PeopleRevisionRow.revision)
+        person = PeopleRevisionRow.payload["person_id"].astext
+        people = (
+            await self._session.scalars(
+                current.with_only_columns(person)
+                .where(PeopleRevisionRow.entity_id.in_({row.entity_id for row in stale_rows}))
+                .distinct()
+            )
+        ).all()
+        heads = [
+            value
+            for row in (await self._session.scalars(current.where(person.in_(people)))).all()
+            if isinstance(value := PEOPLE_RECORD.validate_python(row.payload), PersonIdentifier)
+        ]
+        owner_sources = set(
+            (
+                await self._session.scalars(
+                    select(PeopleRevisionRow.entity_id)
+                    .where(
+                        *owned,
+                        PeopleRevisionRow.entity_id.in_(
+                            {ref for copy in heads for ref in copy.support_ids}
+                        ),
+                        PeopleRevisionRow.kind == "source",
+                        PeopleRevisionRow.payload["source_kind"].astext == "owner",
+                    )
+                    .distinct()
+                )
+            ).all()
+        )
+        ends = _signature_ends(
+            heads, erased, {copy.id for copy in heads if owner_sources & set(copy.support_ids)}
+        )
+        # Every stored revision, so a historical read cannot recover the end.
+        for row in stale_rows:
+            if row.entity_id in ends:
+                stored = PEOPLE_RECORD.validate_python(row.payload)
+                restored = _signature_restored(stored, *ends[row.entity_id])
+                if restored is not stored:
+                    row.payload = restored.model_dump(mode="json")
+        await self._session.flush()
+        now = self._clock.now()
+        for copy in heads:
+            restored = _signature_restored(copy, *ends[copy.id]) if copy.id in ends else copy
+            # A copy hidden with its source cannot take a revision, and is not read.
+            if restored is copy or (
+                await self.get(principal, copy.id, ceiling=Sensitivity.RESTRICTED) is None
+            ):
+                continue
+            await self.put(
+                restored.model_copy(
+                    update={
+                        "revision": copy.revision + 1,
+                        "updated_at": max(now, copy.updated_at + timedelta(microseconds=1)),
+                    }
+                ),
+                expected_revision=copy.revision,
+            )
 
     async def _rebase_source_copies(self, principal: Principal, record_ids: Sequence[UUID]) -> None:
         roots = (
