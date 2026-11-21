@@ -45,6 +45,13 @@ title: Changelog
   new-mail check whose follow-up changed a memory keeps its audit trail. The
   merge of repeated facts checks each later copy by itself and records one
   event per thread.
+- The stored records, not a statement's words, now say which thread and
+  message formed a memory, so the merge and the restore of a memory your
+  feedback left past due cannot be misled by a sender's display name. Only
+  Important and Less important re-rate memories; feedback about replies does
+  not. A new-mail check follows up a pending re-rating for a conversation you
+  have archived, reading only the marked assessments to find it, and a
+  re-rating held by a pause is not counted as a failure.
 - A paged listing of a person's identifiers returns each one once; a later
   copy could reappear on another page.
 - The Email reading text keeps a postscript written under a `-- ` signature
@@ -67,6 +74,12 @@ title: Changelog
   stood when the list was read. If such a conversation changes while the
   counts are being read, the counts are read again so Needs you does not stay
   one too high.
+- Email on Mac, iPad and iPhone: the total of Other mail and of a search drops
+  by one when you archive a conversation there, like the other lists. An
+  archive Gmail has confirmed no longer reappears in the Inbox when mail cannot
+  be refreshed right afterwards. If one account can no longer be read while an
+  archive in it is pending, that account's mail is removed and your other
+  accounts' mail stays once the list has confirmed they can still be read.
 
 ## 2026-11-20 — A recorded run belongs to the question content it tested (ADR-0338, ADR-0339)
 

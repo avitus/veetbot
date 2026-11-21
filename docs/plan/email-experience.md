@@ -141,6 +141,33 @@ other labels, and importance feedback. New correspondence is assessed again.
 After a confirmed reply, the thread leaves Needs reply unless another
 unanswered request remains.
 
+**What the counts guarantee while an archive is pending.** The five sidebar
+counts and the total of the list on screen are lowered by what the server's
+numbers held of each hidden conversation. Other mail is totalled as everything
+not Important and a search of all mail as everything that matches; the other
+lists are totalled as they are counted. Numbers are shown only with what the
+same read says of each hidden conversation: its row in the response that
+carried the numbers, or its own status read after them. When that status
+disagrees with what the client held before asking, or another conversation was
+hidden meanwhile, the list is read again, at most twice. A list kept for quick
+return comes back with the membership its numbers had. Once Gmail confirms, the
+conversation leaves the lists that no longer hold it before its hide is lifted,
+and the numbers stay lowered until the next read; Other mail and search still
+list archived mail, so there the row comes back.
+
+The client cannot guarantee exact numbers, for two reasons it cannot remove.
+The numbers and a conversation's status come from separate requests: a
+conversation that changes and changes back between two reads with the numbers
+taken in between, or that is still changing after the second repeat, is counted
+as last read, so a number can be off by one per hidden conversation until the
+next refresh. And the client decides which numbers hold a conversation by its
+own copy of the server's rules (the Important and Inbox thresholds, Needs you,
+Handled, Suspected spam, Other mail, the account filter and the search match),
+so a server rule that changes first makes the adjustment wrong for as long as
+an archive is pending. The remedy is on the server and is follow-up work: the
+list response should say, with its numbers, which of them hold each
+conversation that has a pending archive.
+
 Legacy clients' **Mark handled** command remains a local, reversible dismissal
 of that source revision. It does not archive Gmail and is not evidence that a
 thread is archived. New clients must not silently substitute this command when
@@ -351,7 +378,7 @@ Native message and conversation parsing runs off the UI thread. Conversation
 parses use a nine-entry least-recently-used cache with exact source and owner
 matching; reset, exclusion and cancellation prevent stale publication. The
 first inbox page renders before independent account freshness finishes loading;
-late account errors remain visible and revoked access clears the cached state.
+late account errors remain visible and revoked access clears the cached state. A refused read of one conversation drops that account's mail at once; other accounts' mail stays only once a list read after the refusal has answered, and a refused or failed list read clears everything.
 Access bookkeeping reuses the source record read under the owner lock unless
 archive recovery has written a newer revision; retention timestamps remain exact.
 
