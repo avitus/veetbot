@@ -121,6 +121,9 @@ public final class EmailViewModel: ObservableObject {
     /// The owner's standing choices on the open thread. Importance and reply need are separate
     /// judgments, so each keeps its own acknowledgment and its own Undo.
     @Published public private(set) var feedbackGiven: [EmailFeedbackKind: EmailFeedbackGiven] = [:]
+    /// Teach Veetbot's unapplied input for the open thread. Held here so it outlasts the card,
+    /// which Reply hides and the Mac panel's tabs replace; it ends with the selection.
+    @Published public var feedbackDraft = EmailFeedbackDraft()
     @Published public private(set) var hasMore = false
     @Published public private(set) var selectedAccountID: String?
     @Published public private(set) var listView = "priority"
@@ -554,6 +557,7 @@ public final class EmailViewModel: ObservableObject {
         styleExampleMessage = nil
         feedbackID = nil
         feedbackGiven = [:]
+        feedbackDraft = EmailFeedbackDraft()
         learning = nil
         revisions = []
         refreshKey = nil
@@ -1034,6 +1038,7 @@ public final class EmailViewModel: ObservableObject {
         styleExampleMessage = nil
         feedbackID = nil
         feedbackGiven = [:]
+        feedbackDraft = EmailFeedbackDraft()
     }
 
     /// Refreshes a thread without overwriting local edits or clearing unrelated action failures.

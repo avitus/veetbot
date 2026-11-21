@@ -3186,6 +3186,41 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 15))
     }
 
+    /// Reply hides Teach Veetbot while the owner writes. What they had entered there and not
+    /// yet applied must be waiting, still open, when the reply is closed.
+    func testTeachVeetbotKeepsUnsentFeedbackWhileReplying() {
+        app.launch()
+        let emailMode = app.buttons["mode.email"]
+        XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
+        emailMode.tap()
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))
+        let teach = app.buttons["email.feedback"]
+        XCTAssertTrue(teach.waitForExistence(timeout: 5))
+        teach.tap()
+        let explanation = app.textFields["Explain what matters (optional)"]
+        XCTAssertTrue(explanation.waitForExistence(timeout: 5))
+        explanation.tap()
+        explanation.typeText("Board mail comes first")
+        let keyboardDone = app.buttons["email.keyboard-done"]
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        keyboardDone.tap()
+
+        app.buttons["email.jump-to-reply"].tap()
+        XCTAssertTrue(app.textViews["email.draft-body"].waitForExistence(timeout: 5))
+        XCTAssertTrue(teach.waitForNonExistence(timeout: 5), "Reply hides Teach Veetbot while the owner writes")
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        keyboardDone.tap()
+        app.buttons["email.save-close"].tap()
+
+        XCTAssertTrue(teach.waitForExistence(timeout: 5))
+        XCTAssertEqual(teach.value as? String, "Expanded", "Closing the reply must not fold away unsent feedback")
+        XCTAssertTrue(explanation.waitForExistence(timeout: 5))
+        XCTAssertEqual(explanation.value as? String, "Board mail comes first")
+    }
+
     func testEmailModePreservesAnUnsentChatMessage() {
         app.launch()
         let historicalRow = app.descendants(matching: .any)[

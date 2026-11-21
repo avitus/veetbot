@@ -341,6 +341,19 @@ public enum EmailFeedbackTarget: String, CaseIterable, Sendable {
     }
 }
 
+/// What the owner has entered in Teach Veetbot for the open thread and not yet applied.
+/// It belongs to the thread, not to the card, which comes and goes with the reply composer
+/// and the Mac panel's tabs.
+public struct EmailFeedbackDraft: Equatable, Sendable {
+    public var target: EmailFeedbackTarget = .thread
+    public var targetValue = ""
+    public var explanation = ""
+    /// Whether the card is open on its choices.
+    public var isExpanded = false
+
+    public init() {}
+}
+
 /// The two separate judgments the owner can give on a thread.
 public enum EmailFeedbackKind: String, CaseIterable, Sendable {
     case importance, replyNeed

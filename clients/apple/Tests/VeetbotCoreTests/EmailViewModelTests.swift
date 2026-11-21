@@ -1325,6 +1325,26 @@ import SwiftUI
             inbox: 23, needsYou: 9, handled: 0, priority: 7, suspectedSpam: 2))
     }
 
+    /// Teach Veetbot's unapplied input belongs to the open thread, not to the card that Reply
+    /// hides: a refresh of that thread keeps it, and it ends when the selection does.
+    @Test func testUnappliedFeedbackStaysWithTheOpenThread() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            return (200, self.threadJSON(draft: self.draftJSON()))
+        }
+        defer { model.resetConnection() }
+        await model.openThread(threadID)
+        model.feedbackDraft.isExpanded = true
+        model.feedbackDraft.target = .person
+        model.feedbackDraft.targetValue = "alex@example.test"
+        model.feedbackDraft.explanation = "Board mail comes first"
+        let entered = model.feedbackDraft
+        await model.openThread(threadID, refreshOnly: true)
+        #expect(model.feedbackDraft == entered)
+        model.clearSelection()
+        #expect(model.feedbackDraft == EmailFeedbackDraft())
+    }
+
     /// A clearly labelled archive gesture must reach the originating thread's remote command.
     @Test(arguments: ["personal", "work"])
     func testArchiveUsesAccountBoundCommandAndPreservesDraft(account: String) async throws {

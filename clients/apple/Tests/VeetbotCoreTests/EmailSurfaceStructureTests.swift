@@ -137,6 +137,19 @@ import Testing
         #expect(source.contains(".accessibilityIdentifier(\"email.draft-\\(title.lowercased())\")"))
     }
 
+    /// Teach Veetbot comes and goes with the reply composer and the Mac panel's tabs, so what
+    /// the owner has entered there is the thread's, kept by the model, never the card's state.
+    @Test
+    func testTeachVeetbotKeepsNoInputOfItsOwn() throws {
+        let source = try source(at: "Veetbot/Views/EmailModeView.swift")
+        let start = try #require(source.range(of: "struct EmailTeachCard: View")).upperBound
+        let end = try #require(source.range(of: "private struct EmailGistBlock", range: start..<source.endIndex)).lowerBound
+        let card = String(source[start..<end])
+        #expect(!card.contains("@State"))
+        #expect(card.contains("$model.feedbackDraft.explanation"))
+        #expect(card.contains("model.feedbackDraft.isExpanded.toggle()"))
+    }
+
     @Test
     func testTheSheetsAndTheCensusWearTheSameSystem() throws {
         let mode = try source(at: "Veetbot/Views/EmailModeView.swift")

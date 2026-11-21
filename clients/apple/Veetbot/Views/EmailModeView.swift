@@ -2041,26 +2041,24 @@ struct EmailTeachCard: View {
     var explanationFocused: FocusState<Bool>.Binding
     /// On the panel's paperDeep the card is a surface card behind a hairline.
     var inPanel = false
-    @State private var target: EmailFeedbackTarget = .thread
-    @State private var explanation = ""
-    @State private var targetValue = ""
-    @State private var showingFeedback = false
+    /// The thread's unapplied input. The model keeps it, so hiding this card loses nothing.
+    private var draft: EmailFeedbackDraft { model.feedbackDraft }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
-                showingFeedback.toggle()
+                model.feedbackDraft.isExpanded.toggle()
             } label: {
                 HStack {
                     Text("Teach Veetbot").veetType(.meta, weight: .semibold)
                     Spacer()
-                    Image(systemName: showingFeedback ? "chevron.up" : "chevron.down").veetType(.meta)
+                    Image(systemName: draft.isExpanded ? "chevron.up" : "chevron.down").veetType(.meta)
                 }.foregroundColor(AppTheme.inkSoft).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityValue(showingFeedback ? "Expanded" : "Collapsed")
+            .accessibilityValue(draft.isExpanded ? "Expanded" : "Collapsed")
             .accessibilityIdentifier("email.feedback")
-            if showingFeedback {
+            if draft.isExpanded {
                 feedback
             } else {
                 Text("Say whether mail like this deserves your attention: this thread, a person, or a kind of content.")
@@ -2093,46 +2091,46 @@ struct EmailTeachCard: View {
     /// Offer explicit importance feedback with supported person and topic targets.
     private var feedback: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("Apply to", selection: $target) {
+            Picker("Apply to", selection: $model.feedbackDraft.target) {
                 ForEach(EmailFeedbackTarget.allCases, id: \.self) { value in Text(value.title).tag(value) }
             }.pickerStyle(.menu).accessibilityIdentifier("email.feedback-target")
-                .onChange(of: target) { targetValue = "" }
-            if target == .person {
-                Picker("Person", selection: $targetValue) {
+                .onChange(of: draft.target) { model.feedbackDraft.targetValue = "" }
+            if draft.target == .person {
+                Picker("Person", selection: $model.feedbackDraft.targetValue) {
                     Text("Choose a person").tag("")
                     ForEach(model.thread?.senders ?? [], id: \.self) { person in Text(person).tag(person) }
                 }
                 .accessibilityIdentifier("email.feedback-person")
-            } else if target == .topic {
+            } else if draft.target == .topic {
                 let topics = model.thread?.feedbackTopics ?? []
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
                         ForEach(topics, id: \.self) { topic in
-                            Button(topic) { targetValue = targetValue == topic ? "" : topic }
-                                .buttonStyle(FilterPillButtonStyle(selected: targetValue == topic))
-                                .accessibilityAddTraits(targetValue == topic ? .isSelected : [])
+                            Button(topic) { model.feedbackDraft.targetValue = draft.targetValue == topic ? "" : topic }
+                                .buttonStyle(FilterPillButtonStyle(selected: draft.targetValue == topic))
+                                .accessibilityAddTraits(draft.targetValue == topic ? .isSelected : [])
                                 .accessibilityIdentifier("email.feedback-topic-chip.\(topic)")
                         }
                     }
                 }
                 .accessibilityIdentifier("email.feedback-topic")
                 .onChange(of: topics) { _, values in
-                    if !values.contains(targetValue) { targetValue = "" }
+                    if !values.contains(draft.targetValue) { model.feedbackDraft.targetValue = "" }
                 }
                 if topics.isEmpty {
                     Text("No content topics are available yet. You can apply feedback to This thread.")
                         .veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 }
             }
-            TextField("Explain what matters (optional)", text: $explanation, prompt: .a2Prompt("Explain what matters (optional)")).focused(explanationFocused)
+            TextField("Explain what matters (optional)", text: $model.feedbackDraft.explanation, prompt: .a2Prompt("Explain what matters (optional)")).focused(explanationFocused)
                 .textFieldStyle(.plain).a2Field()
             Text("Is it important?").veetType(.meta).foregroundColor(AppTheme.inkSoft)
             HStack(spacing: 8) {
                 choice("Important", judgment: "important", identifier: "email.feedback-important")
                 choice("Less important", judgment: "less_important", identifier: "email.feedback-less-important")
             }
-                .disabled(target == .person && targetValue.isEmpty)
-                .disabled(target == .topic && !(model.thread?.feedbackTopics ?? []).contains(targetValue))
+                .disabled(draft.target == .person && draft.targetValue.isEmpty)
+                .disabled(draft.target == .topic && !(model.thread?.feedbackTopics ?? []).contains(draft.targetValue))
             HairlineDivider()
             Text("Does this thread need a reply?").veetType(.meta).foregroundColor(AppTheme.inkSoft)
             HStack(spacing: 8) {
@@ -2146,8 +2144,8 @@ struct EmailTeachCard: View {
     /// the other; a row marks the choice already given for the scope now showing.
     private func choice(_ title: String, judgment: String, identifier: String) -> some View {
         let kind = EmailFeedbackKind(judgment: judgment)
-        let scope = kind == .replyNeed ? EmailFeedbackTarget.thread : target
-        let value = kind == .replyNeed || target == .thread ? "" : targetValue
+        let scope = kind == .replyNeed ? EmailFeedbackTarget.thread : draft.target
+        let value = kind == .replyNeed || draft.target == .thread ? "" : draft.targetValue
         let given = model.feedbackGiven[kind]
         let chosen = given?.judgment == judgment && given?.target == scope && given?.targetValue == value
         return Button(title) {
@@ -2156,7 +2154,8 @@ struct EmailTeachCard: View {
                     await model.giveFeedback(target: .thread, judgment: judgment)
                 } else {
                     await model.giveFeedback(
-                        target: target, judgment: judgment, explanation: explanation, targetValue: targetValue)
+                        target: draft.target, judgment: judgment, explanation: draft.explanation,
+                        targetValue: draft.targetValue)
                 }
             }
         }
