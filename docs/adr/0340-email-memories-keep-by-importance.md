@@ -2,7 +2,7 @@
 
 - Status: Accepted (the owner set the direction and confirmed the tiers and the
   sender rule on 2026-11-20, and the same day chose the readings in decisions
-  2, 6 and 7 when asked)
+  2, 3, 6 and 7 when asked)
 - Date: 2026-11-20
 - Amends: ADR-0090 (decision 2, for the `email-semantic@2` policy only),
   ADR-0121 (decision 2, the thirty-day expiry of a stranger's fact), ADR-0247
@@ -86,7 +86,9 @@ about five weeks after its email, whatever the table said.
 A memory is first-class when the sender is known **and** the thread is kept for
 a year or more (importance 0.6 or above, or marked Important, or the owner
 replied). Both conditions are required. Every other email memory keeps today's
-construction.
+construction. The confirmed proposal named known senders and important threads
+without saying whether either alone was enough; asked on 2026-11-20, the owner
+chose both, so a known sender's unimportant mail stays a guess.
 
 | Field | First-class | Otherwise (unchanged) |
 | --- | --- | --- |
