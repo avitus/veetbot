@@ -262,4 +262,8 @@ class PublicRecallQuestionService:
             saved, expected_revision=expected_revision, clear_result=remeasured
         ):
             raise ConflictError("recall question changed while it was being saved")
-        return saved
+        # Answer with what the store holds now. Unless the save cleared it, the
+        # latest result is whatever was last recorded, which may be newer than
+        # the one this edit read.
+        owner = Principal(tenant_id=stored.tenant_id, principal_id=stored.principal_id)
+        return await uow.recall_questions.get(owner, stored.id) or saved

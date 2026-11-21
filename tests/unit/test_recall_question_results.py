@@ -158,3 +158,42 @@ async def test_a_failed_import_leaves_every_question_as_it_was() -> None:
         views = {view.key: view for view in (await service.list_questions(OWNER)).items}
         assert views["home-city"].content == town and views["home-city"].revision == 1
         assert len((await service.history(OWNER, created.id)).items) == 1
+
+
+async def test_an_edit_returns_the_result_the_store_holds_after_its_save(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run recorded between the edit's read and its save is what the edit reports."""
+
+    async with _composition() as composition:
+        service = _service(composition)
+        town = _content()
+        created = await service.create(
+            OWNER, key="home-city", split=QuestionSplit.HOLDOUT, content=town
+        )
+        await service.record_results(OWNER, {"home-city": _result(town)})
+        async with composition.uow_factory() as uow:
+            store = uow.recall_questions
+        save = store.save
+        missed = _result(town, delivered=0)
+
+        async def recorded_meanwhile(
+            question: Any, *, expected_revision: int, clear_result: bool = False
+        ) -> bool:
+            await store.record_result(
+                OWNER, "home-city", missed, expected_revision=expected_revision
+            )
+            return bool(
+                await save(question, expected_revision=expected_revision, clear_result=clear_result)
+            )
+
+        monkeypatch.setattr(store, "save", recorded_meanwhile)
+        noted = await service.edit(
+            OWNER, created.id, expected_revision=1, content=_content(notes="checked")
+        )
+        retired = await service.set_status(
+            OWNER, created.id, expected_revision=2, status=QuestionStatus.RETIRED
+        )
+
+    assert noted.passed is False and noted.latest_result == missed
+    assert retired.passed is False and retired.revision == 3
