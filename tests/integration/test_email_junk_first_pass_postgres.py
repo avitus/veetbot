@@ -13,7 +13,7 @@ from agent_core.domain.judgment import JudgmentFailure, JudgmentProviderError
 from agent_core.domain.messages import FakeModelScript
 from agent_core.domain.runs import RunStatus
 from agent_core.runtime.worker import DurableWorker
-from tests.gates.test_email_runtime_m26 import _assessment_turn, _current_mail_factory
+from tests.gates.test_email_runtime_m26 import MAIL_NOW, _assessment_turn, _current_mail_factory
 from tests.integration.m2_support import database_settings
 from tests.unit.test_email_junk_first_pass import decision, filter_settings
 
@@ -37,6 +37,7 @@ async def test_junk_usage_and_uncertain_settlement_survive_database_reload(
         judgment_provider_override=judge,
         script=FakeModelScript(turns=[_assessment_turn()] if uncertain else []),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         worker = cast(DurableWorker, app.async_worker_factory("email-junk-test"))

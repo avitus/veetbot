@@ -11,6 +11,7 @@ from agent_core.runtime.worker import DurableWorker
 from tests.gates.test_email_m18 import _email_settings
 from tests.gates.test_email_runtime_m26 import _assessment_turn
 from tests.gates.test_email_unsubscribe_m31 import (
+    NOW,
     URL,
     Mailbox,
     Transport,
@@ -38,6 +39,8 @@ async def test_a_queued_unsubscribe_gesture_reaches_the_sender_once() -> None:
         mcp_client_factory=await mailbox.factory(),
         one_click_transport_override=transport,
         script=FakeModelScript(turns=[_assessment_turn() for _ in range(8)]),
+        # The mailbox's mail is dated against NOW; assessment ignores mail older than ninety days.
+        fixed_clock_at=NOW,
     ) as app:
         worker = cast(DurableWorker, app.worker_factory("interactive-lane"))
         background = cast(DurableWorker, app.async_worker_factory("async-lane"))

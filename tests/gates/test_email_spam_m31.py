@@ -32,7 +32,12 @@ from agent_core.domain.policies import PolicyDecisionType
 from agent_core.domain.runs import RunStatus
 from tests.contract.memory_fixtures import browse_query
 from tests.gates.test_email_m18 import _email_settings
-from tests.gates.test_email_runtime_m26 import MailboxFactory, _current_mail_factory, _page
+from tests.gates.test_email_runtime_m26 import (
+    MAIL_NOW,
+    MailboxFactory,
+    _current_mail_factory,
+    _page,
+)
 from tests.gates.test_email_unsubscribe_gmail_m31 import (
     Header,
     Mailbox,
@@ -255,6 +260,7 @@ async def _assert_refresh_flags_drafts_nothing_and_forms_nothing() -> None:
         # One assessment and nothing else: a draft request would exhaust the script.
         script=FakeModelScript(turns=[ScriptedTurn(text=json.dumps(turn))]),
         mcp_client_factory=_recording(await _mail(census=False), writes),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         run = await app.runs.get(operation.run_id)
@@ -407,6 +413,7 @@ async def test_changed_sender_check_reassesses_cached_spam_verdict(before: str, 
         settings=_settings(),
         script=FakeModelScript(turns=[turn, turn, turn]),
         mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         thread = await _seed(app, page)
         # Refresh assesses one message passage per slice until the thread is complete.
