@@ -23,6 +23,19 @@ title: Changelog
 - Fact values keep the punctuation that changes them (`-5 °C` is not `5 °C`),
   and a merge gives the memory it keeps the latest evidence and longest
   retention of its copies.
+- Undoing Less important now brings back a memory that the feedback itself
+  had pushed past its expiry, also after it was closed. A memory that expired
+  by the table still never returns.
+- A refresh that stopped after rating a thread, or a pause in learning, no
+  longer leaves that thread's memories on their old retention.
+- Merging repeated facts stays inside the thread that formed each memory and
+  leaves a copy alone when its newest evidence cannot be placed. A fact linked
+  to a person is recognised when re-read even if its subject holds a
+  quotation.
+- The records now say plainly that Gmail's sender check vouches for the
+  sending domain, not the mailbox, and what that leaves open.
+- A paged listing of a person's identifiers returns each one once; a later
+  copy could reappear on another page.
 - The Email reading text keeps a postscript written under a `-- ` signature
   delimiter while still removing the rest of the block, and no longer reads a
   list of names under a heading as a signature. People places a signature read

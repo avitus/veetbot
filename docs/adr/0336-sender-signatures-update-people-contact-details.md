@@ -61,9 +61,13 @@ Four existing rules bound the design:
        and the owner has not ended that assignment;
      - the address is not a role mailbox;
      - the thread page holds the complete body.
-   - The detail goes to the person who holds the authenticated address. A
-     display name alone never selects a person, so mail from another address
-     that borrows a known person's name updates nobody.
+   - The detail goes to the person the From address resolves to. The passed
+     check vouches for the sending domain under its DMARC policy, not for the
+     mailbox: someone able to send as another mailbox of the same domain can
+     put a known person's address in the From line. Gmail reports no control
+     that binds the mailbox; ADR-0340's consequences state the same limit and
+     what bounds it. A display name alone never selects a person, so mail from
+     another address that borrows a known person's name updates nobody.
    - Only the sender's own signature counts. The block must sit under a line
      that is exactly the From display name, of two or more words, and above
      the first quoted line, reply header or forward header. A signature
@@ -146,6 +150,11 @@ Four existing rules bound the design:
   see the omitted number end and return.
 - People already in the directory gain details from new mail. Retained mail
   from the last ninety days is read again by `agent people repair-directory`.
+- Erasing a message removes its copies but does not replay the sequence. An
+  end that message had set on an earlier copy stays as recorded, so an earlier
+  title can read as ended with no current one, until the sender's next signed
+  message. Recomputing those ends at erasure means rewriting surviving records
+  in both People stores and is left as follow-up work.
 - `memory/people_correspondence.py` changes, so the email People
   implementation digest changes and an open People import job must be started
   again.
