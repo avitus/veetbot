@@ -102,6 +102,11 @@ title: Changelog
   several of its archives are pending, a conversation you have open from
   another account stays open and what you have typed in its reply is kept. An
   archive that failed stays visible when an older status answer arrives late.
+- Email on Mac, iPad and iPhone: if an account can no longer be read and you
+  switch collection while Email is checking, your other accounts' mail and
+  anything you were typing are kept once the new list loads. An archive that
+  was still being sent when its account stopped being readable no longer
+  closes a conversation you have open from another account.
 - An importance judgment on a person or topic re-rates its own thread a second
   time even when the pass over that person's other threads fails part-way.
 
