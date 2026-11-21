@@ -39,7 +39,10 @@ _RULE = re.compile(r"(?:[-*_]\s*){3,}")
 _UNDERLINE = re.compile(r"-+|=+")
 _TABLE_RULE = re.compile(r"[\s|:-]+")
 _ORDERED_MARKER = re.compile(r"^\d{1,3}[.)]\s+")
-_FENCE = re.compile(r"(?m)^(?:```|~~~)")
+# A fence line: up to three spaces, then three or more backticks or tildes.
+_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
+# A reader image marker, whose alt text is no word of the HTML text.
+_IMAGE_MARKER = re.compile(r"!\[[^\]\n]*\]\([^)\s]*\)")
 # Fewer lines than this can repeat by chance; a sign-off is not a signature.
 _REPEATED_BLOCK_LINES = 3
 
@@ -544,13 +547,17 @@ def merge_image_body(
     plan: list[tuple[bool, str]] = []
     overlaps = False
     for paragraph in re.split(r"\n\s*\n", plain):
-        # The HTML may show an ordered list as bullets; its numbers are not prose.
-        normalized = words(
-            "\n".join(
-                _ORDERED_MARKER.sub("", _quoted(line.strip())[1], count=1)
-                for line in paragraph.splitlines()
+        normalized = words(paragraph)
+        if normalized and " " + normalized + " " not in represented:
+            # The HTML may show an ordered list as bullets; then its numbers are not prose.
+            unnumbered = words(
+                "\n".join(
+                    _ORDERED_MARKER.sub("", _quoted(line.strip())[1], count=1)
+                    for line in paragraph.splitlines()
+                )
             )
-        )
+            if unnumbered != normalized and " " + unnumbered + " " in represented:
+                normalized = unnumbered
         if normalized and " " + normalized + " " not in represented:
             plan.append((True, paragraph))
         elif normalized:
@@ -572,18 +579,30 @@ def _placed(plan: list[tuple[bool, str]], rich: str, words: Callable[[str], str]
     placed inside. A line the rich text does not hold there moves nothing.
     """
     blocks: list[str] = []
-    open_fence = False
+    # The open fence's marker character and length, as CommonMark closes it.
+    fence: tuple[str, int] | None = None
     for paragraph in rich.split("\n\n"):
-        if open_fence:
+        if fence:
             blocks[-1] += "\n\n" + paragraph
         else:
             blocks.append(paragraph)
-        open_fence ^= len(_FENCE.findall(paragraph)) % 2 == 1
+        for line in paragraph.split("\n"):
+            marker = _FENCE.fullmatch(line)
+            if not marker:
+                continue
+            run, rest = marker[1], marker[2]
+            if fence is None:
+                # A backtick fence's info string cannot itself hold a backtick.
+                if run[0] != "`" or "`" not in rest:
+                    fence = (run[0], len(run))
+            elif run[0] == fence[0] and len(run) >= fence[1] and not rest.strip():
+                fence = None
     # The word sequence of the rich text, and where each block's words end in it.
+    # Image markers carry no words of the HTML text the anchors came from.
     sequence = " "
     ends: list[int] = []
     for block in blocks:
-        normalized = words(block)
+        normalized = words(_IMAGE_MARKER.sub(" ", block))
         if normalized:
             sequence += normalized + " "
         ends.append(len(sequence))

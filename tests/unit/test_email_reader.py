@@ -1033,3 +1033,21 @@ def test_outlook_reply_reads_its_note_first() -> None:
     assert reader.startswith("Makes sense to me\n\n")
     # The plain part's wording of the history is kept, below the note.
     assert "mailto:riley@example.com" in reader
+
+
+def test_placement_survives_literal_lists_nested_fences_and_inline_images() -> None:
+    """Exact list numbers match, a fence closes only on its own marker, images hold no words."""
+    from agent_core.application.email_reader import merge_image_body
+
+    numbered = "Intro.\n\n1. Alpha.\n2. Beta."
+    assert merge_image_body(numbered, numbered, numbered) == numbered
+
+    fenced = "Intro.\n\n````\nalpha\n~~~\n\nbeta\n````\n\nAfter."
+    assert merge_image_body("alpha\n\nOnly in plain.", fenced, fenced) == (
+        "Intro.\n\n````\nalpha\n~~~\n\nbeta\n````\n\nOnly in plain.\n\nAfter."
+    )
+
+    rich = "Hello\n\n![Photo](veetbot-email-image:0)\n\nworld."
+    assert merge_image_body("Hello world.\n\nOnly in plain.", rich, "Hello world.") == (
+        rich + "\n\nOnly in plain."
+    )
