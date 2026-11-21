@@ -1,0 +1,67 @@
+{
+  "title": "Stock quote collector",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "stocks"
+    ],
+    "properties": {
+      "stocks": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "symbol",
+            "name",
+            "match_name",
+            "exchange",
+            "currency"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "symbol": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9.-]{0,14}$"
+            },
+            "currency": {
+              "type": "string",
+              "maxLength": 3,
+              "minLength": 3
+            },
+            "exchange": {
+              "type": "string",
+              "minLength": 1
+            },
+            "match_name": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "maxItems": 20,
+        "minItems": 1
+      },
+      "expected_statuses": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "fixture_responses": {
+        "type": "object"
+      }
+    },
+    "additionalProperties": false
+  },
+  "calls": [
+    "feed.publish",
+    "http.request"
+  ],
+  "feeds": [
+    "agent.stock-ticker"
+  ]
+}
