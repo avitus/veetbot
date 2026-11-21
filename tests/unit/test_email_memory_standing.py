@@ -983,6 +983,290 @@ async def test_same_dated_mail_from_a_stranger_never_restands_a_known_senders_me
     assert current == memory and "message m-2" not in current.statement
 
 
+async def _without_roles(factory: Any, *sources: Any) -> None:
+    """Leave these messages' records as one written before roles were kept: each lists
+    its memories and says nothing of what the message did for them."""
+    from agent_core.domain.email_semantics import semantic_source_key
+
+    for source in sources:
+        key = semantic_source_key(source.account_id, source.provider_thread_id, source.message_id)
+        async with factory() as uow:
+            record = await uow.email.get(principal(), "semantic_source", key)
+        assert record is not None
+        facts = {
+            name: value
+            for name, value in record.payload["facts"].items()
+            if not name.startswith(("formed:", "renewed:", "seen:"))
+        }
+        await _put(factory, "semantic_source", key, {**record.payload, "facts": facts})
+
+
+@pytest.mark.parametrize("stripped", ["both", "twin", "first"])
+async def test_a_record_without_roles_never_restands_a_memory_it_is_not_named_by(
+    stripped: str,
+) -> None:
+    """Two messages with one sent time both list the memory. Without a role, a record is
+    told apart by the memory's own record line; a plain statement names no message, so
+    neither record may restate it, demote it or rewrite who said it."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    first = await mail(factory, message_id="m-1", sender=ALEX, body=BODY, days_ago=5)
+    twin = await mail(
+        factory, message_id="m-2", sender=SAM, body=CONFIRMING, days_ago=5, thread_id="t-2"
+    )
+    assert first.sent_at == twin.sent_at
+    await seed_thread(factory, priority=0.7, messages=[_message(first)])
+    # The twin sits in a thread a complete reading rates low, from a sender nobody knows.
+    await seed_thread(
+        factory,
+        priority=0.1,
+        messages=[_message(twin)],
+        provider_thread_id="t-2",
+        thread_id=UUID(int=906),
+    )
+    [memory] = await service.form(first, [fact_for(first)])
+    assert memory.derivation is MemoryDerivation.DIRECT
+    assert await service.form(twin, [fact_for(twin)]) == [memory]
+    await _without_roles(
+        factory, *{"both": (first, twin), "twin": (twin,), "first": (first,)}[stripped]
+    )
+
+    for thread in ("t-mail", "t-2"):
+        assert (await service.rerate_thread("work", thread)).changed == 0
+    assert (await service.rerate_all(apply=True)).changed == 0
+    current = await stored(factory, memory)
+    assert current == memory and "message m-2" not in current.statement
+
+
+async def test_a_record_without_roles_restands_the_memory_its_own_record_line_names() -> None:
+    """Every memory formed before roles were kept is a record line that names its message,
+    so the owner's command still promotes it from that message and from no other."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    first = await mail(factory, message_id="m-1", sender=ALEX, body=BODY, days_ago=5)
+    twin = await mail(factory, message_id="m-2", sender=SAM, body=CONFIRMING, days_ago=5)
+    await seed_thread(factory, priority=0.2, messages=[_message(first), _message(twin)])
+    [guess] = await service.form(first, [fact_for(first)])
+    assert guess.derivation is MemoryDerivation.HYPOTHESIS and "message m-1" in guess.statement
+    assert await service.form(twin, [fact_for(twin)]) == [guess]
+    await _without_roles(factory, first, twin)
+
+    await seed_feedback(factory, "important")
+    report = await service.rerate_all(apply=True)
+    assert (report.promoted, report.demoted, report.by_retention) == (1, 0, {"no_expiry": 1})
+    promoted = await stored(factory, guess)
+    assert promoted.statement.startswith(f"{ALEX} said by email on ")
+    assert promoted.derivation is MemoryDerivation.DIRECT
+    # Promoted, its statement names no message any more. The record line named the
+    # forming message while it stood, and that was written down: the memory still
+    # follows that message, and undoing the mark returns it to the same guess.
+    await seed_feedback(factory, "important", undone=True)
+    report = await service.rerate_all(apply=True)
+    assert (report.demoted, report.by_retention) == (1, {"30_days": 1})
+    assert (await stored(factory, guess)).statement == guess.statement
+
+
+@pytest.mark.parametrize("swept", [False, True])
+async def test_undoing_feedback_restores_a_memory_the_feedback_itself_left_past_due(
+    swept: bool,
+) -> None:
+    """Less important on a forty-day-old memory of a thread kept a year sets its expiry
+    ten days in the past. Undoing it puts the memory back, also once the sweep closed it."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY, days_ago=40)
+    await seed_thread(factory, priority=0.7, messages=[_message(source)])
+    [memory] = await service.form(source, [fact_for(source)])
+    assert memory.derivation is MemoryDerivation.DIRECT
+    assert memory.expires_at == source.sent_at + timedelta(days=365)
+
+    await seed_feedback(factory, "less_important")
+    report = await service.rerate_thread("work", "t-mail", cause="feedback")
+    assert (report.demoted, report.by_retention) == (1, {"30_days": 1})
+    lapsed = await stored(factory, memory)
+    assert lapsed.expires_at == source.sent_at + timedelta(days=30) and lapsed.expires_at < NOW
+    if swept:
+        [closed] = await service._governed.expire()
+        assert closed.id == memory.id and closed.status is MemoryStatus.EXPIRED
+
+    await seed_feedback(factory, "less_important", undone=True)
+    preview = await service.rerate_thread("work", "t-mail", apply=False, cause="feedback")
+    report = await service.rerate_thread("work", "t-mail", cause="feedback")
+    assert (report.changed, report.promoted, report.by_retention) == (1, 1, {"1_year": 1})
+    assert preview.model_dump(exclude={"applied"}) == report.model_dump(exclude={"applied"})
+    restored = await stored(factory, memory)
+    assert restored.status is memory.status and restored.valid_to is None
+    assert restored.expires_at == memory.expires_at
+    assert restored.statement == memory.statement
+    assert restored.derivation is MemoryDerivation.DIRECT
+    # The note is spent with the restoring: nothing is left to do.
+    assert (await service.rerate_thread("work", "t-mail", cause="feedback")).changed == 0
+    assert (await service.rerate_all(apply=True)).changed == 0
+
+
+async def test_a_memory_that_expired_on_its_own_is_never_revived() -> None:
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    # Formed from old mail in a thread kept thirty days: past its expiry from the start.
+    old = await mail(factory, message_id="m-old", sender=ALEX, body=BODY, days_ago=40)
+    await seed_thread(factory, priority=0.2, messages=[_message(old)])
+    [expired] = await service.form(old, [fact_for(old)])
+    assert expired.expires_at is not None and expired.expires_at < NOW
+    # Lowered past due by a grounded assessment of its thread, not by the owner.
+    rated = await mail(
+        factory,
+        message_id="m-2",
+        sender=ALEX,
+        body="The diligence package is due Monday.",
+        days_ago=40,
+        thread_id="t-2",
+    )
+    await seed_thread(
+        factory,
+        priority=0.7,
+        messages=[_message(rated)],
+        provider_thread_id="t-2",
+        thread_id=UUID(int=907),
+    )
+    [lowered] = await service.form(
+        rated, [fact_for(rated, subject="Diligence package", predicate="is due", value="Monday")]
+    )
+    await seed_thread(
+        factory,
+        priority=0.1,
+        messages=[_message(rated)],
+        provider_thread_id="t-2",
+        thread_id=UUID(int=907),
+    )
+    assert (await service.rerate_thread("work", "t-2")).by_retention == {"30_days": 1}
+    lowered = await stored(factory, lowered)
+
+    # The owner now marks the sender Important: neither memory comes back.
+    item = EmailFeedback(
+        id=UUID(int=908),
+        thread_id=THREAD_ID,
+        target="person",
+        judgment="important",
+        target_values=["alex@example.test"],
+        created_at=NOW,
+    )
+    await _put(factory, "feedback", str(item.id), item.model_dump(mode="json"))
+    for thread in ("t-mail", "t-2"):
+        report = await service.rerate_thread("work", thread, cause="feedback")
+        assert (report.examined, report.changed) == (0, 0)
+    assert (await service.lengthen_threads([("work", "t-mail"), ("work", "t-2")])).changed == 0
+    assert (await service.rerate_all(apply=True)).changed == 0
+    assert await stored(factory, expired) == expired
+    assert await stored(factory, lowered) == lowered
+
+
+async def test_a_memory_an_undone_mark_left_past_due_returns_when_the_owner_marks_it_again() -> (
+    None
+):
+    """The same gap from the other side: undoing Important returns a memory to a
+    thirty-day tier it has already outlived. Marking the thread again puts it back."""
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY, days_ago=20)
+    await seed_thread(factory, priority=0.2, messages=[_message(source)])
+    [memory] = await service.form(source, [fact_for(source)])
+    await seed_feedback(factory, "important")
+    assert (await service.rerate_thread("work", "t-mail", cause="feedback")).changed == 1
+    service._clock.advance(timedelta(days=15))  # type: ignore[attr-defined]
+
+    await seed_feedback(factory, "important", undone=True)
+    report = await service.rerate_thread("work", "t-mail", cause="feedback")
+    assert report.by_retention == {"30_days": 1}
+    await service._governed.expire()
+    assert (await stored(factory, memory)).status is MemoryStatus.EXPIRED
+
+    await seed_feedback(factory, "important")
+    report = await service.rerate_thread("work", "t-mail", cause="feedback")
+    assert (report.changed, report.by_retention) == (1, {"no_expiry": 1})
+    restored = await stored(factory, memory)
+    assert restored.status is memory.status and restored.expires_at is None
+    assert restored.valid_to is None
+
+
+async def test_a_memory_the_owners_less_important_lowered_at_an_assessment_returns_on_undo() -> (
+    None
+):
+    """The same gap on the other path: Less important on a person reaches another thread
+    at its next assessment. Undone, the pass over that thread puts its memory back."""
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    source = await mail(
+        factory, message_id="m-in", sender=ALEX, body=BODY, days_ago=40, thread_id="t-2"
+    )
+    await seed_thread(factory, priority=0.7, messages=[_message(source)], provider_thread_id="t-2")
+    [memory] = await service.form(source, [fact_for(source)])
+
+    async def person_feedback(*, undone: bool) -> None:
+        item = EmailFeedback(
+            id=UUID(int=909),
+            thread_id=UUID(int=904),  # given on another of Alex's threads
+            target="person",
+            judgment="less_important",
+            target_values=["alex@example.test"],
+            created_at=NOW,
+            undone_at=NOW if undone else None,
+        )
+        await _put(factory, "feedback", str(item.id), item.model_dump(mode="json"))
+
+    await person_feedback(undone=False)
+    # The pass over other threads shortens nothing; the thread's own assessment does.
+    assert (await service.lengthen_threads([("work", "t-2")])).changed == 0
+    assert (await service.rerate_thread("work", "t-2")).by_retention == {"30_days": 1}
+    await service._governed.expire()
+    assert (await stored(factory, memory)).status is MemoryStatus.EXPIRED
+
+    await person_feedback(undone=True)
+    report = await service.lengthen_threads([("work", "t-2")])
+    assert (report.changed, report.by_retention) == (1, {"1_year": 1})
+    restored = await stored(factory, memory)
+    assert restored.status is memory.status and restored.expires_at == memory.expires_at
+
+
+async def test_a_preview_drops_a_projection_once_the_stored_memory_has_changed() -> None:
+    """A preview carries a memory between two visits as the first would have left it.
+    If the owner takes the memory over in between, the second visit reads the store."""
+    from agent_core.domain.email_semantics import semantic_source_key
+    from agent_core.memory.email_people import _Rerating
+
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    first = await mail(factory, message_id="m-1", sender=ALEX, body=BODY, days_ago=40)
+    later = await mail(factory, message_id="m-2", sender=ALEX, body=CONFIRMING, days_ago=2)
+    await seed_thread(factory, priority=0.4, messages=[_message(first), _message(later)])
+    [guess] = await service.form(first, [fact_for(first)])
+    [renewed] = await service.form(later, [fact_for(later)])
+    await seed_feedback(factory, "important")
+
+    async def visit(source: Any, seen: _Rerating) -> list[UUID]:
+        key = semantic_source_key(source.account_id, source.provider_thread_id, source.message_id)
+        async with factory() as uow:
+            record = await uow.email.get(principal(), "semantic_source", key)
+            assert record is not None
+            return await service._rerate_source(uow, record, seen, apply=False, adopt=True)
+
+    # Unchanged in between, the second visit builds on the first: one promoted memory.
+    seen = _Rerating()
+    assert await visit(first, seen) == [guess.id] and await visit(later, seen) == [guess.id]
+    assert seen.report(applied=False).first_class == 1
+
+    seen = _Rerating()
+    assert await visit(first, seen) == [guess.id]
+    async with factory() as uow:
+        owned = await uow.memories.reinforce(
+            renewed.model_copy(
+                update={"authority": MemoryAuthority.USER, "status": MemoryStatus.ACTIVE}
+            )
+        )
+    # The owner's memory is no longer the table's: the later visit leaves it alone.
+    assert await visit(later, seen) == []
+    assert seen.retention == {} and await stored(factory, guess) == owned
+
+
 async def test_a_preview_reports_the_standing_the_apply_will_leave() -> None:
     """The message that formed a renewed memory sets its standing and the later one its
     retention; a preview carries the first visit's outcome into the second, as a write does."""
@@ -1039,8 +1323,12 @@ async def test_the_owners_mark_between_two_pages_of_a_rerating_is_not_undone(
             yield uow
 
     monkeypatch.setattr(service, "_uow_factory", paged)
-    await service.rerate_all(apply=True)
+    report = await service.rerate_all(apply=True)
     assert transactions == 3
+    # The second page was read and its memory examined, not merely stepped over. The
+    # report holds what each page found: thirty days before the mark, no expiry after.
+    assert (report.examined, report.changed) == (2, 0)
+    assert report.by_retention == {"30_days": 1, "no_expiry": 1}
     assert (await stored(factory, first)).expires_at is None
     assert (await stored(factory, second)).expires_at is None
 
@@ -1079,8 +1367,11 @@ async def test_a_first_class_claim_never_upgrades_a_hypothesis_it_repeats() -> N
         evidence_at=NOW - timedelta(days=10),
     )
     await seed_thread(factory, priority=0.9, messages=[_message(source)])
-    await service.form(source, [fact_for(source)])
+    [formed] = await service.form(source, [fact_for(source)])
     kept = await stored(factory, hypothesis)
+    # The repeat is evidence for the guess that was stored, and forms no second memory.
+    assert formed.id == hypothesis.id
+    assert kept.evidence_count == hypothesis.evidence_count + 1
     assert kept.derivation is MemoryDerivation.HYPOTHESIS
     assert kept.longevity is MemoryLongevity.TENTATIVE
 
@@ -1169,8 +1460,8 @@ async def test_the_pass_over_other_threads_promotes_a_guess_the_mark_makes_first
 
 
 async def test_a_familiar_address_needs_gmails_passed_check_to_be_a_known_sender() -> None:
-    """Anyone can write a familiar address in a From line. Only Gmail's passed sender
-    check ties a received message to that address; `none` says nothing either way."""
+    """Anyone can write a familiar address in a From line. A passed sender check shows
+    the mail came with that address's domain's authority; `none` shows nothing."""
     factory, service = await correspondence_stack()
     await know_alex(factory, service)
     source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY)

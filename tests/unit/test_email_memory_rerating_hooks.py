@@ -202,11 +202,21 @@ async def test_a_retried_feedback_request_resumes_a_rerating_that_did_not_run() 
             assert len(await uow.email.list(app.principal, "feedback")) == 1
 
         feedback_id = UUID(str(marked["feedback_id"]))
+
+        async def feedback_record() -> Any:
+            async with app.uow_factory() as uow:
+                return await uow.email.get(app.principal, "feedback", str(feedback_id))
+
         app.services.email.rerate_memories = interrupted
         await app.services.email.undo_feedback(app.principal, feedback_id)
+        # The undo itself committed; only its re-rating did not run.
+        undone = await feedback_record()
+        assert undone is not None and undone.payload["undone_at"] is not None
         assert (await _memories(app))[0].expires_at is None
         app.services.email.rerate_memories = rerate
         await app.services.email.undo_feedback(app.principal, feedback_id)
+        # The repeated undo wrote nothing to the feedback and ran the re-rating.
+        assert await feedback_record() == undone
         assert (await _memories(app))[0].expires_at == memory.expires_at
 
 
@@ -356,7 +366,8 @@ async def test_a_failed_pass_over_other_threads_never_fails_the_feedback() -> No
 
         email.lengthen_memories = lengthen
         assert (await mark())["feedback_id"] == marked["feedback_id"]
-        assert {row.expires_at for row in await _memories(app)} == {None}
+        kept = {row.id: row.expires_at for row in await _memories(app)}
+        assert kept == {memory.id: None, other.id: None}
 
         # Feedback about replies changes no importance, so no other thread is visited.
         email.lengthen_memories = unavailable
@@ -369,10 +380,21 @@ async def test_a_failed_pass_over_other_threads_never_fails_the_feedback() -> No
         assert len(asked) == 1
 
 
-async def test_an_abstaining_assessment_leaves_the_threads_memories_as_they_were() -> None:
+async def test_an_abstaining_assessment_leaves_the_threads_memories_as_they_were(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A result that cannot be grounded is saved as zero features, and rates the thread zero."""
     ungrounded = json.loads(_assessment(0.8).text or "")
     ungrounded.update(supported_evidence=["A sentence the message does not hold."], people_facts=[])
+    rerated: list[tuple[str, Any]] = []
+    original = EmailPeopleFormationService.rerate_thread
+
+    async def recording(self: Any, account_id: str, thread_id: str, **kwargs: Any) -> Any:
+        run = kwargs.get("run")
+        rerated.append((thread_id, None if run is None else run.id))
+        return await original(self, account_id, thread_id, **kwargs)
+
+    monkeypatch.setattr(EmailPeopleFormationService, "rerate_thread", recording)
     settings = replace(_email_settings(), email_mode_enabled=True, people_enabled=True)
     async with build(
         settings=settings,
@@ -400,6 +422,9 @@ async def test_an_abstaining_assessment_leaves_the_threads_memories_as_they_were
             assessment = await uow.email.get(app.principal, "assessment", str(rated.payload["id"]))
         assert assessment is not None and assessment.payload["grounded"] is False
         assert rated.payload["priority"] == 0
+        # The abstention was followed by a re-rating, under this refresh's run, and the
+        # re-rating is what left the retention alone.
+        assert rerated[-1] == ("thread-1", operation.run_id)
         [kept] = await _memories(app)
         assert kept.id == memory.id and kept.expires_at == memory.expires_at
 
@@ -412,10 +437,11 @@ async def test_a_junk_first_pass_assessment_rerates_the_threads_memories_too(
     from tests.unit.test_email_junk_pilot import pilot_decision, pilot_settings, work_factory
 
     rerated: list[tuple[str, bool]] = []
+    original = EmailPeopleFormationService.rerate_thread
 
     async def recording(self: Any, account_id: str, thread_id: str, **kwargs: Any) -> Any:
         rerated.append((account_id, kwargs.get("run") is not None))
-        return EmailRerateReport()
+        return await original(self, account_id, thread_id, **kwargs)
 
     monkeypatch.setattr(EmailPeopleFormationService, "rerate_thread", recording)
     settings = replace(pilot_settings(tmp_path), email_mode_enabled=True, people_enabled=True)
@@ -425,6 +451,7 @@ async def test_a_junk_first_pass_assessment_rerates_the_threads_memories_too(
         script=FakeModelScript(turns=[]),
         mcp_client_factory=await work_factory(),
     ) as app:
+        saves: list[tuple[str, int]] = []
         for saved in (1, 2):
             # The second refresh reuses the first pass's cached verdict and saves it again.
             operation = await app.services.email.submit_task(app.principal, kind="refresh")
@@ -434,6 +461,106 @@ async def test_a_junk_first_pass_assessment_rerates_the_threads_memories_too(
                 [assessment] = await uow.email.list(app.principal, "assessment")
             assert assessment.payload["junk_bypassed"] and run.usage.model_calls == 0
             assert rerated == [("work", True)] * saved
+            saves.append((assessment.key, assessment.revision))
+        # The second refresh saved the same assessment again; it did not only re-rate.
+        (first_key, first_revision), (second_key, second_revision) = saves
+        assert second_key == first_key and second_revision > first_revision
+
+
+async def test_a_refresh_that_stopped_after_saving_an_assessment_is_followed_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A saved assessment owes its thread's memories a re-rating. If the refresh stops
+    in between, the assessment is already current and is never visited again, so the
+    next refresh looks for the debt itself, whatever the assessment's freshness."""
+    rerated: list[tuple[str, Any]] = []
+    stopped = True
+    original = EmailPeopleFormationService.rerate_thread
+
+    async def recording(self: Any, account_id: str, thread_id: str, **kwargs: Any) -> Any:
+        if stopped:
+            # The refresh ended here: the assessment is saved, its memories not followed.
+            return EmailRerateReport()
+        run = kwargs.get("run")
+        rerated.append((thread_id, None if run is None else run.id))
+        return await original(self, account_id, thread_id, **kwargs)
+
+    monkeypatch.setattr(EmailPeopleFormationService, "rerate_thread", recording)
+    settings = replace(_email_settings(), email_mode_enabled=True, people_enabled=True)
+    async with build(
+        settings=settings,
+        script=FakeModelScript(turns=[_assessment(0.6)]),
+        mcp_client_factory=await _mail(census=False),
+        fixed_clock_at=NOW,
+    ) as app:
+
+        async def refresh() -> UUID:
+            operation = await app.services.email.submit_task(app.principal, kind="refresh")
+            run = await app.runs.get(operation.run_id)
+            assert run.status is RunStatus.COMPLETED, run.failure
+            assert run.usage.model_calls <= 1
+            return operation.run_id
+
+        async def owed() -> object:
+            async with app.uow_factory() as uow:
+                [assessment] = await uow.email.list(app.principal, "assessment")
+            return assessment.payload.get("rerating_pending")
+
+        # The first assessment, by the model: saved, and the refresh stopped.
+        await refresh()
+        assert rerated == [] and await owed() is True
+        stopped = False
+        second = await refresh()
+        assert rerated == [("thread-1", second)] and await owed() is None
+        await refresh()
+        assert len(rerated) == 1
+
+        # The same on a reused assessment, saved again under a new profile revision.
+        async with app.uow_factory() as uow, uow.email.lock(app.principal):
+            await app.services.email._bump_profile(uow.email, app.principal)
+        stopped = True
+        await refresh()
+        assert len(rerated) == 1 and await owed() is True
+        stopped = False
+        fifth = await refresh()
+        assert rerated[1:] == [("thread-1", fifth)] and await owed() is None
+
+
+async def test_assessments_saved_while_learning_was_paused_are_followed_up_afterwards() -> None:
+    """A pause holds the memories still, not the ratings. Resumed, each assessment
+    saved meanwhile is followed by the re-rating it still owes."""
+    higher = json.loads(_assessment(1.0).text or "")
+    higher["people_facts"] = []
+    settings = replace(_email_settings(), email_mode_enabled=True, people_enabled=True)
+    async with build(
+        settings=settings,
+        script=FakeModelScript(turns=[_assessment(0.6), ScriptedTurn(text=json.dumps(higher))]),
+        mcp_client_factory=await _mail(census=False),
+        fixed_clock_at=NOW,
+    ) as app:
+        await app.services.email.submit_task(app.principal, kind="refresh")
+        [memory] = await _memories(app)
+        assert memory.expires_at == memory.last_evidence_at + timedelta(days=90)
+        async with app.uow_factory() as uow:
+            [thread] = await uow.email.list(app.principal, "thread")
+        await app.services.email.pause_learning(app.principal, True)
+        # The owner's reply judgment changes what the assessment sees, so it runs again.
+        await app.services.email.feedback(
+            app.principal,
+            thread_id=UUID(str(thread.payload["id"])),
+            target="thread",
+            judgment="no_reply_needed",
+        )
+        await app.services.email.submit_task(app.principal, kind="refresh")
+        async with app.uow_factory() as uow:
+            [rated] = await uow.email.list(app.principal, "thread")
+        assert rated.payload["priority"] == pytest.approx(0.9)
+        assert (await _memories(app))[0].expires_at == memory.expires_at
+
+        await app.services.email.pause_learning(app.principal, False)
+        await app.services.email.submit_task(app.principal, kind="refresh")
+        [followed] = await _memories(app)
+        assert followed.id == memory.id and followed.expires_at is None
 
 
 async def test_the_refresh_continues_when_a_memory_rerating_is_refused() -> None:

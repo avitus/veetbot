@@ -51,7 +51,9 @@ Everything here applies to the People policy, `email-semantic@2`.
    the value. Every other mark is part of the value: `-5 °C` is not `5 °C`, and
    `3.5%` is not `3-5%`. The value is read from the end of the stored
    statement, past the subject, so a quotation inside the subject or the value
-   does not change it. The first memory stands, in the words it was formed
+   does not change it. A memory linked to a person is stored under that
+   person's identity followed by the subject, and the subject is read from
+   there. The first memory stands, in the words it was formed
    with, and the proposal changes nothing. This holds for a memory in any
    status: one that expired and one a merge superseded are not formed again.
    The retained source record remembers each fact it formed under this
@@ -91,6 +93,20 @@ Everything here applies to the People policy, `email-semantic@2`.
 5. **What the merge leaves alone.** Copies stored under different subjects are
    not merged, because two people in one thread can each hold the same value.
    The preview counts them.
+6. **A memory belongs to the thread that formed it.** A message of another
+   thread that renewed or only found a memory lists it too. That listing is
+   no membership: the listing record says its message formed the memory, or,
+   on a record written before roles were kept, the memory's own record line
+   names the thread. Without this a thread's earlier copy could supersede a
+   memory another thread formed.
+7. **A copy's later evidence is handed over only to a message that answers
+   for it.** The command reads which messages list each memory before it
+   takes a thread's locks. Under the locks it reads the copy and those
+   messages again. The message behind the copy's latest evidence formed or
+   renewed it, or is the one its record line names, and carries that evidence
+   date. If a copy was renewed in between, none of the messages read answers
+   for its new evidence, and the copy is left as it is; the next run reads the
+   renewing message and merges it.
 
 ## Consequences
 

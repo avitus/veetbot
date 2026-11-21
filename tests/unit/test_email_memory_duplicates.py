@@ -5,6 +5,7 @@ a value another memory from the same thread already stated: 157 from the same
 message assessed again in different words, the rest from other messages.
 """
 
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -279,15 +280,26 @@ async def test_a_value_is_read_past_a_subject_that_holds_a_quoted_name() -> None
 def test_a_first_class_statement_is_restated_whatever_its_senders_name_begins_with() -> None:
     """A display name may begin "Email from"; only the whole record line makes a guess."""
     sender, claim = "Email from Alex <alex@example.com>", 'Atlas vote moved to: "Friday".'
-    where = {"account_id": "work", "thread_id": "t-1", "message_id": "m-1"}
+
+    def reword(
+        statement: str, message_id: str, *, first_class: bool, direct: bool | None = None
+    ) -> str | None:
+        return restated(
+            statement,
+            account_id="work",
+            thread_id="t-1",
+            message_id=message_id,
+            first_class=first_class,
+            direct=direct,
+        )
+
     plain = first_class_statement(sender, "2026-07-22", claim)
     guess = guess_statement(sender, "2026-07-22", "work", "t-1", "m-1", claim)
-    assert restated(plain, **where, first_class=False) == guess
-    assert restated(guess, **where, first_class=True) == plain
+    assert reword(plain, "m-1", first_class=False) == guess
+    assert reword(guess, "m-1", first_class=True) == plain
     # A guess that names another message is still left alone, in either direction.
-    other = {**where, "message_id": "m-2"}
-    assert restated(guess, **other, first_class=True) is None
-    assert restated(guess, **other, first_class=False) is None
+    assert reword(guess, "m-2", first_class=True) is None
+    assert reword(guess, "m-2", first_class=False) is None
     about_mail = guess_statement(
         "Sam <sam@example.test>",
         "2026-07-22",
@@ -296,19 +308,101 @@ def test_a_first_class_statement_is_restated_whatever_its_senders_name_begins_wi
         "m-1",
         'Alex said by email on 2026-07-20 that the vote moved to: "Friday".',
     )
-    assert restated(about_mail, **other, first_class=True) is None
+    assert reword(about_mail, "m-2", first_class=True) is None
+    # The email its claim quotes is part of the claim, never this guess's own sender.
+    assert reword(about_mail, "m-2", first_class=False) is None
+    assert reword(about_mail, "m-2", first_class=False, direct=False) is None
+    assert reword(about_mail, "m-1", first_class=False) == about_mail
+
+    # A display name can hold a whole record line. The words alone then read as a
+    # guess for another message; the row's own standing says which wording it is in.
+    crafted = (
+        "Email from A on 2026-01-01 (mailbox work, thread t-9, message m-9) reports x "
+        "<a@example.com>"
+    )
+    held = first_class_statement(crafted, "2026-07-22", claim)
+    assert reword(held, "m-1", first_class=False) is None
+    assert reword(held, "m-1", first_class=False, direct=True) == guess_statement(
+        crafted, "2026-07-22", "work", "t-1", "m-1", claim
+    )
+    # A row that is already a guess is never read as a plain statement.
+    assert reword(plain, "m-1", first_class=False, direct=False) is None
+
+
+def test_a_value_is_read_past_the_subject_a_person_linked_memory_names() -> None:
+    """A memory linked to a person is stored under `person:<who>:<subject>`, and its
+    statement names the subject alone. A quotation in that subject is not the value."""
+    claim = 'Project: "Atlas" is due on: "Friday".'
+    plain = first_class_statement("Alex <alex@example.test>", "2026-07-22", claim)
+    guess = guess_statement("Alex <alex@example.test>", "2026-07-22", "work", "t-1", "m-1", claim)
+    who = "6f1c0f3a-5a50-4b77-9d0f-2f2f8d1c7e11"
+    for stored_subject in (
+        f'person:unresolved:{who}:Project: "Atlas"',
+        f'person:{who}:Project: "Atlas"',
+        f'person:{who},{who}:Project:  "Atlas"',
+    ):
+        assert stated_value(plain, stored_subject) == "Friday"
+        assert stated_value(guess, stored_subject) == "Friday"
+    # The value's own quotation is still read whole, under a person as under a subject.
+    said = first_class_statement("Alex", "2026-07-22", 'Board reply: "He said: "no"".')
+    assert stated_value(said, f"person:{who}:Board") == 'He said: "no"'
+    # A stored subject that names something else falls back to the claim's first quotation.
+    assert stated_value(said, f"person:{who}:Budget") == 'He said: "no"'
+
+
+async def test_a_person_linked_fact_assessed_again_in_other_words_forms_no_second_memory() -> None:
+    """The record of a message read before fact identities were kept lists only its
+    memories, so the same fact is recognised by the value its statement holds."""
+    from tests.contract.people_mail_fixtures import colleague_fact
+
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    source = await mail(factory, message_id="m-1", sender=ALEX, body="Alex is Maya's colleague.")
+    subject = 'Project: "Atlas" lead'
+
+    def fact(predicate: str) -> EmailSemanticFact:
+        return colleague_fact(source).model_copy(
+            update={"subject": subject, "predicate": predicate}
+        )
+
+    [first] = await service.form(source, [fact("is")])
+    assert first.subject.startswith("person:unresolved:") and first.subject.endswith(subject)
+    assert stated_value(first.statement, first.subject) == "Maya's colleague"
+    key = semantic_source_key(source.account_id, source.provider_thread_id, source.message_id)
+    async with factory() as uow:
+        record = await uow.email.get(principal(), "semantic_source", key)
+        assert record is not None
+        await uow.email.put(
+            record.model_copy(
+                update={
+                    "revision": record.revision + 1,
+                    "payload": {**record.payload, "facts": {}},
+                }
+            ),
+            expected_revision=record.revision,
+        )
+    assert await service.form(source, [fact("works_as")]) == [first]
+    assert await _email_memories(factory) == [first]
 
 
 async def _copy(
     factory: Any, source: Any, original: MemoryRecord, number: int, **update: object
 ) -> MemoryRecord:
-    """A copy as production holds them: another row for a fact, listed by its source message."""
+    """A copy as production holds them: another row for a fact, listed by its source
+    message and worded as that message's own record line."""
+    named = (
+        f"(mailbox {source.account_id}, thread {source.provider_thread_id}, "
+        f"message {source.message_id}) reports"
+    )
+    statement = re.sub(
+        r"\(mailbox .+?, thread .+?, message .+?\) reports", named, original.statement
+    )
     async with factory() as uow:
         copy: MemoryRecord = await uow.memories.upsert_belief(
             original.model_copy(
                 update={
                     "id": UUID(int=9_000 + number),
-                    "statement": original.statement.replace("moved to:", f"wording_{number}:"),
+                    "statement": statement.replace("moved to:", f"wording_{number}:"),
                     "valid_from": source.sent_at,
                     "last_evidence_at": source.sent_at,
                     "store_position": await uow.memories.next_position(),
@@ -431,6 +525,121 @@ async def test_the_merge_gives_the_memory_kept_its_copies_later_evidence_and_ret
     assert (await service.rerate_thread("work", "t-mail")).by_retention == {"no_expiry": 1}
     async with factory() as uow:
         assert (await uow.memories.get(kept.id, principal())).expires_at is None
+    assert (await service.merge_duplicates(apply=True)).superseded == 0
+
+
+async def test_the_merge_counts_a_memory_only_in_the_thread_that_formed_it() -> None:
+    """A message can renew or find a memory another thread formed, and then lists it.
+    The merge works within one thread: that listing makes the memory no member of it."""
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    in_a = await mail(
+        factory, message_id="m-a", sender=ALEX, body=SENTENCE, days_ago=6, thread_id="t-a"
+    )
+    earlier_b = await mail(
+        factory, message_id="m-b0", sender=SAM, body="A note.", days_ago=9, thread_id="t-b"
+    )
+    confirming = "Confirming the Atlas vote is now Friday."
+    renewing_b = await mail(
+        factory, message_id="m-b1", sender=SAM, body=confirming, days_ago=2, thread_id="t-b"
+    )
+    agreeing = "Yes, Friday is right for the Atlas vote."
+    seeing_b = await mail(
+        factory, message_id="m-b2", sender=SAM, body=agreeing, days_ago=4, thread_id="t-b"
+    )
+    [formed_in_a] = await service.form(in_a, [fact_for(in_a)])
+    # Thread B renews the memory thread A formed, and an older message of B then finds it.
+    [renewed] = await service.form(renewing_b, [fact_for(renewing_b, quote=confirming)])
+    [found] = await service.form(seeing_b, [fact_for(seeing_b, quote=agreeing)])
+    assert renewed.id == found.id == formed_in_a.id
+    # Thread B also holds its own, earlier memory of the fact from before roles were kept.
+    await service.register_source(earlier_b)
+    own_b = await _copy(factory, earlier_b, formed_in_a, 1)
+    assert own_b.valid_from < formed_in_a.valid_from
+
+    for apply in (False, True):
+        report = await service.merge_duplicates(apply=apply)
+        assert report == EmailMergeReport(applied=apply, examined=2)
+    assert {row.id for row in await _email_memories(factory)} == {formed_in_a.id, own_b.id}
+
+    # A listing with no role, as a record written before roles were kept holds it, is
+    # no membership either: the memory's own record line names the thread that formed it.
+    key = semantic_source_key("work", "t-b", "m-b1")
+    async with factory() as uow:
+        record = await uow.email.get(principal(), "semantic_source", key)
+        assert record is not None
+        facts = {
+            name: value
+            for name, value in record.payload["facts"].items()
+            if not name.startswith(("renewed:", "seen:"))
+        }
+        await uow.email.put(
+            record.model_copy(
+                update={
+                    "revision": record.revision + 1,
+                    "payload": {**record.payload, "facts": facts},
+                }
+            ),
+            expected_revision=record.revision,
+        )
+    assert await service.merge_duplicates(apply=True) == EmailMergeReport(applied=True, examined=2)
+    assert {row.id for row in await _email_memories(factory)} == {formed_in_a.id, own_b.id}
+
+
+async def test_the_merge_leaves_a_copy_whose_latest_evidence_it_cannot_place(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The merge reads which messages list each memory before it takes its locks. A copy
+    renewed in between has later evidence from a message that reading never saw."""
+    from agent_core.memory.email_people import EmailPeopleFormationService
+
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    first_mail = await mail(factory, message_id="m-1", sender=ALEX, body=SENTENCE, days_ago=9)
+    copy_mail = await mail(factory, message_id="m-2", sender=SAM, body="A note.", days_ago=6)
+    confirming = "Confirming the Atlas vote is now Friday."
+    late_mail = await mail(factory, message_id="m-3", sender=SAM, body=confirming, days_ago=1)
+    [kept] = await service.form(first_mail, [fact_for(first_mail)])
+    await service.register_source(copy_mail)
+    copy = await _copy(factory, copy_mail, kept, 2)
+    other = EmailPeopleFormationService(
+        factory, service._clock, service._ids, principal(), provider="fake", model="scripted"
+    )
+    opened = 0
+
+    @asynccontextmanager
+    async def racing() -> Any:
+        nonlocal opened
+        opened += 1
+        if opened == 2:
+            # After the listing was read, before this thread's merge: a new message
+            # restates the fact and renews the newest memory of it, the copy.
+            [renewed] = await other.form(late_mail, [fact_for(late_mail, quote=confirming)])
+            assert renewed.id == copy.id and renewed.last_evidence_at == late_mail.sent_at
+        async with factory() as uow:
+            yield uow
+
+    monkeypatch.setattr(service, "_uow_factory", racing)
+    report = await service.merge_duplicates(apply=True)
+    monkeypatch.undo()
+    # Nothing that reading saw can answer for the copy's new evidence, so it stays.
+    assert (report.facts, report.superseded) == (0, 0)
+    async with factory() as uow:
+        assert await uow.memories.get(kept.id, principal()) == kept
+        assert (await uow.memories.get(copy.id, principal())).status is MemoryStatus.PROVISIONAL
+
+    # The next run reads the renewing message's listing and carries its evidence over.
+    assert (await service.merge_duplicates(apply=False)).superseded == 1
+    assert (await service.merge_duplicates(apply=True)).superseded == 1
+    async with factory() as uow:
+        survivor = await uow.memories.get(kept.id, principal())
+        merged = await uow.memories.get(copy.id, principal())
+        linked = await uow.email.get(
+            principal(), "semantic_source", semantic_source_key("work", "t-mail", "m-3")
+        )
+    assert merged.status is MemoryStatus.SUPERSEDED and merged.superseded_by == kept.id
+    assert survivor.last_evidence_at == late_mail.sent_at
+    assert linked is not None and linked.payload["facts"][f"renewed:{kept.id}"] == str(kept.id)
     assert (await service.merge_duplicates(apply=True)).superseded == 0
 
 

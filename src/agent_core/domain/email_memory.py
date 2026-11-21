@@ -25,6 +25,10 @@ EMAIL_STANDING_POLICY = "email-semantic@2"
 # every automatically captured chat memory has.
 GUESS_CONFIDENCE_CEILING = 0.4
 FIRST_CLASS_CONFIDENCE_CEILING = 0.65
+# The mark a saved assessment carries until its thread's memories have followed
+# it. The re-rating clears it in its own transaction, so a refresh that stops
+# between the two leaves it for the next one to find.
+RERATING_PENDING = "rerating_pending"
 _ONE_YEAR_DAYS = 365
 _RETENTION_LABELS = {None: "no_expiry", 365: "1_year", 90: "90_days", 30: "30_days"}
 _DATE = r"\d{4}-\d{2}-\d{2}"
@@ -44,6 +48,8 @@ class EmailMemoryStanding:
     false when this message is not among those held. `sender_unverified` is
     true when the address is one the owner knows but Gmail gave no verdict for
     the message: the sender is not known, and nothing shows it is anyone else.
+    `owner_lowered` is true when the owner's Less important is what rates the
+    thread.
     """
 
     importance: float
@@ -54,6 +60,7 @@ class EmailMemoryStanding:
     complete: bool = True
     sender_seen: bool = True
     sender_unverified: bool = False
+    owner_lowered: bool = False
 
     @property
     def retention_days(self) -> int | None:
@@ -186,14 +193,22 @@ def thread_importance(
         rating, known = (None, False) if last is None else last
     if assessment is not None and assessment.get("grounded") is False:
         known = False
-    marked = False
+    judgment = owner_judgment(thread, feedback)
+    if judgment == "important":
+        return 1.0, True, True
+    if judgment == "less_important":
+        return 0.0, False, True
+    return rating, False, known
+
+
+def owner_judgment(thread: EmailThread, feedback: Sequence[EmailFeedback]) -> str | None:
+    """The owner's last surviving importance judgment that matches the thread, if any."""
+    judgment: str | None = None
     matching = [item for item in feedback if feedback_matches(item, thread)]
     for item in sorted(matching, key=lambda value: (value.created_at, str(value.id))):
-        if item.judgment == "important":
-            rating, marked, known = 1.0, True, True
-        elif item.judgment == "less_important":
-            rating, marked, known = 0.0, False, True
-    return rating, marked, known
+        if item.judgment in {"important", "less_important"}:
+            judgment = item.judgment
+    return judgment
 
 
 def claim_text(subject: str, predicate: str, value: str) -> str:
@@ -234,6 +249,31 @@ def attributed_email_statement(statement: str) -> bool:
     )
 
 
+def _record_marker(account_id: str, thread_id: str, message_id: str) -> str:
+    """The part of a record line that names its message, as a stored statement holds it."""
+    return " ".join(
+        f"(mailbox {account_id}, thread {thread_id}, message {message_id}) reports".split()
+    )
+
+
+def names_message(statement: str, account_id: str, thread_id: str, message_id: str) -> bool:
+    """Whether a statement is the record line of this very message.
+
+    A guess says which message formed it. That identifies the message by
+    itself, where a date can be shared by two.
+    """
+    wording = _wording(statement)
+    marker = _record_marker(account_id, thread_id, message_id)
+    return wording is not None and wording[0] == "guess" and f" {marker} " in statement
+
+
+def names_thread(statement: str, account_id: str, thread_id: str) -> bool:
+    """Whether a statement is the record line of some message of this thread."""
+    wording = _wording(statement)
+    opening = " ".join(f"(mailbox {account_id}, thread {thread_id}, message ".split())
+    return wording is not None and wording[0] == "guess" and f" {opening} " in statement
+
+
 def restated(
     statement: str,
     *,
@@ -241,35 +281,46 @@ def restated(
     thread_id: str,
     message_id: str,
     first_class: bool,
+    direct: bool | None = None,
 ) -> str | None:
     """The same claim in the other standing's words, or None when it is not this source's.
 
     A stored statement has its whitespace collapsed, so the identifiers are
-    compared the same way. The standing asked for says which wording the
-    statement is in now, so the text never has to be guessed at:
+    compared the same way.
 
     - A guess becomes first-class only from this message's own record line. A
-      record line that names another message is left alone.
+      record line that names another message is left alone, whatever its claim
+      holds: an email it quotes is never read as its sender.
     - A first-class statement returns to a guess from its plain wording. Its
       sender is whatever stands before the first "said by email on <date>
       that", and may itself begin "Email from".
 
+    `direct` is the row's own standing, which says which wording it is in. A
+    sender's display name can hold a whole record line, and a guess's claim can
+    quote an email, so the words alone can be read both ways. Without it the
+    statement is read as the wording whose attribution comes first.
+
     A statement in neither wording is left alone.
     """
-    marker = " ".join(
-        f" (mailbox {account_id}, thread {thread_id}, message {message_id}) reports ".split()
-    )
+    marker = _record_marker(account_id, thread_id, message_id)
     head, found, claim = statement.partition(f" {marker} ")
     guess = (
         re.fullmatch(rf"Email from (?P<sender>.+) on (?P<date>{_DATE})", head) if found else None
     )
     if guess is not None:
         sender, sent_on = guess["sender"], guess["date"]
-    elif first_class:
+    elif first_class or direct is False:
         return None
     else:
+        wording = _wording(statement)
         plain = _PLAIN_HEAD.search(statement)
-        if plain is None or plain.start() == 0 or plain.end() == len(statement):
+        if (
+            plain is None
+            or plain.start() == 0
+            or plain.end() == len(statement)
+            # A record line for another message, unless the row says it is first-class.
+            or (direct is None and (wording is None or wording[0] != "plain"))
+        ):
             return None
         sender, sent_on, claim = statement[: plain.start()], plain[1], statement[plain.end() :]
     if first_class:
@@ -284,18 +335,38 @@ def restated(
 QUOTED_SENTENCE_WORDS = 6
 
 
-def _claim(statement: str) -> str | None:
-    """The claim an email statement makes, past its attribution, in either wording.
+def _wording(statement: str) -> tuple[str, str] | None:
+    """Which email wording a statement reads as, and the claim past its attribution.
 
-    Whichever attribution ends first is the statement's own; the other, if it
-    appears at all, is text inside the claim.
+    Whichever attribution ends first is taken as the statement's own; the other,
+    if it appears at all, is text inside the claim or the sender's name.
     """
     guess = _GUESS_HEAD.search(statement) if statement.startswith("Email from ") else None
     plain = _PLAIN_HEAD.search(statement)
     if guess is not None and (plain is None or guess.start() < plain.start()):
         _, found, claim = statement[guess.end() :].partition(") reports ")
-        return claim if found else None
-    return None if plain is None else statement[plain.end() :]
+        return ("guess", claim) if found else None
+    return None if plain is None else ("plain", statement[plain.end() :])
+
+
+def _subject_length(claim: str, subject: str | None) -> int:
+    """How much of a claim is its subject, as far as the stored subject can say.
+
+    A claim opens with the subject the email fact named. A memory is stored
+    under that subject, or, when it is linked to a person, under
+    ``person:<who>:<that subject>``, where ``<who>`` holds identifiers and none
+    of the email's words. Zero when the claim opens with neither.
+    """
+    named = " ".join((subject or "").split())
+    if named and claim.startswith(f"{named} "):
+        return len(named)
+    at = named.find(":") if named.startswith("person:") else -1
+    while at >= 0:
+        rendered = named[at + 1 :].strip()
+        if rendered and claim.startswith(f"{rendered} "):
+            return len(rendered)
+        at = named.find(":", at + 1)
+    return 0
 
 
 def stated_value(statement: str, subject: str | None = None) -> str | None:
@@ -303,17 +374,17 @@ def stated_value(statement: str, subject: str | None = None) -> str | None:
 
     The claim reads ``<subject> <predicate>: "<value>".`` and the value opens at
     the first ``: "`` after the subject, so a quotation inside the subject or
-    inside the value does not move it. `subject` is the memory's stored subject.
-    A memory linked to a person is stored under that person and not under the
-    words its statement uses; then the first ``: "`` of the claim opens the value.
+    inside the value does not move it. `subject` is the memory's stored subject,
+    which names the claim's subject directly or after a person's identity. When
+    it names neither, the first ``: "`` of the claim opens the value.
     """
     if not attributed_email_statement(statement):
         return None
-    claim = _claim(statement)
-    if claim is None or not claim.endswith('".'):
+    wording = _wording(statement)
+    if wording is None or not wording[1].endswith('".'):
         return None
-    named = " ".join((subject or "").split())
-    opened = claim.find(': "', len(named) if named and claim.startswith(f"{named} ") else 0)
+    claim = wording[1]
+    opened = claim.find(': "', _subject_length(claim, subject))
     return None if opened < 0 or opened + 3 > len(claim) - 2 else claim[opened + 3 : -2]
 
 

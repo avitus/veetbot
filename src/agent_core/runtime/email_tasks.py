@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -49,6 +49,7 @@ from agent_core.domain.email_drafting import (
     EmailToolError as EmailToolError,
 )
 from agent_core.domain.email_junk import JunkPilotUnavailableError, junk_request
+from agent_core.domain.email_memory import RERATING_PENDING
 from agent_core.domain.email_people import EmailPeopleAssessment, email_people_schema
 from agent_core.domain.email_semantics import (
     EmailSemanticFact,
@@ -111,6 +112,8 @@ EMAIL_BODY_WINDOW_BYTES = 512 * 1024
 EMAIL_ASSESSMENT_PASSAGE_CHARACTERS = 8192
 EMAIL_CHANGE_EVENT_LIMIT = 1000
 EMAIL_CHANGE_PAGE_LIMIT = 10
+# Saved assessments one slice follows up when their memories never followed them.
+RERATING_RESUME_LIMIT = 20
 EMAIL_HISTORY_POLICY = "email-history@2:90d"
 # Assessments once embedded the whole provider-registry revision, so any edit to
 # any model profile re-paid for ninety days of mail. Those rows remain current.
@@ -1085,6 +1088,15 @@ class _TaskIO:
             }
         learning = await self.service.learning_context(c.principal, None)
         revision = int(str(learning.get("profile_revision", 0)))
+        await self._resume_reratings(
+            [
+                thread
+                for thread in candidates
+                if thread.account_id in self.task.account_ids
+                and (prior := assessments.get(str(thread.id))) is not None
+                and prior.payload.get(RERATING_PENDING) is True
+            ]
+        )
 
         def assessment_order(thread: EmailThread) -> tuple[bool, float, float, str]:
             """Prioritize the oldest unfinished assessments with deterministic tie breaking."""
@@ -1209,12 +1221,16 @@ class _TaskIO:
                 if summary.account_id in self.task.account_ids
                 and ((summary.in_inbox and summary.updated_at >= since) or waiting(summary))
             ]
+            priors = {
+                summary.id: await uow.email.get(c.principal, "assessment", str(summary.id))
+                for summary in recent
+            }
             selected = [
                 summary
                 for summary in recent
                 if arrival(
                     summary,
-                    await uow.email.get(c.principal, "assessment", str(summary.id)),
+                    priors[summary.id],
                     await uow.email.get(
                         c.principal,
                         "thread_progress",
@@ -1225,6 +1241,14 @@ class _TaskIO:
                     is not None,
                 )
             ]
+        await self._resume_reratings(
+            [
+                summary
+                for summary in recent
+                if (prior := priors[summary.id]) is not None
+                and prior.payload.get(RERATING_PENDING) is True
+            ]
+        )
         selected.sort(key=lambda thread: (not waiting(thread), -thread.updated_at.timestamp()))
         assessed: list[UUID] = []
         for summary in selected:
@@ -1826,7 +1850,9 @@ class _TaskIO:
                     self.context.principal,
                     thread.id,
                     thread.revision,
-                    {**previous, "profile_revision": learning["profile_revision"]},
+                    self._owing_rerating(
+                        {**previous, "profile_revision": learning["profile_revision"]}
+                    ),
                     run=self.context.run,
                     lease=self.context.lease,
                     junk_pilot=None if self.junk_filter is None else self.junk_filter.pilot,
@@ -1857,6 +1883,7 @@ class _TaskIO:
                     thread.id,
                     thread.revision,
                     {
+                        **self._owing_rerating({}),
                         "summary": "Filtered promotional bulk"
                         if category == "bulk"
                         else "Filtered likely junk",
@@ -2005,7 +2032,7 @@ class _TaskIO:
             self.context.principal,
             thread.id,
             thread.revision,
-            value,
+            self._owing_rerating(value),
             run=self.context.run,
             lease=self.context.lease,
         )
@@ -2045,6 +2072,31 @@ class _TaskIO:
             )
         except (ConflictError, NotFoundError, ToolTrustRejectedError, ToolValidationError):
             return
+
+    def _owing_rerating(self, assessment: dict[str, Any]) -> dict[str, Any]:
+        """An assessment about to be saved, marked as owing its memories a re-rating.
+
+        The re-rating clears the mark in its own transaction. A refresh that
+        stops between the save and the re-rating, or a pause that holds the
+        memories still, leaves the mark for a later refresh to act on.
+        """
+        owed = {key: value for key, value in assessment.items() if key != RERATING_PENDING}
+        return {**owed, RERATING_PENDING: True} if self.semantics.people_enabled else owed
+
+    async def _resume_reratings(self, owing: Sequence[EmailThread]) -> None:
+        """Follow up saved assessments whose memories never followed them (ADR-0340).
+
+        Such an assessment is current, so nothing would visit its thread again.
+        The mark is looked for whatever the assessment's freshness, and a
+        bounded number are followed up in one slice.
+        """
+        if not owing or not self.semantics.people_enabled:
+            return
+        learning = await self.service.learning_context(self.context.principal, None)
+        if learning.get("paused"):
+            return
+        for thread in owing[:RERATING_RESUME_LIMIT]:
+            await self._rerate_memories(thread)
 
     async def _bulk_reason(self, thread: EmailThread, assessment: EmailAssessment) -> str | None:
         """Why bulk mail forms nothing (ADR-0116): the census first, then the verdict.

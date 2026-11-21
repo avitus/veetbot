@@ -55,10 +55,13 @@ evaluated construction unchanged.
     someone the owner has written to.
 
   Anyone can write a familiar address in a From line, so the address alone is
-  not enough. Gmail's passed check is what ties a received message to it, as
-  ADR-0336 requires before it reads a signature. A message whose check failed,
-  or gave no verdict, never has a known sender. An address that is unresolved,
-  ambiguous, or one of the owner's own on received mail is unknown.
+  not enough. The sender check is Gmail's DMARC verdict for the From domain.
+  A pass proves one thing: the message was sent with that domain's authority,
+  under the policy the domain publishes. It does not prove which mailbox of
+  the domain sent it; nothing Gmail reports does. ADR-0336 reads a signature
+  under the same control. A message whose check failed, or gave no verdict,
+  never has a known sender. An address that is unresolved, ambiguous, or one
+  of the owner's own on received mail is unknown.
 
 A stored thread is not always a full, current reading, and the first read of
 production on 2026-11-20 showed how much that matters. The 667 live email
@@ -149,6 +152,14 @@ No ranking code changes, so the `retrieval@7` label stays.
   repeated undo, writes nothing and re-rates again, so a re-rating that did not
   run is made up by the retry or by the thread's next assessment. A reply
   reaches the memory when the sent message is synced.
+- **A saved assessment owes a re-rating until it happens.** Every assessment
+  is saved with a mark that its thread's memories have not followed it yet.
+  The re-rating clears the mark in its own transaction. A refresh that stops
+  between the two leaves an assessment that is already current, which nothing
+  would visit again; so each refresh looks for the mark itself, whatever the
+  assessment's freshness, and follows up at most twenty threads a slice. A
+  pause in learning holds the memories still and leaves the marks, and the
+  first refresh after it follows them up.
 - **Person and topic feedback, and the other threads it matches.** Importance
   feedback on a person or a topic rates every thread it matches, not only the
   one it was given on. That thread is re-rated in full. When the feedback is
@@ -192,6 +203,19 @@ No ranking code changes, so the `retrieval@7` label stays.
   over in place: that row keeps the email policy label but holds the owner's
   words, and it is the owner's memory from then on. An expired memory is never
   revived; "Still true" restores one.
+- **The one memory that comes back.** The owner's own feedback can leave a
+  memory past due at once: Less important on a forty-day-old memory of a
+  thread kept a year sets its expiry ten days in the past, and so can undoing
+  Important. That memory did not expire on its own, and the feedback has an
+  undo. When a re-rating sets an expiry that is already past, and the owner's
+  judgment is what did it (the feedback's own re-rating, or any re-rating
+  while Less important rates the thread), the retained source record notes
+  the expiry it set and the status the memory had. A later re-rating that
+  gives the memory a retention still running puts it back: the expiry, the
+  standing its message now earns, and its former status if the expiry sweep
+  has closed it meanwhile. It is put back only while it is exactly as the
+  feedback left it. The note sits in the record's fact map, which source
+  erasure clears. A memory that expired by the table carries no note.
 - **What re-rating changes.** The expiry always. When the standing changes, the
   statement is reworded in place, and the derivation, longevity and review flag
   follow. A promoted guess keeps the confidence it was stored with, because the
@@ -217,8 +241,20 @@ No ranking code changes, so the `retrieval@7` label stays.
   retained source record says, for each memory it lists, whether its message
   formed it, renewed it or only found it. A message that only found a memory
   governs nothing, even when it carries the same timestamp as the one that
-  formed it. Dates order the evidence; they identify a message only on a
-  record written before this was kept.
+  formed it. Dates order the evidence and never say which message formed a
+  memory.
+- **A record written before roles were kept.** It lists its memories and says
+  nothing of what its message did, and two such records can list one memory
+  with one sent time. What tells them apart is the memory's own record line,
+  which names the mailbox, thread and message that formed it; every memory
+  formed before this change is such a line. The record that line names formed
+  the memory: it restands and shortens as any forming message does, and the
+  role is then written down, because a promoted statement names no message. A
+  record the memory does not name never restates it, demotes it or rewrites
+  who said it, and never shortens it. It may lengthen it when its date is the
+  memory's last evidence date, which needs only what is visible. A plain
+  statement on records that all lack a role cannot be told apart at all, so
+  its standing is left as it is.
 - **A later chat.** The owner's own statement about the same subject takes the
   memory over under the ordinary formation rules, which this change leaves as
   they are: it promotes a guess in place with the owner's words, and it
@@ -290,7 +326,9 @@ decisions 1 to 4, and reports counts only: examined, changed, promoted,
 returned, first-class, guesses, and memories by retention. Each transaction
 reads feedback, threads and senders again, so a mark the owner gives while the
 command runs is not undone by what an earlier transaction read. The preview
-reports what applying would leave. Nothing is backfilled at deploy, and no
+reports what applying would leave: it carries each memory from one visit to
+the next as the first would have written it, and drops that picture as soon
+as the stored memory is no longer the one it was drawn from. Nothing is backfilled at deploy, and no
 later assessment or feedback changes a memory the command has not yet brought
 under the table. A memory that already expired is not revived.
 
@@ -330,6 +368,27 @@ under the table. A memory that already expired is not revived.
   however well the owner knows them. Mail cached before the check existed
   reads no verdict and forms guesses until Gmail returns it again. Both are
   still kept by the thread's importance.
+- A passed sender check leaves one risk open. It vouches for the sending
+  domain, not for the mailbox. Someone able to send as another mailbox of the
+  same domain, a colleague of the known person or anyone with access to that
+  domain's mail system, can put a known person's address in the From line and
+  pass. Their claim can then form a first-class memory under that person's
+  name. Gmail reports no control that binds the mailbox, so none is used.
+  What limits the harm:
+  - the memory always shows who is said to have said it, by email and when;
+  - an emailed claim never overrides, replaces or promotes over the owner's
+    own statement, and a contradiction is flagged to the owner;
+  - a first-class memory stays provisional and sensitive, out of the
+    session-start summary and out of dreaming, until a known sender repeats
+    it or the owner confirms it. A second message that passes the same way
+    would count as that repeat;
+  - a failed check blocks, and nobody outside the domain can pass: a pass
+    needs mail authenticated as the domain itself.
+
+  ADR-0336 reads signatures under the same control and carries the same
+  risk. The owner asked that mail from people they know form first-class
+  memories; the owner accepts this risk with that, or revisits the rule here
+  and in ADR-0336 together.
 - A first-class statement no longer carries identifiers, so two emails that say
   the same thing read alike apart from sender and date. The renewal rule folds
   the exact repeats.

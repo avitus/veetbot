@@ -1027,7 +1027,7 @@ horizon and the tentative construction.
   that resolves to exactly one active or provisional person in People through
   an owner-confirmed, channel-observed or owner-stated identifier. A sender check that failed or gave no verdict,
   an unresolved or ambiguous address, and the owner's own address
-  on received mail are unknown. A check with no verdict earns no standing and takes none from a memory that is already first-class; a failed check demotes.
+  on received mail are unknown. A check with no verdict earns no standing and takes none from a memory that is already first-class; a failed check demotes. A passed check vouches for the sending domain, not the mailbox: ADR-0340 records that residual risk and what limits it.
 - **First-class standing** needs a known sender and a thread kept for a year or
   more. The statement reads `<sender> said by email on <date> that <subject>
   <predicate>: "<value>".` Confidence is the extraction's, up to the 0.65
@@ -1037,7 +1037,7 @@ horizon and the tentative construction.
   statement, the 0.4 cap, the hypothesis derivation, the tentative longevity
   and the review flag.
 - **Re-rating.** Retention and standing are recomputed after every saved
-  assessment of the thread, whichever path saved it, and at once when the owner gives or undoes feedback
+  assessment of the thread, whichever path saved it (each is saved with a mark that the re-rating clears in its own transaction, and a refresh follows up any mark left by a stopped refresh or a pause, whatever the assessment's freshness), and at once when the owner gives or undoes feedback
   on it. A retried feedback request or a repeated undo writes nothing and re-rates again. Importance feedback on a person or a topic, saved or undone, also lengthens or promotes memories at once in the other threads it matches (up to 250, newest first, within three quarters of a second) and shortens or demotes nothing there; that waits for each thread's next assessment or the command. A re-rating lengthens or promotes on whatever the stored thread shows.
   It shortens only when the importance is known and the thread is held whole,
   changes standing only when the memory's message is among those held, and
@@ -1048,7 +1048,7 @@ horizon and the tentative construction.
   the command below. Only a live memory that is still inferred, still under this policy,
   still worded as an email statement and not yet past its expiry is touched. A
   memory the owner's own words took over is the owner's, and an expired memory
-  is never revived. A
+  is never revived, with one exception: a memory the owner's own feedback left past due is noted on its retained source record, and a later re-rating that gives it a retention still running puts it back as it was. A
   change of standing rewords the statement in place and moves the derivation,
   longevity and review flag with it. A promoted guess keeps its stored
   confidence. Each applied change appends one content-free
@@ -1060,7 +1060,7 @@ horizon and the tentative construction.
   moves and the expiry is recomputed and never shortened. A first-class memory
   becomes active when the later message is from a known sender too; a guess
   stays provisional. The message that formed a memory sets its standing; the
-  message that supplied its last evidence sets its retention. The retained source record says which messages formed and renewed each memory, so a message is told apart by itself and not by its timestamp. The owner's own
+  message that supplied its last evidence sets its retention. The retained source record says which messages formed and renewed each memory, so a message is told apart by itself and not by its timestamp. A record written before that was kept formed a memory only when the memory's own record line names its message; named by nothing, it never restands or shortens the memory. The owner's own
   statement about the same subject takes the memory over under the ordinary
   rules, and "Still true" replaces it at owner authority.
 - **One fact, one memory (ADR-0341).** A thread's analysis restarts when a
@@ -1069,7 +1069,7 @@ horizon and the tentative construction.
   - A message forms one memory per fact: a proposal with the same subject,
     belief type and value as a memory the message already formed changes
     nothing, whatever that memory's status. Values are compared without case,
-    spacing, surrounding quotation marks or a closing punctuation mark. Every other mark is part of the value: `-5 °C` is not `5 °C`.
+    spacing, surrounding quotation marks or a closing punctuation mark. Every other mark is part of the value: `-5 °C` is not `5 °C`. The value is read past the subject the memory is stored under, also when that is a person's identity followed by the subject.
   - A fact whose quote is quoted text forms nothing and renews nothing. Quoted
     text appears in the message only on lines marked `>`, or is a quote of at
     least six words that an earlier message of the stored thread already
@@ -1079,7 +1079,7 @@ horizon and the tentative construction.
   - `agent memory merge-email-duplicates --owner TENANT/PRINCIPAL` merges the
     copies already stored. Within a thread, live email memories that share a
     subject, a belief type and a value are one fact: the earliest evidence
-    stays and each copy is superseded by it. The memory kept takes its copies' latest evidence date and longest retention, and the message behind that evidence is linked to it for later re-rating. Copies under different subjects
+    stays and each copy is superseded by it. The memory kept takes its copies' latest evidence date and longest retention, and the message behind that evidence is linked to it for later re-rating. A memory counts only in the thread that formed it, and a copy whose latest evidence no listed message answers for under the merge's locks is left for the next run. Copies under different subjects
     are counted and left. It previews unless `--confirm` is given, reports
     counts only, and appends one content-free `email.memory.merged` event per
     thread it changes.
