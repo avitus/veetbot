@@ -398,18 +398,18 @@ archive recovery has written a newer revision; retention timestamps remain exact
 its rows, kept lists, counts, hidden archives, archive requests still waiting,
 their polls and status reads, and the reader if it shows one of its
 conversations. An unsaved edit goes only with a conversation known to be that
-account's. Any answer for something retired this way is ignored. The list is
-then asked again, and the latest list read asked after the refusal decides, by
-the way it ends:
+account's. Any answer for something retired this way is ignored, and so is every
+list read asked before the refusal. The list is then asked again, and the latest
+list read asked after the refusal decides, by the way it ends:
 
 | The list read ends by | What is cleared | Email's visit | Error route |
 | --- | --- | --- | --- |
 | answering | nothing more | goes on | the refusal's message above the list |
-| being refused | everything | goes on while Email is on screen | the refusal's message; no sign-in is asked for |
+| being refused, or failing for any reason but needing a sign-in | everything | goes on while Email is on screen | the refusal's message; no sign-in is asked for |
 | needing the owner to sign in again | everything | ends, as after any such answer | the usual one: the connection asks the owner to sign in |
-| failing for any other reason | everything | goes on while Email is on screen | the refusal's message; no sign-in is asked for |
-| being replaced by another list read | nothing | goes on | none; the newer read decides |
-| not being able to start, including the read a collection or search change asks for | everything | goes on while Email is on screen | the refusal's message |
+| being replaced by another list read, as each regular refresh does while a refusal still waits | nothing | goes on | none; the newer read decides |
+| not being able to start for want of a connection to ask through, including the read a collection or search change asks for | everything | goes on while Email is on screen | the refusal's message |
+| never starting because its caller no longer counts: a cancelled task, or a visit that has ended | nothing | unchanged | none; the read that is out still decides |
 | the owner leaving Email first | everything | ends | the refusal's message |
 
 A visit that goes on after a clear keeps Refresh and the regular refreshes
