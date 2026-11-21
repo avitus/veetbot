@@ -67,6 +67,9 @@ def test_a_signature_in_quoted_or_forwarded_text_is_never_read(body: str) -> Non
         "Rory O'Driscoll\nI wanted to follow up on the note you sent over to us last week.\n",
         # The name introduces a list.
         "Attendees:\nRory O'Driscoll\nPartner, Scale\n",
+        # A blank line under the heading does not make the list a signature.
+        "Attendees:\n\nRory O'Driscoll\nAlex Rivera\nSam Example\n",
+        "*Attendees:*\n\nRory O'Driscoll\nAlex Rivera\n",
         # No line structure: Gmail supplied only flattened HTML.
         "Thanks. Rory O'Driscoll Partner, Scale 650.378.6038",
     ],

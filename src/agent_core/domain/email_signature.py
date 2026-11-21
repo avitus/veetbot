@@ -76,7 +76,10 @@ def named_signature(
     `own_text_only`, the name must come before any quoted line or reply or
     forward header, so a signature inside history is never found.
     """
+    above = ""
     for index, line in enumerate(lines):
+        # The nearest line with text above this one, across any blank lines.
+        heading, above = above, line or above
         if own_text_only and (line.startswith(">") or starts_history(line)):
             return None
         # A cheap bound first: the scan must stay linear on a hostile long line.
@@ -84,7 +87,7 @@ def named_signature(
             continue
         if visible(line).casefold() != name:
             continue
-        if index and lines[index - 1].rstrip("\\").endswith(":"):
+        if len(heading) <= 2000 and visible(heading).rstrip("\\").endswith(":"):
             # A line ending in a colon introduces a list the name belongs to.
             continue
         end = index + 1

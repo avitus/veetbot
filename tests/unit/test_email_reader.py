@@ -1086,6 +1086,9 @@ def test_block_under_the_writers_own_name_goes_when_it_ends_the_message() -> Non
         "Thanks.\n\nRiley Example\nPartner\n\nP.S. Bring the printed deck.",
         # A list the name belongs to, and more lines than a signature has.
         "Attending:\nRiley Example\nSam Example\nJamie Example",
+        # The list is still a list when a blank line or a paragraph sets it apart.
+        "Attending:\n\nRiley Example\nSam Example\nJamie Example",
+        "<p><b>Attending:</b></p><div>Riley Example</div><div>Sam Example</div>",
         "Riley Example\n" + "\n".join(f"Guest {index}" for index in range(13)),
     ],
 )
