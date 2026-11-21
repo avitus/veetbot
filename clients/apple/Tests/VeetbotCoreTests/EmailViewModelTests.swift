@@ -1384,6 +1384,109 @@ import SwiftUI
         await archiving.value
     }
 
+    /// A kept list comes back with the counts it was read with, so the hidden conversation is
+    /// taken off them as it stood for that read. A later page that showed it changed speaks
+    /// only for its own counts.
+    @Test func testKeptListComesBackWithTheMembershipItsCountsHad() async throws {
+        let requests = EmailRequestRecorder()
+        let admission = EmailArchiveResponseGate()
+        let answered = EmailTestFlag()
+        let other = archiveThreadJSON(inInbox: true)
+            .replacingOccurrences(of: "\(threadID)", with: "00000000-0000-0000-0000-000000000899")
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), admission) }
+            let row = self.archiveThreadJSON(inInbox: true)
+                .replacingOccurrences(of: "\"needs_reply\":true", with: "\"needs_reply\":\(!answered.isSet)")
+            guard request.url!.path.hasSuffix("threads") else { return (200, row, nil) }
+            // Important holds the conversation; the Inbox's first page stops short of it.
+            let inbox = request.url?.query?.contains("view=inbox") == true
+            return (200, "{\"items\":[\(inbox ? other : row)],\"next_cursor\":\(inbox ? "\"100\"" : "null"),"
+                + "\"collection_counts\":{\"priority\":7,\"inbox\":150,\"needs_you\":\(answered.isSet ? 8 : 9),"
+                + "\"handled\":0,\"suspected_spam\":2},\"total_count\":\(inbox ? 150 : 7)}", nil)
+        }
+        defer { admission.release(); model.resetConnection() }
+        await model.reload()
+        let row = try #require(model.items.first)
+        let archiving = Task { await model.setThreadArchived(row, archived: true) }
+        try await waitForEmailTestCondition { admission.isWaiting }
+        model.setCollection(.inbox)
+        try await waitForEmailTestCondition { model.collectionCounts != nil && !model.isReadingList }
+        let kept = Self.archiveCountsWithoutIt(inbox: 150)
+        #expect(model.collectionCounts == kept)
+        answered.set()
+        model.setListView("priority")
+        try await waitForEmailTestCondition { model.collectionCounts != nil && !model.isReadingList }
+        #expect(model.collectionCounts == EmailCollectionCounts(
+            inbox: 149, needsYou: 8, handled: 0, priority: 6, suspectedSpam: 2))
+        model.setCollection(.inbox)
+        // The kept Inbox is shown at once, with the counts of the read that produced it.
+        #expect(model.collectionCounts == kept, "Those counts held the conversation in Needs you")
+        admission.release()
+        await archiving.value
+    }
+
+    /// A kept list's counts were adjusted for the conversations hidden when it was read. Once
+    /// another conversation is hidden it is not shown again as it was: its counts wait for a read.
+    @Test func testKeptListsAreNotShownAgainOnceAnotherConversationIsHidden() async throws {
+        let other = archiveThreadJSON(inInbox: true)
+            .replacingOccurrences(of: "\(threadID)", with: "00000000-0000-0000-0000-000000000899")
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            guard request.url!.path.hasSuffix("threads") else {
+                return (200, self.archiveThreadJSON(inInbox: true, status: "pending"))
+            }
+            let inbox = request.url?.query?.contains("view=inbox") == true
+            let row = self.archiveThreadJSON(inInbox: true)
+            return (200, "{\"items\":[\(inbox ? other : row)],\"next_cursor\":\(inbox ? "\"100\"" : "null"),"
+                + "\"collection_counts\":\(Self.archiveCountsJSON(counted: true, inbox: 150)),"
+                + "\"total_count\":\(inbox ? 150 : 7)}")
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        model.setCollection(.inbox)
+        try await waitForEmailTestCondition { model.collectionCounts != nil && !model.isReadingList }
+        await model.openThread(threadID)
+        model.setListView("priority")
+        #expect(model.collectionCounts == nil, "The kept Important list knew nothing of this archive")
+        #expect(model.items.isEmpty)
+    }
+
+    /// Nor is a kept list shown again as it was once a conversation hidden when it was read has
+    /// settled: its counts were lowered for a conversation Gmail has since removed.
+    @Test func testKeptListsAreNotShownAgainOnceAHiddenConversationSettles() async throws {
+        let requests = EmailRequestRecorder()
+        let admission = EmailArchiveResponseGate()
+        let confirmed = EmailTestFlag()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), admission) }
+            // Other mail keeps archived conversations; there the row itself shows the confirmation.
+            let row = self.archiveThreadJSON(inInbox: !confirmed.isSet, status: confirmed.isSet ? "completed" : nil)
+            guard request.url!.path.hasSuffix("threads") else { return (200, row, nil) }
+            return (200, "{\"items\":[\(row)],\"next_cursor\":null,"
+                + "\"collection_counts\":\(Self.archiveCountsJSON(counted: !confirmed.isSet)),"
+                + "\"total_count\":7}", nil)
+        }
+        defer { admission.release(); model.resetConnection() }
+        await model.reload()
+        let row = try #require(model.items.first)
+        let archiving = Task { await model.setThreadArchived(row, archived: true) }
+        try await waitForEmailTestCondition { admission.isWaiting }
+        await model.reload(preserveOrder: true)
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt(), "Important is kept, lowered for the hidden row")
+        confirmed.set()
+        model.setListView("other")
+        try await waitForEmailTestCondition { model.collectionCounts != nil && !model.isReadingList }
+        #expect(model.items.count == 1, "Other mail shows the archived conversation again")
+        model.setListView("priority")
+        #expect(model.collectionCounts == nil, "The kept Important counts still held the conversation")
+        admission.release()
+        await archiving.value
+    }
+
     /// Switching collections straight after archiving puts a status read on the wire before the
     /// archive is admitted. Admission overtakes it, so it no longer decides the archive's
     /// outcome, but it still shows the conversation in the Inbox the counts describe.

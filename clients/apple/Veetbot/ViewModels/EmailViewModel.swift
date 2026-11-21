@@ -130,6 +130,8 @@ public final class EmailViewModel: ObservableObject {
     private struct CachedMailList {
         let rows: [EmailThreadView]
         let counts: EmailCollectionCounts?
+        /// The hidden conversations those counts held, each as it stood for that read.
+        let counted: [UUID: EmailThreadView]
         let total: Int?
         let cursor: String?
         let seenCursors: Set<String>
@@ -622,8 +624,9 @@ public final class EmailViewModel: ObservableObject {
         loadedCollectionCounts = cached?.counts
         loadedListTotal = cached?.total
         loadedListVersion = cached?.version
-        // A kept list brings back its own rows with its counts; the read that follows settles the rest.
-        if let cached { recordCountedArchives(cached.rows, replacing: false) }
+        // A kept list comes back with the hidden conversations its counts held, as they stood
+        // for that read. What a later page learned belongs to that page's counts.
+        if let cached { countedPendingArchives = cached.counted }
         nextCursor = cached?.cursor
         seenCursors = cached?.seenCursors ?? []
         hasMore = nextCursor != nil
@@ -674,7 +677,8 @@ public final class EmailViewModel: ObservableObject {
             return
         }
         cachedMailLists[listView] = CachedMailList(rows: inboxItems, counts: loadedCollectionCounts,
-            total: loadedListTotal, cursor: nextCursor, seenCursors: seenCursors, version: loadedListVersion)
+            counted: countedPendingArchives, total: loadedListTotal, cursor: nextCursor,
+            seenCursors: seenCursors, version: loadedListVersion)
     }
 
     /// Allows explicit inactive reads while binding visible inbox work to its current foreground visit.
@@ -2028,7 +2032,7 @@ public final class EmailViewModel: ObservableObject {
     private func observeArchive(_ value: EmailThreadView) {
         guard acceptsArchiveOperation(value), let operation = value.archiveOperation else { return }
         if operation.status == "completed" || operation.status == "failed" || operation.status == "uncertain" {
-            archiveHiddenThreads.remove(value.id)
+            if archiveHiddenThreads.remove(value.id) != nil { cachedMailLists = [:] }
             archiveRequests[value.id] = nil
             archiveErrors[value.id] = nil
             archiveReadErrors.remove(value.id)
@@ -2036,7 +2040,8 @@ public final class EmailViewModel: ObservableObject {
             archiveTasks[value.id] = nil
         } else {
             if operation.targetArchived {
-                archiveHiddenThreads.insert(value.id)
+                // A kept list's counts were adjusted for the conversations hidden when it was read.
+                if archiveHiddenThreads.insert(value.id).inserted { cachedMailLists = [:] }
                 // Hidden between two reads of the counts (an archive begun on another device,
                 // first seen in the reader): they hold it as it has just been read.
                 if countedPendingArchives[value.id] == nil, isInLoadedCounts(value) {
