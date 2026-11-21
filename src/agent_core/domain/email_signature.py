@@ -2,14 +2,15 @@
 
 The Email reader leaves the block out of the reading text; People reads a known
 sender's contact details from it. Both use the one rule here, so what the owner
-no longer sees and what People reads are the same lines. The rule for what a
-code fence holds lives here too, so the reader's placement and this rule agree.
+no longer sees and what People reads are the same lines. Which lines of a text
+are code, fenced or indented, is decided here too and nowhere else, from the
+lines as written, so no caller's stripping or reflow can hide a code block.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from email.utils import parseaddr
 
@@ -88,24 +89,78 @@ def fence_after(line: str, fence: tuple[str, int] | None) -> tuple[str, int] | N
     return None if run[0] == fence[0] and len(run) >= fence[1] and not rest.strip() else fence
 
 
-def named_in_code(source: Iterable[str], name: str, *, visible: Callable[[str], str]) -> bool:
-    """Whether a line indented as code (four columns or a tab) is exactly the writer's name.
+def _columns(line: str) -> int:
+    """How far a line is set in: spaces, and tabs to the next stop of four."""
+    columns = 0
+    # Past this a line is deep whatever follows, and the count stays cheap.
+    for character in line[:64]:
+        if character == " ":
+            columns += 1
+        elif character == "\t":
+            columns += 4 - columns % 4
+        else:
+            break
+    return columns
 
-    `source` is the text as it was written, before any line is stripped. Such a
-    block is an example of a signature, so no signature is read from that text.
+
+def code_lines(source: Sequence[str]) -> list[bool]:
+    """Which lines of a text, as it was written, stand in a code block (ADR-0336).
+
+    The one place that decides it. Callers pass the lines before stripping or
+    reflowing them and carry the answer with the lines, so a signature-shaped
+    example in a code block is never taken for a signature.
+
+    A fenced block is code, closed or not. So is an indented block: lines set
+    four columns or a tab in from the text's own margin, starting under a blank
+    line or under a line that ends in a colon, and running across blank lines
+    while the indentation holds. An indented line is not code where a mailer
+    indents ordinary text: continuing a paragraph, under a list item, in a
+    quoted line, or under a reply or forward header.
     """
-    for line in source:
-        if line[:1] not in (" ", "\t"):
+    texts = [line.strip() for line in source]
+    columns = [_columns(line) for line in source]
+    margin = min(
+        (columns[index] for index, text in enumerate(texts) if text and text[0] != ">"),
+        default=0,
+    )
+    coded = [False] * len(texts)
+    fence: tuple[str, int] | None = None
+    # In an indented block; under a list item; under a reply or forward header.
+    code = listed = history = False
+    # What the line above allows: it was blank, or it ends in a colon.
+    blank, colon = True, False
+    for index, text in enumerate(texts):
+        inside, fence = fence, fence_after(text, fence)
+        if inside or fence:
+            coded[index] = True
+            code, blank, colon = False, True, False
             continue
-        written = line.strip()
-        indent = line[: len(line) - len(line.lstrip(" \t"))]
-        if (
-            ("\t" in indent or len(indent) >= 4)
-            and len(name) <= len(written) <= len(name) + 8
-            and visible(written).casefold() == name
-        ):
-            return True
-    return False
+        if not text:
+            blank = True
+            continue
+        deep = columns[index] - margin >= 4
+        if text[0] == ">":
+            code = listed = False
+        elif deep and code:
+            coded[index] = True
+        elif history:
+            code = False
+        elif starts_history(text) and (text[0] != "-" or text[-1] == "-"):
+            # A header proper. A line that only starts with dashes, such as the
+            # comment `-- get users`, is not one, and may be code.
+            history, code = True, False
+        elif _LIST_ITEM.match(text):
+            code, listed = False, True
+        elif deep and (blank or colon) and not listed:
+            coded[index] = code = True
+        elif not deep:
+            code = False
+            if blank:
+                # A paragraph of its own ends the list above it.
+                listed = False
+        blank = False
+        colon = not coded[index] and text.rstrip("*_\\ ").endswith(":")
+    return coded
 
 
 def _list_continues(line: str, listed: bool) -> bool:
@@ -159,25 +214,27 @@ def named_signature(
     *,
     visible: Callable[[str], str],
     own_text_only: bool = False,
+    code: Sequence[bool] | None = None,
 ) -> tuple[int, int] | None:
     """The writer's own name line and the end of the short lines under it.
 
     The name alone is a sign-off. Prose, a postscript or a long block under it
     is the message, and so is anything followed by more than history. A name
-    inside a list is an entry of it, wherever in the list it stands. A fenced
-    block is the message: nothing in it is a signature, and a fence or a table
-    under the name makes that block the message too. With
+    inside a list is an entry of it, wherever in the list it stands. A code
+    block is the message: nothing in it is a signature, and code or a table
+    under the name makes that block the message too. `code` says which lines
+    are code, as `code_lines` read them from the text before it was stripped;
+    without it only a fence can be seen in `lines`. With
     `own_text_only`, the name must come before any quoted line or reply or
     forward header, so a signature inside history is never found.
     """
+    coded = code if code is not None and len(code) == len(lines) else code_lines(lines)
     above = ""
     below = False
-    fence: tuple[str, int] | None = None
     for index, line in enumerate(lines):
-        inside, fence = fence, fence_after(line, fence)
-        if inside or fence:
-            # A fence line or a line a fence holds. The block is one unit of the
-            # message, so it also ends a list and is no heading of one.
+        if coded[index]:
+            # A line of a code block. The block is one unit of the message, so
+            # it also ends a list and is no heading of one.
             above, below = "", False
             continue
         # The nearest line with text above this one, across any blank lines, and
@@ -213,7 +270,7 @@ def named_signature(
                     or POSTSCRIPT.match(text)
                     or (len(text.split()) > 8 and text[-1] in ".?!")
                     # A code block or a table row under the name is the message.
-                    or fence_after(following, None)
+                    or coded[end]
                     or (following.startswith("|") and following.endswith("|"))
                 ):
                     block = 0
@@ -244,10 +301,10 @@ def sender_contact(body: str, sender: str) -> SignatureContact | None:
     if not name:
         return None
     source = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    if named_in_code(source, name, visible=_written):
-        return None
     lines = [line.strip() for line in source]
-    found = named_signature(lines, name, visible=_written, own_text_only=True)
+    found = named_signature(
+        lines, name, visible=_written, own_text_only=True, code=code_lines(source)
+    )
     if found is None:
         return None
     block = [_written(line) for line in lines[found[0] + 1 : found[1]] if line]

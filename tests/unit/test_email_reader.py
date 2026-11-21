@@ -1204,6 +1204,133 @@ def test_a_signature_under_a_closed_fence_still_goes() -> None:
     assert reading_body(indented, sender=RILEY) == "See you there."
 
 
+EXAMPLE = ["-- ", "Jamie Example", "Director, Example", "555 0100"]
+
+
+def _indented(indent: str, lines: list[str] = EXAMPLE) -> str:
+    return "\n".join(indent + line for line in lines)
+
+
+@pytest.mark.parametrize("indent", ["    ", "\t", "      ", "  \t"])
+@pytest.mark.parametrize("above", ["Format:\n", "Format:\n\n", "Here is the format I mean.\n\n"])
+def test_an_indented_example_of_a_delimited_signature_stays(indent: str, above: str) -> None:
+    """An indented code block is the message, though it is shaped like a signature."""
+    body = above + _indented(indent)
+    result = reading_body(body)
+    assert result == reading_body(body, keep_signatures=True)
+    assert all(line.strip() in result for line in EXAMPLE)
+
+
+def test_a_signature_below_an_indented_example_still_goes() -> None:
+    example = "Format:\n" + _indented("    ")
+    signature = "\n\n-- \nRiley Example\nPartner\n650.555.0100"
+    # An ordinary delimiter at the margin is a signature as before.
+    assert reading_body("See you there." + signature) == "See you there."
+    # The example keeps its lines and the real signature under it is left out.
+    signed = example + "\n\nSee you there." + signature
+    result = reading_body(signed)
+    assert result == reading_body(example + "\n\nSee you there.", keep_signatures=True)
+    assert "Jamie Example" in result and "Riley Example" not in result
+    # The same when the sender's own name leads the real one, with no delimiter.
+    named = example + "\n\nSee you there.\n\nRiley Example\nPartner\n650.555.0100"
+    assert reading_body(named, sender=RILEY) == result
+    # And the sender's own name in the example does not stop that.
+    own = "Format:\n" + _indented("    ", ["Riley Example", "Partner", "650.555.0100"])
+    signed = own + "\n\nSee you there.\n\nRiley Example\nPartner\n650.555.0100"
+    assert reading_body(signed, sender=RILEY) == reading_body(own + "\n\nSee you there.")
+
+
+def test_code_block_lines_keep_their_place_through_every_reflow() -> None:
+    """Which lines are code is read once, as written, and follows them as lines move."""
+    wrapped = (
+        "This is a line long enough that the mailer wrapped it at seventy columns,\n"
+        "so the reader joins it.\n\n"
+    )
+    assert len(wrapped.split("\n")[0]) + len(" so") > 70
+    example = "Format:\n" + _indented("    ", ["-- ", "Riley Example", "Partner"])
+    body = wrapped + example
+    assert reading_body(body, sender=RILEY) == reading_body(body, keep_signatures=True)
+    # A forwarded envelope collapses to fewer lines above a fenced example.
+    forwarded = (
+        "FYI\n\n---------- Forwarded message ---------\nFrom: Sam Example <sam@example.com>\n"
+        "Date: Fri, Nov 20, 2026\nSubject: Format\nTo: Riley Example <riley@example.com>\n\n"
+        "Like this.\n\n```\nRiley Example\nPartner\n650.555.0100\n```"
+    )
+    result = reading_body(forwarded, sender=RILEY)
+    assert result == reading_body(forwarded) and "650.555.0100" in result
+    # A block that repeats an earlier one is shown once, unless the repeat is code.
+    repeated = (
+        "Our footer:\n\nAcme Rocket Company\n1 Launch Way\nSuite 400\n\n"
+        "Copy it exactly.\n\n"
+        + _indented("    ", ["Acme Rocket Company", "1 Launch Way", "Suite 400"])
+    )
+    assert reading_body(repeated).count("Acme Rocket Company") == 2
+    flush = repeated.replace("    ", "")
+    assert reading_body(flush).count("Acme Rocket Company") == 1
+
+
+@pytest.mark.parametrize(
+    "body, kept",
+    [
+        # Under a list item the indentation is the list's own.
+        (
+            "Next steps:\n  1. Send the deck.\n  2. Book the room.\n\n"
+            + _indented("     ", ["-- ", "Riley Example", "Partner", "650.555.0100"]),
+            "Next steps:\n  1. Send the deck.\n  2. Book the room.",
+        ),
+        (
+            "Next steps:\n    - Send the deck.\n    - Book the room.\n\n"
+            + _indented("    ", ["Riley Example", "Partner", "650.555.0100"]),
+            "Next steps:\n    - Send the deck.\n    - Book the room.",
+        ),
+        # A whole message set in from the edge has no indentation of its own.
+        (
+            _indented("    ", ["See you there.", "", "-- ", "Riley Example", "Partner"]),
+            "See you there.",
+        ),
+        (
+            _indented("\t", ["See you there.", "", "Riley Example", "Partner", "650.555.0100"]),
+            "See you there.",
+        ),
+        # An indented line that continues a paragraph is not a code block.
+        ("See you there.\n    -- \n    Riley Example\n    Partner", "See you there."),
+        ("See you there.\n\nRiley Example\n    Partner\n    650.555.0100", "See you there."),
+        # A reply quoted by indentation under its header is history, not code.
+        (
+            "Agreed.\n\nOn Fri, Nov 20, 2026 at 6:13 AM Sam Example <sam@example.com> wrote:\n\n"
+            + _indented("    ", ["Are you coming?", "", "-- ", "Sam Example", "Example Inc"]),
+            "Agreed.\n\nOn Fri, Nov 20, 2026 at 6:13 AM Sam Example <sam@example.com> wrote:\n\n"
+            "Are you coming?",
+        ),
+    ],
+)
+def test_an_indented_signature_that_is_no_code_block_still_goes(body: str, kept: str) -> None:
+    """Mailers indent real signatures: under a list, in a set-in body, in quoted history."""
+    assert reading_body(body, sender=RILEY) == reading_body(kept)
+
+
+def test_a_fence_elsewhere_no_longer_keeps_a_delimited_signature() -> None:
+    """Code is decided line by line, so one fence does not make the whole message code."""
+    above = "Thanks.\n\n```\nmake check\n```"
+    signature = "\n\n-- \nRiley\nSent from my phone"
+    assert reading_body(above + signature) == above
+    assert reading_body("Use ``` to open a fence." + signature) == "Use ``` to open a fence."
+    # A delimiter the fence holds is still an example, closed or not.
+    for fenced in ("```\n-- \nJamie Example\n```", "Thanks.\n\n```\n-- \nJamie Example"):
+        assert reading_body(fenced) == fenced.replace("-- ", "--")
+    # A fenced block under the delimiter is more of the message, so that block stays.
+    under = "Thanks.\n\n-- \nRiley\n```\nmake check\n```"
+    assert reading_body(under) == under.replace("-- ", "--")
+
+
+def test_an_indented_block_led_by_two_dashes_is_code_not_history() -> None:
+    """A comment line such as `-- get users` is not a reply or forward header."""
+    body = "The query.\n\n    -- get users\n    SELECT 1\n\nAnd the format:\n" + _indented("    ")
+    result = reading_body(body)
+    assert result == reading_body(body, keep_signatures=True)
+    assert "Jamie Example" in result and "SELECT 1" in result
+
+
 def test_reply_alternatives_are_compared_line_by_line() -> None:
     """A link the reader labelled by host, or a repeat shown once, is not missing prose."""
     from agent_core.application.email_reader import merge_image_body

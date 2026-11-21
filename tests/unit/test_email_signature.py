@@ -241,6 +241,83 @@ def test_the_fence_rule_is_the_readers_and_stays_quick() -> None:
     assert time.monotonic() - started < 5
 
 
+def test_code_lines_are_decided_from_the_text_as_written() -> None:
+    """One place says which lines stand in a code block, before anything strips them."""
+    from agent_core.domain.email_signature import code_lines
+
+    def coded(text: str) -> str:
+        return "".join("#" if flag else "." for flag in code_lines(text.split("\n")))
+
+    # An indented block under a blank line, or under the line that introduces it.
+    assert coded("Like this.\n\n    a\n    b\n\n    c\nafter") == "..##.#."
+    assert coded("Format:\n    a\n\tb\nafter") == ".##."
+    assert coded("    a\nb") == "#." and coded("b\n\n     a") == "..#"
+    # A fenced block, closed or not; a fence is read from the stripped line.
+    assert coded("a\n```\nb\n```\nc") == ".###." and coded("a\n~~~\nb") == ".##"
+    # Three columns are not code, and a tab counts to the next stop of four.
+    assert coded("a\n\n   b\n\n  \tc") == "....#"
+    # An indented line that continues a paragraph is not a code block.
+    assert coded("a\n    b\n    c") == "..."
+    # Indentation is measured from the text's own margin.
+    assert coded("    a\n\n    b\n\n        c") == "....#"
+    # Under a list item the indentation is the list's own, until a paragraph ends the list.
+    assert coded("- a\n\n    b\n\n    c") == "....."
+    assert coded("Steps:\n    1. a\n    2. b\n\n    c") == "....."
+    assert coded("- a\n\npara\n\n    b") == "....#"
+    # A quoted line is never code, and neither is anything under a reply header.
+    assert coded("a\n\n>     b\n\n    c") == "....#"
+    assert coded("a\n\nOn Fri, Nov 20, 2026 Sam wrote:\n\n    b\n```\nc") == ".....##"
+    # A header proper ends in dashes; a comment that starts with two is code.
+    assert coded("a\n\n    -- b\n    c\n\nd:\n    e") == "..##..#"
+    assert coded("a\n\n-----Original Message-----\n\n    b") == "....."
+    assert code_lines([]) == []
+
+
+@pytest.mark.parametrize("indent", ["    ", "\t"])
+@pytest.mark.parametrize("above", ["Format:\n", "Here is the format I mean.\n\n"])
+def test_an_indented_example_of_a_signature_is_not_read(indent: str, above: str) -> None:
+    example = "\n".join(
+        indent + line for line in ["-- ", "Rory O'Driscoll", "Partner, Scale", "650.378.6038"]
+    )
+    assert sender_contact(above + example + "\n", RORY) is None
+    # The sender's own signature under the example is still theirs.
+    signed = above + example + "\n\nThanks.\n\nRory O'Driscoll\nManaging Partner\n650.555.0100\n"
+    assert sender_contact(signed, RORY) == SignatureContact(
+        title="Managing Partner", phones=("650.555.0100",)
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Under a list item the indentation is the list's own.
+        "Next steps:\n  1. Send the deck.\n  2. Book the room.\n\n"
+        "     Rory O'Driscoll\n     Partner, Scale\n     650.378.6038\n",
+        # A whole message set in from the edge has no indentation of its own.
+        "    Thanks.\n\n    Rory O'Driscoll\n    Partner, Scale\n    650.378.6038\n",
+        "\tThanks.\n\n\tRory O'Driscoll\n\tPartner, Scale\n\t650.378.6038\n",
+        # An indented line that continues a paragraph is not a code block.
+        "Thanks.\n    Rory O'Driscoll\n    Partner, Scale\n    650.378.6038\n",
+        "Thanks.\n\nRory O'Driscoll\n    Partner, Scale\n    650.378.6038\n",
+    ],
+)
+def test_an_indented_signature_that_is_no_code_block_is_still_read(body: str) -> None:
+    assert sender_contact(body, RORY) == SignatureContact(
+        title="Partner, Scale", phones=("650.378.6038",)
+    )
+
+
+def test_deciding_code_lines_stays_quick_on_hostile_text() -> None:
+    import time
+
+    from agent_core.domain.email_signature import code_lines
+
+    started = time.monotonic()
+    code_lines([" " * 200_000 + "x", "\t" * 200_000, "a:" * 100_000] * 20)
+    code_lines(["Format:", "    x", ""] * 100_000)
+    assert time.monotonic() - started < 5
+
+
 def test_a_sender_without_a_two_word_display_name_gives_nothing() -> None:
     assert sender_contact(SIGNED, "rory@scalevp.test") is None
     assert sender_contact(SIGNED.replace("Rory O'Driscoll", "Rory"), "Rory <r@x.test>") is None

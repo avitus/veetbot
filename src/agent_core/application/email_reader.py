@@ -17,8 +17,8 @@ from agent_core.domain.email_signature import HISTORY as _HISTORY
 from agent_core.domain.email_signature import POSTSCRIPT as _POSTSCRIPT
 from agent_core.domain.email_signature import SIGNATURE_LINES as _SIGNATURE_LINES
 from agent_core.domain.email_signature import (
+    code_lines,
     fence_after,
-    named_in_code,
     named_signature,
     sender_name,
 )
@@ -133,10 +133,14 @@ def _starts_block(content: str) -> bool:
     return bool(_BLOCK_START.match(content) or _RULE.fullmatch(content))
 
 
-def _unwrap(lines: list[str]) -> list[str]:
-    """Rejoin what a mailer wrapped; a line with room for the next word ended on purpose."""
+def _unwrap(lines: list[str], coded: list[bool]) -> tuple[list[str], list[bool]]:
+    """Rejoin what a mailer wrapped; a line with room for the next word ended on purpose.
+
+    `coded` says which lines are code and is returned for the lines that remain.
+    """
     # Each line's pieces join once at the end: growing a string here is quadratic.
     result: list[list[str]] = []
+    kept: list[bool] = []
     for index, line in enumerate(lines):
         previous = lines[index - 1] if index else ""
         prefix, content = _quoted(line)
@@ -145,6 +149,7 @@ def _unwrap(lines: list[str]) -> list[str]:
             if _UNDERLINE.fullmatch(content):
                 # A sender's rule or signature delimiter must not underline a heading.
                 result.append([prefix.rstrip()])
+                kept.append(False)
             elif (
                 not _starts_block(content)
                 and not _RULE.fullmatch(before)
@@ -161,11 +166,15 @@ def _unwrap(lines: list[str]) -> list[str]:
                 result[-1].append(content.strip())
                 continue
         result.append([line])
-    return [" ".join(parts) for parts in result]
+        kept.append(coded[index])
+    return [" ".join(parts) for parts in result], kept
 
 
-def _without_repeated_blocks(lines: list[str]) -> list[str]:
-    """Show a signature once, however each quote level wrapped it."""
+def _without_repeated_blocks(lines: list[str], coded: list[bool]) -> list[str]:
+    """Show a signature once, however each quote level wrapped it.
+
+    A code block that repeats an earlier block is an example of it and stays.
+    """
 
     def depth(line: str) -> int | None:
         """The quote level of a line with text, or None for a blank one."""
@@ -176,9 +185,10 @@ def _without_repeated_blocks(lines: list[str]) -> list[str]:
     seen: set[str] = set()
     for level, group in groupby(lines, key=depth):
         block = list(group)
+        start = len(result)
         if level is not None and len(block) >= _REPEATED_BLOCK_LINES:
             key = "".join("".join(_quoted(line)[1].split()) for line in block).casefold()
-            if key in seen:
+            if key in seen and not any(coded[start : start + len(block)]):
                 # Blank at its own depth, so the quote around it stays one quote.
                 block = [">" * level] * len(block)
             seen.add(key)
@@ -186,24 +196,25 @@ def _without_repeated_blocks(lines: list[str]) -> list[str]:
     return result
 
 
-def _without_delimited_signatures(lines: list[str]) -> list[str]:
+def _without_delimited_signatures(lines: list[str], coded: list[bool]) -> list[str]:
     """Blank a `-- ` delimiter and the unbroken lines under it, at each quote level.
 
     Only a block that ends its level's text is a signature or a list footer: a
     rule between two sections has more of the message below it. A postscript
     line in the block is the message and stays. Any other sentence there goes
     with the block: under a delimiter it is a disclaimer or a list footer.
+    A delimiter in a code block is an example of one and starts no signature.
     """
     result = list(lines)
     for index, line in enumerate(lines):
         prefix, content = _quoted(line)
-        if content != "--":
+        if content != "--" or coded[index]:
             continue
         depth = prefix.count(">")
         end = index + 1
         while end < len(lines) and end - index <= _SIGNATURE_LINES + 1:
             inner_prefix, inner = _quoted(lines[end])
-            if not inner or inner_prefix.count(">") != depth:
+            if not inner or inner_prefix.count(">") != depth or coded[end]:
                 break
             end += 1
         if end == index + 1 or end - index > _SIGNATURE_LINES + 1:
@@ -256,19 +267,16 @@ def _visible(line: str) -> str:
     return re.sub(r"[\[\]*_\\]", "", "".join(kept)).strip()
 
 
-def _without_named_signature(lines: list[str], sender: str, source: str = "") -> list[str]:
+def _without_named_signature(lines: list[str], sender: str, coded: list[bool]) -> list[str]:
     """Blank the writer's own name and the short lines under it that end their text.
 
     The name alone is a sign-off and stays. Prose, a postscript or a long block
     under it is the message, and so is anything followed by more than history.
-    `source` is the plain text as written: where it holds the name indented as
-    code, the block is an example and stays, as a fenced one does.
+    `coded` says which lines are code: a block there is an example and stays.
     People reads the same block for a sender's contact details (ADR-0336).
     """
     name = sender_name(sender)
-    if not name or named_in_code(source.split("\n"), name, visible=_visible):
-        return lines
-    found = named_signature(lines, name, visible=_visible)
+    found = named_signature(lines, name, visible=_visible, code=coded) if name else None
     if found is None:
         return lines
     index, end = found
@@ -276,7 +284,8 @@ def _without_named_signature(lines: list[str], sender: str, source: str = "") ->
     start = index
     while start and not lines[start - 1]:
         start -= 1
-    start = start - 1 if start and lines[start - 1].rstrip("\\") == "--" else index
+    delimited = start and lines[start - 1].rstrip("\\") == "--" and not coded[start - 1]
+    start = start - 1 if delimited else index
     return [*lines[:start], *[""] * (end - start), *lines[end:]]
 
 
@@ -476,9 +485,13 @@ class _HTMLText(HTMLParser):
             self.parts.append(_inert(re.sub(r"\s+", " ", data)))
 
 
-def _forwarded(lines: list[str]) -> list[str]:
-    """Collapse only a recognized, bounded forwarding envelope; retain its source."""
+def _forwarded(lines: list[str], coded: list[bool]) -> tuple[list[str], list[bool]]:
+    """Collapse only a recognized, bounded forwarding envelope; retain its source.
+
+    `coded` says which lines are code and is returned for the lines that remain.
+    """
     result: list[str] = []
+    kept: list[bool] = []
     index = 0
     while index < len(lines):
         if re.fullmatch(
@@ -499,11 +512,13 @@ def _forwarded(lines: list[str]) -> list[str]:
                 and not lines[end]
             ):
                 result.extend(["", "> Forwarded from " + sender, ""])
+                kept.extend([False] * 3)
                 index = end + 1
                 continue
         result.append(lines[index])
+        kept.append(coded[index])
         index += 1
-    return result
+    return result, kept
 
 
 def reading_source(body: str, html: str) -> str:
@@ -543,13 +558,20 @@ def reading_body(
         parser.feed(text)
         parser.close()
         text = "".join(parser.parts)
-    lines = _forwarded([line.strip() for line in text.split("\n")])
+    source = text.split("\n")
+    lines = [line.strip() for line in source]
+    # Which lines are code is read here, from the text as written: the strip
+    # above hides an indented block from every pass below. Each pass that moves
+    # lines returns the answer for the lines it leaves (ADR-0336). Extracted
+    # HTML text has no indentation of the writer's own, only fences.
+    lines, coded = _forwarded(lines, code_lines(lines if extracted else source))
     # Lines inside a code fence are the writer's own; a mail with one keeps them all.
     reflows = not extracted and "```" not in text and "~~~" not in text
     if reflows:
-        lines = _unwrap(lines)
-        if not keep_signatures:
-            lines = _without_delimited_signatures(lines)
+        lines, coded = _unwrap(lines, coded)
+    if not extracted and not keep_signatures:
+        # Code is known line by line, so a fence elsewhere keeps no signature in view.
+        lines = _without_delimited_signatures(lines, coded)
     title = re.sub(r"^(?:(?:fwd?|re):\s*)+", "", subject.strip(), flags=re.I)
     # Copyright/address furniture is removable only when directly paired with
     # a newsletter's unsubscribe control near its end, never by chopping a tail.
@@ -566,6 +588,8 @@ def reading_body(
                     lines[start:end] = [""] * (end - start)
                 break
     result: list[str] = []
+    # Which lines of `result` are code, as `coded` says for `lines`.
+    kept: list[bool] = []
     # A link line made from the line before it continues that line's sentence.
     flowing: set[int] = set()
     index = 0
@@ -615,14 +639,15 @@ def reading_body(
                 flowing.add(len(result) - 1)
             else:
                 result.append(prefix + _link(_host(url), url) + closing_emphasis)
+                kept.append(coded[index])
         else:
             result.append(line if extracted else _with_targets(line))
+            kept.append(coded[index])
         index += 1
     if reflows:
-        result = _without_repeated_blocks(result)
+        result = _without_repeated_blocks(result, kept)
     if sender and not keep_signatures:
-        # Extracted HTML text has no indentation of the writer's own to read.
-        result = _without_named_signature(result, sender, "" if extracted else text)
+        result = _without_named_signature(result, sender, kept)
     title = _inert(title)
     if title:
         for index, line in enumerate(result):

@@ -153,11 +153,43 @@ Four existing rules bound the design:
   and contributes nothing. That is chosen on purpose: reading the next entry as
   the sender's title, or removing real names from an email, is the worse error.
   A list with no line that introduces it is not recognised.
-- A signature-shaped example in a code block is the message and contributes
-  nothing: a fenced block, closed or not, by the same definition of a fence the
-  reader's placement uses, or a body that holds the sender's name indented four
-  columns or a tab. A code fence or a table row under the name makes that block
-  the message as well. A signature after a closed fence is read as before.
+- A signature-shaped example in a code block is the message: the reader
+  leaves it in the reading text and People reads nothing from it. One function
+  decides which lines are code, from the text as it was written, and each
+  caller carries its answer with the lines, so that no stripping or reflow can
+  hide a block from a later pass.
+    - *Fenced.* A block opened by three or more backticks or tildes, closed or
+      not, by the same definition of a fence the reader's placement uses.
+    - *Indented.* Lines set four columns or a tab in from the text's own
+      margin, starting under a blank line or under a line that ends in a
+      colon, and running across blank lines while the indentation holds. So
+      `Format:` followed by an indented `-- ` line and three indented lines is
+      an example, with or without a blank line between.
+    - *Not code,* because mailers indent ordinary text there: an indented line
+      that continues a paragraph; anything under a list item, until a
+      paragraph of its own ends the list; a quoted line; anything under a
+      reply or forward header; and a message set in as a whole, because
+      indentation is measured from its own margin. A signature in any of
+      these is removed and read as before. Only spaces and tabs are
+      indentation. A header is `On … wrote:`, a `From:` line,
+      `Begin forwarded message:`, or a line of dashes around words such as
+      `-----Original Message-----`; a line that only starts with dashes, such
+      as the comment `-- get users`, is not.
+    - In a code block a `-- ` delimiter, the sender's name and a block that
+      repeats an earlier one start no signature and are not removed. Code or a
+      table row under the name makes that block the message as well, and so
+      does code under a delimiter. A signature after a code block is removed
+      and read as before, and a fence elsewhere in a message no longer keeps
+      a `-- ` signature in view: code is decided line by line.
+    - *Limits.* A real signature that its writer sets four columns in under a
+      blank line reads as an indented block, so it stays and gives nothing.
+      An indented example of mail headers that begins `From:` reads as a
+      header, so nothing under it is code. Extracted HTML has no indentation,
+      so there only a fence is code. `<pre>` and `<code>` are not treated as
+      code: HTML mail carries whole converted plain-text bodies in `<pre>`,
+      signature included, and treating that as code would leave those
+      signatures in view. People reads the plain part, so an example that only
+      the HTML marks as code reaches People without that mark.
 - A motto under the name is stored as that person's line. It is shown as the
   sender's own words, and the owner can end it.
 - Someone who alternates between two signatures with different numbers will

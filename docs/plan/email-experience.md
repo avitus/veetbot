@@ -240,10 +240,10 @@ the real host. A phone number's percent-encoded target is removed. A line the
 mailer wrapped rejoins its sentence, judged by whether the next word would have
 fit within 70 columns; a line the writer ended keeps its break as a Markdown hard
 break, so a signature stays a stack of lines and a short answer stays two answers.
-A message containing a code fence keeps its lines as they are. A block of three or
+A message containing a code fence keeps its lines as they are, apart from a `-- ` signature outside the fence. A block of three or
 more lines that repeats an earlier block of the same message, however it wrapped,
-is shown once, which is how a signature quoted at every level appears. No other
-prose is removed for repeating.
+is shown once, which is how a signature quoted at every level appears; a repeat that
+is a code block stays. No other prose is removed for repeating.
 
 A sender's signature is left out of the reading text, at every quote level, and
 stays in the retained body that **Show original** shows and that People and
@@ -254,22 +254,22 @@ memory formation read. Three signs identify one, and nothing else does:
   `Signature`, `ms-outlook-mobile-signature` and `AppleMailSignature` ids.
 - In a plain-text part, a `-- ` delimiter line and the unbroken lines under it,
   at most 12, when only blank lines, the end of that quote level, or the reply or
-  forward it was written above follow. This also removes a mailing-list footer written the same way. A delimiter with
-  more of the message below it stays. Of a removed block only a postscript line is kept; a disclaimer or other sentence there goes.
-- In the writer's own text, a line that is exactly the sender's display name of two or more words, with the lines under it, when those
-  lines run to the end of the text or to the reply or forward below. Each must be at most 100 characters, there are at most 12, and none
-  is a postscript, a sentence of more than eight words, a code fence or a table row. The name alone is a sign-off and stays. So does a
-  name inside a list, wherever in it: a bulleted line, or a line under one that introduces a list (ending in a colon, a short label such
-  as `Cc:`, a bold line or a heading) until a finished sentence, a closing such as "Best,", a `--` rule or a quote ends it. So does a name
-  inside a code block, which is an example: a fenced block, closed or not, or plain text that holds the name indented four columns or a tab.
+  forward it was written above follow. This also removes a mailing-list footer written the same way. A delimiter with more of the message
+  below it stays, and so does one inside a code block. Of a removed block only a postscript line is kept; a disclaimer or other sentence there goes.
+- In the writer's own text, a line that is exactly the sender's display name of two or more words, with the lines under it, when those lines
+  run to the end of the text or to the reply or forward below. Each must be at most 100 characters, there are at most 12, and none is a
+  postscript, a sentence of more than eight words, a line of code or a table row. The name alone is a sign-off and stays. So does a name inside
+  a list, wherever in it: a bulleted line, or a line under one that introduces a list (ending in a colon, a short label such as `Cc:`, a bold
+  line or a heading) until a finished sentence, a closing such as "Best,", a `--` rule or a quote ends it. So does a name inside a code block,
+  which is an example: a fenced block, closed or not, or an indented one, as ADR-0336 defines it from the text as written (below).
 
 The comparison of the two alternatives above uses the HTML with its signature, so
 the plain part's copy is never preserved as missing prose.
 
-People reads the third sign's block from the retained plain body to update a
-known sender's contact details
-([ADR-0336](../adr/0336-sender-signatures-update-people-contact-details.md));
-the rule and its limits are in
+An indented code block is lines set four columns or a tab in from the text's own margin, under a blank line or a line ending in a colon.
+An indented line that continues a paragraph, stands under a list item, is quoted or follows a reply or forward header is not code, and
+neither is `<pre>` in HTML. People reads the third sign's block from the retained plain body to update a known sender's contact details
+([ADR-0336](../adr/0336-sender-signatures-update-people-contact-details.md)); the rule and its limits are in
 [people-and-relationships.md](people-and-relationships.md#contact-details-from-a-senders-signature).
 
 Native text renders the result across the available Mac reader width, keeping
