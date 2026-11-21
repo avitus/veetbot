@@ -655,6 +655,47 @@ async def test_feedback_about_replies_cannot_apply_a_pending_assessment_during_a
         assert await _owed(app) is None
 
 
+async def test_a_failed_pass_over_other_threads_still_rerates_the_feedbacks_thread_again() -> None:
+    """The pass commits page by page. A page that fails leaves the earlier pages'
+    restorations in place, and those memories still have to take their standing from the
+    message that formed them, which may sit in the feedback's own thread."""
+    settings = replace(_email_settings(), email_mode_enabled=True, people_enabled=True)
+    async with build(
+        settings=settings,
+        script=FakeModelScript(turns=[_assessment(0.6)]),
+        mcp_client_factory=await _mail(census=False),
+        fixed_clock_at=NOW,
+    ) as app:
+        email = app.services.email
+        await email.submit_task(app.principal, kind="refresh")
+        async with app.uow_factory() as uow:
+            [thread] = await uow.email.list(app.principal, "thread")
+        [memory] = await _memories(app)
+        await _second_thread(app, memory)
+        calls: list[str] = []
+
+        async def own(*_: object) -> None:
+            calls.append("own")
+
+        async def others(*_: object) -> None:
+            calls.append("others")
+            raise RuntimeError("a later page of the pass failed")
+
+        email.rerate_memories, email.lengthen_memories = own, others
+        marked = await email.feedback(
+            app.principal,
+            thread_id=UUID(str(thread.payload["id"])),
+            target="person",
+            judgment="important",
+        )
+        assert marked["feedback_id"]
+        assert calls == ["own", "others", "own"]
+
+        calls.clear()
+        await email.undo_feedback(app.principal, UUID(str(marked["feedback_id"])))
+        assert calls == ["own", "others", "own"]
+
+
 async def test_only_an_importance_judgment_rerates_and_a_persons_rerates_its_thread_twice() -> None:
     """The feedback hook is for importance judgments and their undo. On a person or a
     topic it re-rates the feedback's own thread, then the other threads it matches, then

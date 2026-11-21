@@ -818,10 +818,18 @@ class EmailExperienceService:
                 reverse=True,
             )[:FEEDBACK_FOLLOW_THREADS]
             if others:
-                await self.lengthen_memories(
-                    principal, [(stored.account_id, stored.provider_thread_id) for stored in others]
-                )
-                await self.rerate_memories(principal, thread.account_id, thread.provider_thread_id)
+                try:
+                    await self.lengthen_memories(
+                        principal,
+                        [(stored.account_id, stored.provider_thread_id) for stored in others],
+                    )
+                finally:
+                    # The pass commits page by page, so a failure part of the way
+                    # leaves the earlier pages' restorations in place. They still
+                    # take their standing from this thread's messages.
+                    await self.rerate_memories(
+                        principal, thread.account_id, thread.provider_thread_id
+                    )
         except Exception:
             # The pass is a courtesy to an already committed judgment; a retry,
             # each thread's next assessment or the owner's command makes it up.
