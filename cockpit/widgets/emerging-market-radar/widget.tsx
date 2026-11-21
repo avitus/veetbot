@@ -1,30 +1,34 @@
-import React from 'react';
+import React,{useState} from 'react';
 import {Tile,List,Row,StatusPill,Metric,Between,PendingState,useNow} from '@veetbot/cockpit-kit';
-const t=(v:any,n=500)=>typeof v==='string'?v.slice(0,n):'';
-const arr=(v:any)=>Array.isArray(v)?v:[];
+const text=(v:any,n=220)=>typeof v==='string'?v.slice(0,n):'';
+const object=(v:any)=>v&&typeof v==='object'&&!Array.isArray(v)?v:null;
+const rows=(v:any,n=60)=>Array.isArray(v)?v.slice(0,n).filter(object):[];
+const time=(v:any)=>{const n=Date.parse(text(v,40));return Number.isFinite(n)?n:null;};
 export default function Widget({feeds,size}:any){
- const now=useNow(),f=feeds['agent.emerging-market-radar'],d=f?.data;
- const items=arr(d?.items),markets=arr(d?.markets),news=arr(d?.news),sources=arr(d?.sources);
- const failed=!!f?.error||['error','failed'].includes(d?.status);
- const warning=!!d?.message||sources.some((s:any)=>['error','unavailable'].includes(s.status)||s.automationStatus==='unavailable');
- const stamp=Date.parse(d?.observedAt||'');
- const freshness={observedAt:Number.isFinite(stamp)?stamp:null,expectedIntervalSec:86400,error:failed?t(d?.message||'Refresh failed; showing last known data',200):null};
- const cached=(i:any)=>i.verificationStatus==='retained'||t(i.evidence).startsWith('STALE:')||(i.lastVerifiedAt&&now-Date.parse(i.lastVerifiedAt)>86400000);
- const date=(i:any)=>`${i.dateBasis==='deal'?'Deal date':i.dateBasis==='announcement'?'Announcement':'Reported date'} ${t(i.date,10)}`;
- const row=(i:any,k:number,full=false)=><Row key={k} title={`${cached(i)?'Cached · ':''}${t(i.company,100)} · ${t(i.market,90)}`} marker={cached(i)?'stale':'none'} detail={`${date(i)} · ${t(i.source,80)}. ${t(i.description,full?350:140)}${full?` Fit (analysis): ${t(i.why,250)}. Product: ${t(i.productStatus,80)}. Amount: ${t(i.amount,100)}. Funding checked: ${t(i.lastVerifiedAt,25)||'See provenance'}.`:''}`}/>;
- return <Tile title="Emerging-market radar" size={size} freshness={freshness} footer="Daily news scan · Source health below · Deal dates ≠ announcements.">
- {!d?<PendingState/>:<>
- <Between><Metric value={items.length} label="selected rounds · 30 days"/><StatusPill tone={failed?'error':warning?'attention':'neutral'}>{failed?'Refresh failed':warning?'Limited sources':`${markets.length} markets`}</StatusPill></Between>
- {warning&&!failed?<Row title="Source warning" detail={t(d.message||'Some sources are unavailable; see source checks.',190)} marker="attention"/>:null}
- <List ariaLabel="Selected funding signals" empty={!items.length?{title:failed||warning?'No verified rounds available in this scan':'No qualifying rounds in this scan',detail:t(d.coverage,220)}:null}>{items.slice(0,3).map((i:any,k:number)=>row(i,k))}</List>
- <details><summary>All rounds, news & source health</summary>
- <List ariaLabel="Source checks">{sources.map((s:any,k:number)=><Row key={k} title={`${t(s.name,100)} · ${t(s.status,40)}`} detail={`${t(s.detail,450)}${s.automationStatus==='unavailable'?' Automated access unavailable.':''} ${s.lastSuccessAt?`Last successful check: ${t(s.lastSuccessAt,25)}`:''}`}/>)}</List>
- {d.message?<Row title="Refresh detail" detail={t(d.message,1600)}/>:null}
- <List ariaLabel="All rounds">{items.map((i:any,k:number)=>row(i,k,true))}</List>
- <List ariaLabel="Market clusters">{markets.map((m:any,k:number)=><Row key={k} title={t(m.name,100)} detail={arr(m.companies).map((x:any)=>t(x,100)).join(', ')}/>)}</List>
- <List ariaLabel="Related news">{news.map((n:any,k:number)=><Row key={k} title={`${n.verificationStatus==='retained'?'Cached · ':''}${t(n.title,180)}`} detail={`${t(n.publishedAt,10)} · ${t(n.source,100)} · ${t(n.summary,350)} ${t(n.url,1000)}`}/>)}</List>
- <List ariaLabel="Provenance">{items.map((i:any,k:number)=><Row key={k} title={t(i.company,100)} detail={`${t(i.sourceId,200)} | ${t(i.url,1000)} | ${t(i.evidence,700)}`}/>)}</List>
- <Row title="Coverage" detail={t(d.coverage,1800)}/>
- </details></>}
+ const now=useNow(),[view,setView]=useState('rounds');
+ const f=feeds?.['agent.emerging-market-radar'],latest=object(f?.data);
+ const failed=['error','failed'].includes(text(latest?.status));
+ const noFunding=failed||rows(latest?.sources,8).some(s=>s.role==='funding'&&s.status==='unavailable');
+ const previous=rows(f?.history,10).map(h=>object(h.data)).filter(d=>d&&!['error','failed'].includes(text(d.status))&&rows(d.items).length).sort((a,b)=>(time(b.observedAt)||0)-(time(a.observedAt)||0))[0];
+ const retained=!!(noFunding&&previous),d=retained?previous:latest,stamp=time(d?.observedAt);
+ const stale=stamp!==null&&now-stamp>86400000;
+ const items=rows(d?.items).filter(i=>{const at=time(i.date);return at!==null&&at<=now&&at>=now-30*86400000;});
+ const sources=rows(latest?.sources,8),news=rows(failed?d?.news:latest?.news,20),markets=rows(d?.markets,25);
+ const warning=failed||stale||retained||!!text(latest?.message)||latest?.status==='partial';
+ const cached=(i:any)=>retained||i.verificationStatus==='retained'||!time(i.lastVerifiedAt)||now-(time(i.lastVerifiedAt)||0)>86400000;
+ const selected=view==='rounds'?items:view==='news'?news:view==='markets'?markets:sources;
+ const rendered=selected.slice(0,20).map((i:any,k:number)=>{
+  if(view==='rounds')return <Row key={k} title={`${cached(i)?'Cached · ':''}${text(i.company,100)} · ${text(i.market,100)}`} marker={cached(i)?'stale':'none'} detail={`${i.dateBasis==='deal'?'Deal date':i.dateBasis==='announcement'?'Announcement':'Reported date'} ${text(i.date,10)} · ${text(i.source,80)}. ${text(i.description,220)} ${text(i.productStatus,90)}. ${text(i.url,180)}`} meta={`Checked ${text(i.lastVerifiedAt,10)||'unknown'} · ${text(i.amount,80)||'Amount not verified'}`}/>;
+  if(view==='news')return <Row key={k} title={`${failed?'Cached · ':''}${text(i.title,180)}`} detail={`${text(i.publishedAt,10)} · ${text(i.source,60)} · ${text(i.summary,220)} ${text(i.url,220)}`}/>;
+  if(view==='markets')return <Row key={k} title={`${retained||stale?'Cached · ':''}${text(i.name,100)}`} detail={`${text(i.basis,100)||'Analytical grouping'} · ${Array.isArray(i.companies)?i.companies.slice(0,20).map((c:any)=>text(c,70)).filter(Boolean).join(', '):''}`}/>;
+  return <Row key={k} title={`${text(i.name,80)} · ${text(i.status,30)}`} marker={i.status==='ok'?'none':'attention'} detail={text(i.detail,400)}/>;
+ });
+ return <Tile title="Emerging-market radar" size={size} freshness={{observedAt:stamp,expectedIntervalSec:86400,error:failed?(text(latest?.message)||'Sources unavailable'):null}} footer={text(latest?.coverage,260)||'Daily bounded scan · Deal dates are not announcement dates.'}>
+ {!latest?<PendingState/>:<>
+ <Between><Metric value={items.length} label="funding signals · 30 days"/><StatusPill tone={warning?'attention':'neutral'}>{failed?'Sources failed':retained?'Cached rounds':stale?'Out of date':warning?'Limited coverage':`${markets.length} markets`}</StatusPill></Between>
+ {text(latest.message)?<Row title="Source status" detail={`${text(latest.message,200)}${retained?' Cached funding records retain original check dates.':''}`} marker="attention"/>:null}
+ <label>Show <select aria-label="Radar view" value={view} onChange={e=>setView(e.target.value)}><option value="rounds">Rounds</option><option value="markets">Markets</option><option value="news">News</option><option value="sources">Source health</option></select></label>
+ <List ariaLabel={`Radar ${view}`} more={Math.max(0,selected.length-20)} empty={rendered.length?null:{title:warning?'No current signals available in this view':'No matching signals in this scan',detail:warning?'Check source health; this does not establish that no rounds occurred.':'Bounded coverage, not exhaustive.'}}>{rendered}</List>
+ </>}
  </Tile>;
 }
