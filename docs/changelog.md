@@ -39,7 +39,8 @@ title: Changelog
   left past due returns with the standing its forming message earns, whichever
   message is read first. A rating saved for an earlier revision of a thread
   only lengthens.
-- Re-ratings that follow an assessment write nothing while learning is paused,
+- Re-ratings that follow an assessment write nothing while learning is paused
+  (your own feedback still reaches memories at once),
   ones that keep failing are put off so they cannot hold back the rest, and a
   new-mail check whose follow-up changed a memory keeps its audit trail. The
   merge of repeated facts checks each later copy by itself and records one
