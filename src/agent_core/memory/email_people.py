@@ -1438,9 +1438,13 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
     ) -> EmailRerateReport:
         """Make one thread's live email memories follow its current importance and sender.
 
-        The learning pause is read here, under the mailbox lock it is saved
-        under. A caller's earlier reading may be out of date by the time the
-        lock is held, and while learning is paused nothing is written.
+        A pause in learning holds what the mailbox's own work would change. A
+        re-rating that follows an assessment reads the pause here, under the
+        mailbox lock it is saved under, because a caller's earlier reading
+        may be out of date by the time the lock is held; while learning is
+        paused it writes nothing. The owner's feedback is the owner's own act
+        and re-rates at once, pause or not: Important given during a pause
+        must still keep a memory from expiring.
         """
         seen = _Rerating()
         if not self.enabled:
@@ -1450,9 +1454,9 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             uow.email.lock(self._principal),
             uow.people.lock(self._principal),
         ):
-            if await self._learning_paused(uow):
-                # A pause holds the memories still. Nothing is written, so a
-                # saved assessment keeps its mark for the refresh after it.
+            if cause != "feedback" and await self._learning_paused(uow):
+                # Nothing is written, so the saved assessment keeps its mark
+                # for the refresh after the pause.
                 return seen.report(applied=apply)
             await self._standing(uow, account_id, provider_thread_id, "", seen=seen)
             source_key = thread_source_key(account_id, provider_thread_id)
@@ -1530,8 +1534,8 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         it does not reach waits like the rest. The caller supplies the timer
         that measures that time; without one the pass has no time limit.
 
-        Each page reads the learning pause under its locks and the pass ends
-        there while it is on, as a thread's own re-rating does.
+        The pass is the owner's own feedback at work. A pause in learning
+        holds neither it nor the re-rating of the feedback's own thread.
         """
         seen = _Rerating()
         if not self.enabled:
@@ -1553,9 +1557,6 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 uow.email.lock(self._principal),
                 uow.people.lock(self._principal),
             ):
-                if await self._learning_paused(uow):
-                    # A pause holds the memories still, here as in a thread's own re-rating.
-                    break
                 seen.fresh()
                 changed: list[UUID] = []
                 for account_id, provider_thread_id in threads[start : start + _LENGTHEN_PAGE]:

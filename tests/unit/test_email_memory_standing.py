@@ -1184,16 +1184,19 @@ async def test_a_memory_that_expired_on_its_own_is_never_revived() -> None:
     assert await stored(factory, lowered) == lowered
 
 
-async def test_a_memory_an_undone_mark_left_past_due_returns_when_the_owner_marks_it_again() -> (
-    None
-):
+@pytest.mark.parametrize("paused", [False, True])
+async def test_a_memory_an_undone_mark_left_past_due_returns_when_the_owner_marks_it_again(
+    paused: bool,
+) -> None:
     """The same gap from the other side: undoing Important returns a memory to a
-    thirty-day tier it has already outlived. Marking the thread again puts it back."""
+    thirty-day tier it has already outlived. Marking the thread again puts it back,
+    also when every one of these marks is given while learning is paused."""
     factory, service = await correspondence_stack()
     await seed_account(factory)
     source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY, days_ago=20)
     await seed_thread(factory, priority=0.2, messages=[_message(source)])
     [memory] = await service.form(source, [fact_for(source)])
+    await _pause(factory, paused)
     await seed_feedback(factory, "important")
     assert (await service.rerate_thread("work", "t-mail", cause="feedback")).changed == 1
     service._clock.advance(timedelta(days=15))  # type: ignore[attr-defined]
@@ -1922,12 +1925,19 @@ async def test_a_stale_rating_leaves_the_owner_and_the_sender_check_their_say(ch
         assert (await stored(factory, memory)).expires_at == memory.expires_at
 
 
-async def test_a_rerating_reads_the_learning_pause_under_its_own_lock() -> None:
-    """A refresh reads the pause before it calls the re-rating, and the owner can pause
-    in between. The re-rating reads it again once it holds the mailbox lock, and while
-    learning is paused it writes nothing: no memory, no note, no settled mark."""
+async def _pause(factory: Any, paused: bool) -> None:
+    """The owner pauses or resumes learning, as the mailbox stores it."""
     from agent_core.domain.email import EmailLearningState
 
+    state = EmailLearningState(paused=paused)
+    await _put(factory, "learning", "shared", state.model_dump(mode="json"))
+
+
+async def test_an_assessments_rerating_reads_the_learning_pause_under_its_own_lock() -> None:
+    """A refresh reads the pause before it calls the re-rating, and the owner can pause
+    in between. A re-rating that follows an assessment reads it again once it holds the
+    mailbox lock, and while learning is paused it writes nothing: no memory, no note,
+    no settled mark."""
     factory, service = await correspondence_stack()
     await seed_account(factory)
     source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY)
@@ -1937,17 +1947,81 @@ async def test_a_rerating_reads_the_learning_pause_under_its_own_lock() -> None:
     await seed_thread(factory, priority=0.9, messages=[_message(source)], fingerprint="rev-1")
     await _put(factory, "assessment", str(THREAD_ID), {**LOW_READING, "priority": 0.9})
 
-    async def pause(paused: bool) -> None:
-        state = EmailLearningState(paused=paused)
-        await _put(factory, "learning", "shared", state.model_dump(mode="json"))
-
-    await pause(True)
+    await _pause(factory, True)
     for apply in (False, True):
         report = await service.rerate_thread("work", "t-mail", apply=apply)
         assert (report.examined, report.changed) == (0, 0)
-    assert (await service.lengthen_threads([("work", "t-mail")])).changed == 0
     assert await stored(factory, memory) == memory and await _owed(factory) is True
 
-    await pause(False)
+    await _pause(factory, False)
     assert (await service.rerate_thread("work", "t-mail")).by_retention == {"no_expiry": 1}
     assert (await stored(factory, memory)).expires_at is None and await _owed(factory) is None
+
+
+async def test_the_owners_feedback_reaches_memories_while_learning_is_paused() -> None:
+    """A pause holds what Veetbot learns on its own. A mark is the owner's own act: it
+    reaches the thread's memories at once, pause or not, so Important given during a
+    pause still keeps a memory from expiring, and Less important and its undo work as
+    they always do, with the note that lets the undo put the memory back."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY, days_ago=40)
+    await seed_thread(factory, priority=0.7, messages=[_message(source)], fingerprint="rev-1")
+    [memory] = await service.form(source, [fact_for(source)])
+    assert memory.derivation is MemoryDerivation.DIRECT
+    assert memory.expires_at == source.sent_at + timedelta(days=365)
+    await _put(factory, "assessment", str(THREAD_ID), {**LOW_READING, "priority": 0.7})
+    await _pause(factory, True)
+
+    # Less important: the assessment's own re-rating is held, the owner's is not.
+    await seed_feedback(factory, "less_important")
+    held = await service.rerate_thread("work", "t-mail")
+    assert (held.examined, held.changed) == (0, 0)
+    assert await stored(factory, memory) == memory and await _owed(factory) is True
+    report = await service.rerate_thread("work", "t-mail", cause="feedback")
+    assert (report.demoted, report.by_retention) == (1, {"30_days": 1})
+    lapsed = await stored(factory, memory)
+    assert lapsed.expires_at == source.sent_at + timedelta(days=30) and lapsed.expires_at < NOW
+    assert f"lapsed:{memory.id}" in await _source_facts(factory, source)
+
+    # Undone in the same pause, the memory is put back as it was.
+    await seed_feedback(factory, "less_important", undone=True)
+    report = await service.rerate_thread("work", "t-mail", cause="feedback")
+    assert (report.promoted, report.by_retention) == (1, {"1_year": 1})
+    restored = await stored(factory, memory)
+    assert restored.derivation is MemoryDerivation.DIRECT
+    assert restored.statement == memory.statement and restored.expires_at == memory.expires_at
+    assert f"lapsed:{memory.id}" not in await _source_facts(factory, source)
+
+    # Important removes the expiry at once.
+    await seed_feedback(factory, "important")
+    report = await service.rerate_thread("work", "t-mail", cause="feedback")
+    assert report.by_retention == {"no_expiry": 1}
+    assert (await stored(factory, memory)).expires_at is None
+
+
+async def test_the_pass_over_a_persons_other_threads_runs_while_learning_is_paused() -> None:
+    """Important on a person is the owner's own act in every thread it rates: the pass
+    over the other threads lengthens their memories during a pause as at any other time."""
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    source = await mail(
+        factory, message_id="m-in", sender=ALEX, body=BODY, days_ago=20, thread_id="t-2"
+    )
+    await seed_thread(factory, priority=0.2, messages=[_message(source)], provider_thread_id="t-2")
+    [memory] = await service.form(source, [fact_for(source)])
+    assert memory.expires_at == source.sent_at + timedelta(days=30)
+    marked = EmailFeedback(
+        id=UUID(int=912),
+        thread_id=UUID(int=904),  # given on another of Alex's threads
+        target="person",
+        judgment="important",
+        target_values=["alex@example.test"],
+        created_at=NOW,
+    )
+    await _put(factory, "feedback", str(marked.id), marked.model_dump(mode="json"))
+
+    await _pause(factory, True)
+    report = await service.lengthen_threads([("work", "t-2")])
+    assert (report.changed, report.by_retention) == (1, {"no_expiry": 1})
+    assert (await stored(factory, memory)).expires_at is None

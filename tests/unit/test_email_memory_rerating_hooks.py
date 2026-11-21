@@ -563,6 +563,40 @@ async def test_assessments_saved_while_learning_was_paused_are_followed_up_after
         assert followed.id == memory.id and followed.expires_at is None
 
 
+async def test_the_owners_mark_reaches_a_memory_at_once_while_learning_is_paused() -> None:
+    """A pause holds what Veetbot learns on its own, not the owner's own act: Important
+    given during a pause keeps the thread's memory from expiring, and its undo returns
+    the memory to its thread's rating, both at once."""
+    settings = replace(_email_settings(), email_mode_enabled=True, people_enabled=True)
+    async with build(
+        settings=settings,
+        script=FakeModelScript(turns=[_assessment(0.6)]),
+        mcp_client_factory=await _mail(census=False),
+        fixed_clock_at=NOW,
+    ) as app:
+        service = app.services.email
+        await service.submit_task(app.principal, kind="refresh")
+        [memory] = await _memories(app)
+        assert memory.expires_at == memory.last_evidence_at + timedelta(days=90)
+        async with app.uow_factory() as uow:
+            [thread] = await uow.email.list(app.principal, "thread")
+        await service.pause_learning(app.principal, True)
+
+        marked = await service.feedback(
+            app.principal,
+            thread_id=UUID(str(thread.payload["id"])),
+            target="thread",
+            judgment="important",
+        )
+        [kept] = await _memories(app)
+        assert kept.id == memory.id and kept.expires_at is None
+
+        await service.undo_feedback(app.principal, UUID(str(marked["feedback_id"])))
+        [returned] = await _memories(app)
+        assert returned.expires_at == memory.expires_at
+        assert (await service.learning(app.principal)).paused is True
+
+
 async def test_the_refresh_continues_when_a_memory_rerating_is_refused() -> None:
     from unittest.mock import AsyncMock
 

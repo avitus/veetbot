@@ -179,17 +179,19 @@ No ranking code changes, so the `retrieval@7` label stays.
     follow-up's audit event sits in that session, so a slice whose follow-up
     changed a memory is recorded as work: it keeps its session and takes the
     ordinary end-of-run path.
-- **A pause in learning holds every hook.** A thread's re-rating, whatever
-  caused it, and the pass over other threads read the pause after they take
-  the mailbox lock, under which the pause is saved, and write nothing while it
+- **A pause in learning holds what Veetbot learns on its own, not the owner's
+  own acts.** A re-rating that follows an assessment (the refresh's own, a
+  follow-up of a mark, a junk first pass) reads the pause after it takes the
+  mailbox lock, under which the pause is saved, and writes nothing while it
   is on: no memory, no note and no settled mark. A refresh also reads the
   pause before it calls the re-rating; that earlier reading only saves work.
-  Feedback the owner gives during a pause is saved and rates the thread. It
-  reaches the thread's memories with the thread's next saved assessment once
-  the pause is over, which the feedback's own profile change brings about for
-  every thread a refresh still assesses, and otherwise with the owner's
-  command. The owner's two commands are not hooks and run when the owner runs
-  them.
+  The owner's feedback and its undo are the owner's own acts. Their
+  re-rating of the thread, and the pass over the other threads a person or
+  topic judgment matches, run at once during a pause as at any other time,
+  and write the note that lets an undo put a memory back. Otherwise
+  Important given during a pause could not keep a memory from expiring, and
+  an expired memory is not revived. The owner's two commands run when the
+  owner runs them.
 - **Person and topic feedback, and the other threads it matches.** Importance
   feedback on a person or a topic rates every thread it matches, not only the
   one it was given on. That thread is re-rated in full. When the feedback is
@@ -478,10 +480,10 @@ standing wherever it sorts and whichever thread it is in.
   a sender differently than when a guess formed, that guess is not promoted
   and stays an attributed guess, while a first-class memory can still be
   demoted.
-- While learning is paused the owner's feedback moves no memory. A memory
-  the owner marks Important during a pause can still reach its expiry before
-  the pause ends, and an expired memory is not revived; "Still true" or
-  ending the pause first avoids it.
+- A pause does not stop the clock. A memory whose thread is rated higher by
+  an assessment saved during a pause is lengthened only by the follow-up
+  after it, and can reach its expiry first; the owner's own mark is not held
+  and prevents that.
 - A reply that quotes the earlier message can renew a memory through the quoted
   text. The assessment already reads the newest message first; no separate
   quote filter is added here.
