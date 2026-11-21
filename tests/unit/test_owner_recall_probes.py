@@ -31,13 +31,27 @@ from agent_core.domain.memory import (
     Sensitivity,
 )
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
-from agent_core.evals.owner_recall_probes import evidence_stage, load_probes
+from agent_core.domain.recall_questions import (
+    QuestionSplit,
+    RecallQuestion,
+    RecallQuestionContent,
+)
+from agent_core.evals import owner_recall_probe_driver as driver
+from agent_core.evals.owner_recall_probe_driver import _resolve, _StoreSnapshot, observe_probes
+from agent_core.evals.owner_recall_probes import (
+    ExpectedEvidence,
+    Probe,
+    evidence_stage,
+    load_probes,
+)
+from agent_core.evals.owner_recall_questions import loaded_from_questions
 from tests.contract.owner_recall_probe_cases import (
     FakeWebProvider,
     delivery_case,
     home_city_case,
     post_snapshot_home_case,
     save_case,
+    stated,
 )
 from tests.gates.test_memory_m16 import _START
 from tests.integration.m2_support import memory_settings
@@ -248,3 +262,115 @@ async def test_family_probe_checks_the_names_the_overview_delivers(tmp_path: Pat
         clock=FixedClock(_START),
     ) as app:
         await family_names_case(app, script)
+
+
+async def test_an_expected_text_is_found_however_many_beliefs_the_store_holds(
+    tmp_path: Path,
+) -> None:
+    """A text locator must search the whole store, not its first page.
+
+    The owner's store holds thousands of beliefs. A locator that read one page
+    reported an expected fact as never stored whenever it lay outside that
+    page, which blames formation for what recall did or did not do.
+    """
+
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=script,
+        clock=FixedClock(_START),
+    ) as app:
+        session_id = await app.sessions.create()
+        oldest = await stated(app, session_id, "User keeps bees at the allotment", "bees")
+        for number in range(205):
+            await stated(
+                app, session_id, f"User filed receipt number {number}", f"receipt {number}"
+            )
+        newest = await stated(app, session_id, "User plays the cello on Sundays", "cello")
+
+        found_oldest = await _resolve(app, None, "keeps bees")
+        found_newest = await _resolve(app, None, "plays the cello")
+        missing = await _resolve(app, None, "owns a submarine")
+
+    assert found_oldest is not None and found_oldest.id == oldest.id
+    assert found_newest is not None and found_newest.id == newest.id
+    assert missing is None
+
+
+async def test_one_observation_reads_the_store_once_for_all_its_expected_texts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=script,
+        clock=FixedClock(_START),
+    ) as app:
+        session_id = await app.sessions.create()
+        bees = await stated(app, session_id, "User keeps bees at the allotment", "bees")
+        cello = await stated(app, session_id, "User plays the cello on Sundays", "cello")
+        reads = 0
+        whole_store = driver._every_belief
+
+        async def counted(target: object) -> list[MemoryRecord]:
+            nonlocal reads
+            reads += 1
+            return await whole_store(target)
+
+        monkeypatch.setattr(driver, "_every_belief", counted)
+        store = _StoreSnapshot(app)
+        found_bees = await _resolve(app, None, "keeps bees", store)
+        found_cello = await _resolve(app, None, "plays the cello", store)
+        by_id = await _resolve(app, bees.id, None, store)
+
+    assert found_bees is not None and found_bees.id == bees.id
+    assert found_cello is not None and found_cello.id == cello.id
+    assert by_id is not None and by_id.id == bees.id
+    assert reads == 1
+
+
+async def test_a_stored_question_run_carries_the_fingerprint_of_what_it_tested(
+    tmp_path: Path,
+) -> None:
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=script,
+        clock=FixedClock(_START),
+    ) as app:
+        session_id = await app.sessions.create()
+        await stated(app, session_id, "User lives in Example Town", "home")
+        question = RecallQuestion(
+            id=UUID(int=1),
+            tenant_id=app.principal.tenant_id,
+            principal_id=app.principal.principal_id,
+            key="home-city",
+            split=QuestionSplit.HOLDOUT,
+            content=RecallQuestionContent.model_validate(
+                {
+                    "question": "Where do I live?",
+                    "family": "attributes",
+                    "expected": ({"statement_contains": "Example Town"},),
+                }
+            ),
+            created_at=_START,
+            updated_at=_START,
+        )
+        incident = Probe(
+            id="bees",
+            incident="bees",
+            family="attributes",
+            question="Do I keep bees?",
+            paths=("automatic",),
+            expected=(ExpectedEvidence(statement_contains="keeps bees"),),
+        )
+        stored = loaded_from_questions([question], label="holdout").probes
+        report = await observe_probes(app, script, (*stored, incident), paths=("automatic",))
+
+    by_id = {item.probe_id: item for item in report.probes}
+    assert by_id["home-city"].content_sha256 == question.content.criteria_sha256
+    # An incident probe is not a stored question and is bound to none.
+    assert by_id["bees"].content_sha256 is None

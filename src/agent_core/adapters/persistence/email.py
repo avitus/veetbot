@@ -22,6 +22,7 @@ from sqlalchemy import (
     case,
     cast,
     delete,
+    false,
     literal,
     or_,
     select,
@@ -41,6 +42,7 @@ from agent_core.adapters.persistence.people_reference_index import reference_ove
 from agent_core.adapters.persistence.sqlalchemy_models import EmailRecordRow
 from agent_core.domain.agents import Principal
 from agent_core.domain.email import EmailRecord
+from agent_core.domain.email_memory import RERATING_PENDING
 from agent_core.domain.erasure import erased_email_payload
 from agent_core.domain.errors import ConflictError
 
@@ -254,6 +256,25 @@ class InMemoryEmailStore:
                 and record.payload.get("settled_cost") is not None
                 and Decimal(str(record.payload["settled_cost"])) == 0
                 and datetime.fromisoformat(str(record.payload["created_at"])) < created_before
+            ),
+            key=lambda record: record.key,
+        )
+        return [record.model_copy(deep=True) for record in selected[:limit]]
+
+    async def list_pending_reratings(
+        self, principal: Principal, *, after: str | None = None, limit: int = 1000
+    ) -> builtins.list[EmailRecord]:
+        """Key-ordered `assessment` records that carry the pending re-rating mark."""
+        _validate_limit(limit)
+        selected = sorted(
+            (
+                record
+                for record in self._records.values()
+                if record.tenant_id == principal.tenant_id
+                and record.principal_id == principal.principal_id
+                and record.kind == "assessment"
+                and record.payload.get(RERATING_PENDING) is True
+                and (after is None or record.key > after)
             ),
             key=lambda record: record.key,
         )
@@ -590,6 +611,41 @@ class PostgresEmailStore:
                     < created_before,
                 )
                 .order_by(EmailRecordRow.key)
+                .limit(limit)
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+        return [email_record_to_domain(row) for row in rows]
+
+    async def list_pending_reratings(
+        self, principal: Principal, *, after: str | None = None, limit: int = 1000
+    ) -> builtins.list[EmailRecord]:
+        """Key-ordered `assessment` records that carry the pending re-rating mark.
+
+        The mark is matched in the query as the JSON value true, so the many
+        records without it never leave the database.
+
+        The document is looked into only for assessment rows. Written as a
+        plain condition, the planner may test it first on every row of a
+        sequential scan, which reads back the stored bodies of every thread
+        record: measured at thirty times the cost on a table of this size.
+        """
+        _validate_limit(limit)
+        is_assessment = EmailRecordRow.kind == "assessment"
+        query = select(EmailRecordRow).where(
+            EmailRecordRow.tenant_id == principal.tenant_id,
+            EmailRecordRow.principal_id == principal.principal_id,
+            is_assessment,
+            case(
+                (is_assessment, EmailRecordRow.payload.contains({RERATING_PENDING: True})),
+                else_=false(),
+            ),
+        )
+        if after is not None:
+            query = query.where(EmailRecordRow.key > after)
+        rows = (
+            await self._session.scalars(
+                query.order_by(EmailRecordRow.key)
                 .limit(limit)
                 .execution_options(populate_existing=True)
             )

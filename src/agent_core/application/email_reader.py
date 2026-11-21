@@ -11,6 +11,10 @@ from html.parser import HTMLParser
 from itertools import groupby
 from urllib.parse import urlsplit
 
+from agent_core.domain.email_signature import HISTORY as _HISTORY
+from agent_core.domain.email_signature import POSTSCRIPT as _POSTSCRIPT
+from agent_core.domain.email_signature import SIGNATURE_LINES as _SIGNATURE_LINES
+from agent_core.domain.email_signature import named_signature, sender_name
 from agent_core.domain.web import is_public_https_url
 
 _INVISIBLE = str.maketrans("", "", "\u00ad\u034f\u200b\ufeff")
@@ -38,6 +42,11 @@ _UNDERLINE = re.compile(r"-+|=+")
 _TABLE_RULE = re.compile(r"[\s|:-]+")
 # Fewer lines than this can repeat by chance; a sign-off is not a signature.
 _REPEATED_BLOCK_LINES = 3
+# How Gmail, Outlook and Apple Mail mark the signature they insert.
+_SIGNATURE_CLASSES = frozenset({"gmail_signature", "gmail_signature_prefix"})
+_SIGNATURE_IDS = frozenset({"signature", "ms-outlook-mobile-signature", "applemailsignature"})
+_DESTINATION = re.compile(r"\]\(https?://[^\s)]*\)")
+_HOST_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)\\?")
 
 
 def _safe_url(value: str) -> str | None:
@@ -166,6 +175,67 @@ def _without_repeated_blocks(lines: list[str]) -> list[str]:
     return result
 
 
+def _without_delimited_signatures(lines: list[str]) -> list[str]:
+    """Blank a `-- ` delimiter and the unbroken lines under it, at each quote level.
+
+    Only a block that ends its level's text is a signature or a list footer: a
+    rule between two sections has more of the message below it. A postscript
+    line in the block is the message and stays. Any other sentence there goes
+    with the block: under a delimiter it is a disclaimer or a list footer.
+    """
+    result = list(lines)
+    for index, line in enumerate(lines):
+        prefix, content = _quoted(line)
+        if content != "--":
+            continue
+        depth = prefix.count(">")
+        end = index + 1
+        while end < len(lines) and end - index <= _SIGNATURE_LINES + 1:
+            inner_prefix, inner = _quoted(lines[end])
+            if not inner or inner_prefix.count(">") != depth:
+                break
+            end += 1
+        if end == index + 1 or end - index > _SIGNATURE_LINES + 1:
+            continue
+        after = end
+        while after < len(lines) and not _quoted(lines[after])[1]:
+            after += 1
+        if after < len(lines):
+            next_prefix, following = _quoted(lines[after])
+            if next_prefix.count(">") == depth and not _HISTORY.match(following):
+                continue
+        result[index:end] = [
+            kept if _POSTSCRIPT.match(_quoted(kept)[1].strip("*_ ")) else ">" * depth
+            for kept in lines[index:end]
+        ]
+    return result
+
+
+def _visible(line: str) -> str:
+    """A rendered line as its reader sees it: no destinations, markup or line break."""
+    return re.sub(r"[\[\]*_\\]", "", _DESTINATION.sub("]", line)).strip()
+
+
+def _without_named_signature(lines: list[str], sender: str) -> list[str]:
+    """Blank the writer's own name and the short lines under it that end their text.
+
+    The name alone is a sign-off and stays. Prose, a postscript or a long block
+    under it is the message, and so is anything followed by more than history.
+    People reads the same block for a sender's contact details (ADR-0336).
+    """
+    name = sender_name(sender)
+    found = named_signature(lines, name, visible=_visible) if name else None
+    if found is None:
+        return lines
+    index, end = found
+    # An HTML signature's delimiter is its own paragraph above the name.
+    start = index
+    while start and not lines[start - 1]:
+        start -= 1
+    start = start - 1 if start and lines[start - 1].rstrip("\\") == "--" else index
+    return [*lines[:start], *[""] * (end - start), *lines[end:]]
+
+
 def _with_line_breaks(lines: list[str], flowing: set[int]) -> list[str]:
     """Mark each line the writer ended, except where its paragraph ends anyway."""
     result = list(lines)
@@ -213,10 +283,13 @@ class _Table:
 class _HTMLText(HTMLParser):
     """Extract inert text and explicit links, without a WebView or resource loader."""
 
-    def __init__(self, image_urls: list[str] | None = None) -> None:
+    def __init__(
+        self, image_urls: list[str] | None = None, *, keep_signatures: bool = False
+    ) -> None:
         """Optionally collect image destinations while emitting inert presentation text."""
         super().__init__(convert_charrefs=True)
         self.image_urls = image_urls
+        self.keep_signatures = keep_signatures
         self.parts: list[str] = []
         self.hidden: list[str] = []
         self.anchor: tuple[int, str] | None = None
@@ -232,16 +305,21 @@ class _HTMLText(HTMLParser):
                 self.hidden.append(tag)
             return
         style = re.sub(r"\s+", "", values.get("style") or "").lower()
+        classes = set((values.get("class") or "").lower().split())
+        # The mailer says which block is the signature; nothing is guessed here.
+        signature = not self.keep_signatures and (
+            bool(classes & _SIGNATURE_CLASSES)
+            or (values.get("id") or "").lower() in _SIGNATURE_IDS
+            or (values.get("data-smartmail") or "").lower() == "gmail_signature"
+        )
         hidden = (
             tag in {"script", "style", "iframe", "object", "template", "head"}
             or "hidden" in values
             or "display:none" in style
             or "visibility:hidden" in style
             or (values.get("aria-hidden") or "").lower() == "true"
-            or bool(
-                set((values.get("class") or "").lower().split())
-                & {"advertisement", "ad-banner", "preheader"}
-            )
+            or bool(classes & {"advertisement", "ad-banner", "preheader"})
+            or signature
         )
         if hidden:
             if not void:
@@ -400,13 +478,24 @@ def reading_source(body: str, html: str) -> str:
     return body
 
 
-def reading_body(body: str, *, subject: str = "", image_urls: list[str] | None = None) -> str:
-    """Derive safe reading Markdown from retained text, preserving substantive prose."""
+def reading_body(
+    body: str,
+    *,
+    subject: str = "",
+    image_urls: list[str] | None = None,
+    sender: str = "",
+    keep_signatures: bool = False,
+) -> str:
+    """Derive safe reading Markdown from retained text, preserving substantive prose.
+
+    A signature is left out of the reading text only; the retained body keeps it.
+    `sender` lets an unmarked block under the writer's own name be recognized.
+    """
     text = body.translate(_INVISIBLE).replace("\r\n", "\n").replace("\r", "\n")
     # Extracted HTML text is already inert and carries the reader's own links.
     extracted = bool(_HTML.search(text))
     if extracted:
-        parser = _HTMLText(image_urls)
+        parser = _HTMLText(image_urls, keep_signatures=keep_signatures)
         parser.feed(text)
         parser.close()
         text = "".join(parser.parts)
@@ -415,6 +504,8 @@ def reading_body(body: str, *, subject: str = "", image_urls: list[str] | None =
     reflows = not extracted and "```" not in text and "~~~" not in text
     if reflows:
         lines = _unwrap(lines)
+        if not keep_signatures:
+            lines = _without_delimited_signatures(lines)
     title = re.sub(r"^(?:(?:fwd?|re):\s*)+", "", subject.strip(), flags=re.I)
     # Copyright/address furniture is removable only when directly paired with
     # a newsletter's unsubscribe control near its end, never by chopping a tail.
@@ -485,6 +576,8 @@ def reading_body(body: str, *, subject: str = "", image_urls: list[str] | None =
         index += 1
     if reflows:
         result = _without_repeated_blocks(result)
+    if sender and not keep_signatures:
+        result = _without_named_signature(result, sender)
     title = _inert(title)
     if title:
         for index, line in enumerate(result):
@@ -515,6 +608,9 @@ def merge_image_body(
     link destinations. Unmatched paragraphs precede the HTML because MIME parts do
     not provide a reliable position for prose omitted from one alternative.
     A text-only alternative can require shared prose before replacing the reader.
+    A paragraph is judged line by line, so a reply's quoted history is not missing
+    for having a repeat shown once. A link the reader could only label by its
+    host is there when the HTML links the same destination.
     """
 
     def words(value: str) -> str:
@@ -533,13 +629,24 @@ def merge_image_body(
         return " ".join(re.findall(r"\w+", "".join(labels).casefold()))
 
     represented = " " + words(html_text) + " "
+    linked = {match[1:] for match in _DESTINATION.findall(html_text)}
     missing: list[str] = []
     overlaps = False
     for paragraph in re.split(r"\n\s*\n", plain):
-        normalized = words(paragraph)
-        if normalized and " " + normalized + " " not in represented:
+        absent = False
+        found = False
+        for line in paragraph.splitlines():
+            only_link = _HOST_LINK.fullmatch(_quoted(line.strip())[1])
+            if only_link and only_link[1] == _host(only_link[2]) and f"({only_link[2]})" in linked:
+                continue
+            normalized = words(line)
+            if normalized and " " + normalized + " " not in represented:
+                absent = True
+                break
+            found = found or bool(normalized)
+        if absent:
             missing.append(paragraph)
-        elif normalized:
+        elif found:
             overlaps = True
     if require_overlap and plain and not overlaps:
         return plain

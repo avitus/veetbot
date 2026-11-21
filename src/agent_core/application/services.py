@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import builtins
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Literal, Protocol
 from uuid import UUID
@@ -94,6 +94,18 @@ from agent_core.domain.persona import (
     PersonaNominationState,
     PersonaPreview,
     PersonaTrait,
+)
+from agent_core.domain.recall_questions import (
+    QuestionImportOutcome,
+    QuestionRecordOutcome,
+    QuestionResult,
+    QuestionSplit,
+    QuestionStatus,
+    RecallQuestion,
+    RecallQuestionContent,
+    RecallQuestionHistory,
+    RecallQuestionList,
+    RecallQuestionView,
 )
 from agent_core.domain.reconsolidation_views import OperationKind, OperationState, OperationView
 from agent_core.domain.schedules import (
@@ -1135,3 +1147,60 @@ class IntegrationSecretSettings(Protocol):
     ) -> dict[str, object]: ...
 
     async def delete(self, principal: Principal, key_id: UUID, expected_revision: int) -> None: ...
+
+
+class RecallQuestionService(Protocol):
+    """The owner's recall question set (ADR-0339)."""
+
+    async def list_questions(
+        self,
+        principal: Principal,
+        *,
+        split: QuestionSplit | None = None,
+        status: QuestionStatus | None = None,
+    ) -> RecallQuestionList: ...
+
+    async def create(
+        self,
+        principal: Principal,
+        *,
+        key: str,
+        split: QuestionSplit,
+        content: RecallQuestionContent,
+    ) -> RecallQuestionView: ...
+
+    async def edit(
+        self,
+        principal: Principal,
+        question_id: UUID,
+        *,
+        expected_revision: int,
+        content: RecallQuestionContent,
+    ) -> RecallQuestionView: ...
+
+    async def set_status(
+        self,
+        principal: Principal,
+        question_id: UUID,
+        *,
+        expected_revision: int,
+        status: QuestionStatus,
+    ) -> RecallQuestionView: ...
+
+    async def history(self, principal: Principal, question_id: UUID) -> RecallQuestionHistory: ...
+
+    async def stored_questions(
+        self, principal: Principal, *, split: QuestionSplit | None = None
+    ) -> list[RecallQuestion]: ...
+
+    async def import_questions(
+        self,
+        principal: Principal,
+        *,
+        split: QuestionSplit,
+        items: Sequence[tuple[str, RecallQuestionContent]],
+    ) -> QuestionImportOutcome: ...
+
+    async def record_results(
+        self, principal: Principal, results: Mapping[str, QuestionResult]
+    ) -> QuestionRecordOutcome: ...

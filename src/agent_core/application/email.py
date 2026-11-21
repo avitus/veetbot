@@ -12,7 +12,7 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -66,9 +66,11 @@ from agent_core.domain.email import (
     addresses,
     apply_feedback,
     archive_result_matches,
+    assessment_priority,
     body_cutoff,
     draft_expired,
     feedback_matches,
+    own_reply_floor,
     retained_thread,
     send_arguments_digest,
     send_gesture,
@@ -109,6 +111,12 @@ logger = logging.getLogger(__name__)
 
 # Inbox omits conversations ranked below this; Needs you still lists them (ADR-0329).
 INBOX_RELEVANCE_FLOOR = 0.1
+# Other threads one piece of person or topic feedback lengthens memories in at
+# once, newest first (ADR-0340). The rest follow at their own next assessment.
+FEEDBACK_FOLLOW_THREADS = 250
+# The judgments that say what a thread's memories are worth (ADR-0340). Only
+# these, given or undone, re-rate memories; a judgment about replies does not.
+IMPORTANCE_JUDGMENTS = frozenset({"important", "less_important"})
 
 
 async def records(store: EmailStore, principal: Principal, kind: str) -> AsyncIterator[EmailRecord]:
@@ -257,6 +265,7 @@ def thread_summary(thread: EmailThread) -> dict[str, object]:
             "provider_thread_id",
             "source_fingerprint",
             "last_accessed_at",
+            "own_reply_floor",
         },
     )
 
@@ -310,6 +319,9 @@ class EmailExperienceService:
         release_session_transports: Callable[[UUID], Awaitable[None]] | None = None,
         forget_source: Callable[[Principal, str, str, frozenset[str]], Awaitable[None]]
         | None = None,
+        rerate_memories: Callable[[Principal, str, str], Awaitable[None]] | None = None,
+        lengthen_memories: Callable[[Principal, Sequence[tuple[str, str]]], Awaitable[None]]
+        | None = None,
         cleanup_artifacts: Callable[[], Awaitable[None]] | None = None,
         cancel_parked_run: Callable[[RepositoryUnitOfWork, Run, str], Awaitable[Run]] | None = None,
         resolve_archive_approval: Callable[[Principal, UUID, WorkerLease | None], Awaitable[None]]
@@ -343,6 +355,8 @@ class EmailExperienceService:
         self.close_session = close_session
         self.release_session_transports = release_session_transports or close_session
         self.forget_source = forget_source
+        self.rerate_memories = rerate_memories
+        self.lengthen_memories = lengthen_memories
         self.cleanup_artifacts = cleanup_artifacts
         self.cancel_parked_run = cancel_parked_run
         self.resolve_archive_approval = resolve_archive_approval
@@ -608,7 +622,7 @@ class EmailExperienceService:
             selected = apply_feedback(
                 thread, await self._feedback(uow.email, principal), now=self.clock.now()
             )
-            result = selected.model_dump(mode="json")
+            result = selected.model_dump(mode="json", exclude={"own_reply_floor"})
             draft = (
                 None
                 if thread.draft_id is None
@@ -660,70 +674,158 @@ class EmailExperienceService:
                 else hashlib.sha256(idempotency_key.encode()).hexdigest()
             )
             replay = None if key is None else await uow.email.get(principal, "feedback_replay", key)
+            if replay is not None and replay.payload.get("request_digest") != request_digest:
+                raise ConflictError("idempotency key was used for different feedback")
+            item: EmailFeedback | None
             if replay is not None:
-                if replay.payload.get("request_digest") != request_digest:
-                    raise ConflictError("idempotency key was used for different feedback")
-                return {
-                    "feedback_id": replay.payload["feedback_id"],
-                    "thread": thread_summary(
-                        apply_feedback(
-                            thread, await self._feedback(uow.email, principal), now=self.clock.now()
-                        )
-                    ),
-                }
-            if expected_revision is not None and thread.revision != expected_revision:
-                raise ConflictError("email thread changed")
-            values = (
-                [str(thread.id)]
-                if target == "thread"
-                else addresses(thread.senders)
-                if target == "person"
-                else thread.topics
-            )
-            if target_value is not None:
-                target_value = addresses([target_value])[0] if target == "person" else target_value
-                if target_value not in values:
-                    raise EmailFeedbackTargetError(
-                        "feedback target is not supported by this thread"
-                    )
-                values = [target_value]
-            if len(values) != 1:
-                raise EmailFeedbackTargetError(
-                    "choose the specific person or topic for this feedback"
+                feedback_id = str(replay.payload["feedback_id"])
+                item = await read_value(
+                    uow.email, principal, "feedback", feedback_id, EmailFeedback
                 )
-            item = EmailFeedback(
-                id=self.ids.new_id(),
-                thread_id=thread.id,
-                target=target,
-                judgment=judgment,
-                target_values=values,
-                explanation=explanation,
-                created_at=now,
-            )
-            await save_value(uow.email, principal, "feedback", str(item.id), item, now)
-            await self._bump_profile(uow.email, principal)
-            if key is not None:
-                await uow.email.put(
-                    EmailRecord(
-                        tenant_id=principal.tenant_id,
-                        principal_id=principal.principal_id,
-                        kind="feedback_replay",
-                        key=key,
-                        revision=1,
-                        payload={"feedback_id": str(item.id), "request_digest": request_digest},
-                        created_at=now,
-                        updated_at=now,
-                    ),
-                    expected_revision=0,
+            else:
+                item = await self._save_feedback(
+                    uow.email,
+                    principal,
+                    thread,
+                    target=target,
+                    judgment=judgment,
+                    explanation=explanation,
+                    target_value=target_value,
+                    expected_revision=expected_revision,
+                    replay=None if key is None else (key, request_digest),
+                    now=now,
                 )
-            return {
-                "feedback_id": str(item.id),
+                feedback_id = str(item.id)
+            result: dict[str, object] = {
+                "feedback_id": feedback_id,
                 "thread": thread_summary(
                     apply_feedback(
                         thread, await self._feedback(uow.email, principal), now=self.clock.now()
                     )
                 ),
             }
+        # A replayed request re-rates too: the first one may have ended after its
+        # feedback committed and before the memories followed.
+        await self._memories_follow(principal, thread, item, judgment)
+        return result
+
+    async def _save_feedback(
+        self,
+        store: EmailStore,
+        principal: Principal,
+        thread: EmailThread,
+        *,
+        target: Literal["thread", "person", "topic"],
+        judgment: Literal["important", "less_important", "needs_reply", "no_reply_needed"],
+        explanation: str | None,
+        target_value: str | None,
+        expected_revision: int | None,
+        replay: tuple[str, str] | None,
+        now: datetime,
+    ) -> EmailFeedback:
+        """Write one feedback record and its replay receipt; returns the record."""
+        if expected_revision is not None and thread.revision != expected_revision:
+            raise ConflictError("email thread changed")
+        values = (
+            [str(thread.id)]
+            if target == "thread"
+            else addresses(thread.senders)
+            if target == "person"
+            else thread.topics
+        )
+        if target_value is not None:
+            target_value = addresses([target_value])[0] if target == "person" else target_value
+            if target_value not in values:
+                raise EmailFeedbackTargetError("feedback target is not supported by this thread")
+            values = [target_value]
+        if len(values) != 1:
+            raise EmailFeedbackTargetError("choose the specific person or topic for this feedback")
+        item = EmailFeedback(
+            id=self.ids.new_id(),
+            thread_id=thread.id,
+            target=target,
+            judgment=judgment,
+            target_values=values,
+            explanation=explanation,
+            created_at=now,
+        )
+        await save_value(store, principal, "feedback", str(item.id), item, now)
+        await self._bump_profile(store, principal)
+        if replay is not None:
+            key, request_digest = replay
+            await store.put(
+                EmailRecord(
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    kind="feedback_replay",
+                    key=key,
+                    revision=1,
+                    payload={"feedback_id": str(item.id), "request_digest": request_digest},
+                    created_at=now,
+                    updated_at=now,
+                ),
+                expected_revision=0,
+            )
+        return item
+
+    async def _memories_follow(
+        self,
+        principal: Principal,
+        thread: EmailThread,
+        feedback: EmailFeedback | None,
+        judgment: str,
+    ) -> None:
+        """Let email memories follow the owner's importance judgment at once (ADR-0340).
+
+        Only Important and Less important, given or undone, say what a
+        thread's memories are worth. A judgment about replies says nothing of
+        that and re-rates nothing: it must not carry out, as if it were the
+        owner's word on importance, whatever else is waiting for the thread,
+        such as an assessment saved while learning is paused.
+
+        The feedback is already committed. A refused re-rating never fails it:
+        a retry of the request, a repeated undo, or the next assessment of the
+        thread re-rates again.
+
+        The thread the feedback was given on is re-rated in full. Importance
+        feedback on a person or a topic also rates every other thread it
+        matches, and their memories gain at once what it gives them: a longer
+        retention, or first-class standing. That pass never shortens and never
+        demotes; what the feedback takes away there waits for each thread's
+        next assessment or the owner's command. The feedback's own thread is
+        then re-rated once more: a memory the pass put back takes its standing
+        from the message that formed it, which may sit in this thread and was
+        read before the memory came back.
+        """
+        if self.rerate_memories is None or judgment not in IMPORTANCE_JUDGMENTS:
+            return
+        with suppress(ConflictError, NotFoundError):
+            await self.rerate_memories(principal, thread.account_id, thread.provider_thread_id)
+        if self.lengthen_memories is None or feedback is None or feedback.target == "thread":
+            return
+        try:
+            async with self.uow_factory() as uow:
+                summaries = await self._summaries.read(uow.email, principal)
+            # An undone record matches nothing; the threads it rated are the ones to visit.
+            given = feedback.model_copy(update={"undone_at": None})
+            others = sorted(
+                (
+                    stored
+                    for stored in summaries
+                    if stored.id != thread.id and feedback_matches(given, stored)
+                ),
+                key=lambda stored: stored.updated_at,
+                reverse=True,
+            )[:FEEDBACK_FOLLOW_THREADS]
+            if others:
+                await self.lengthen_memories(
+                    principal, [(stored.account_id, stored.provider_thread_id) for stored in others]
+                )
+                await self.rerate_memories(principal, thread.account_id, thread.provider_thread_id)
+        except Exception:
+            # The pass is a courtesy to an already committed judgment; a retry,
+            # each thread's next assessment or the owner's command makes it up.
+            logger.warning("email_memory_follow_deferred")
 
     async def undo_feedback(self, principal: Principal, feedback_id: UUID) -> dict[str, object]:
         """Undo one feedback record and rebuild the thread projection from surviving evidence."""
@@ -745,11 +847,15 @@ class EmailExperienceService:
                 )
                 await self._bump_profile(uow.email, principal)
             thread = await self._thread(uow.email, principal, item.thread_id)
-            return thread_summary(
+            summary = thread_summary(
                 apply_feedback(
                     thread, await self._feedback(uow.email, principal), now=self.clock.now()
                 )
             )
+        # A repeated undo writes nothing and re-rates again: the first one may have
+        # ended after it committed and before the memories followed.
+        await self._memories_follow(principal, thread, item, item.judgment)
+        return summary
 
     async def _draft(self, store: EmailStore, principal: Principal, draft_id: UUID) -> EmailDraft:
         """Read one authorized draft; a settled body past the window is withheld."""
@@ -1455,7 +1561,8 @@ class EmailExperienceService:
                 if (
                     thread is None
                     or type(archived) is not bool
-                    or expected_revision != thread.revision
+                    or type(expected_revision) is not int
+                    or not thread.inbox_gesture_current(expected_revision)
                 ):
                     raise ConflictError("the thread changed; review it before changing Inbox state")
                 thread = await self._reconcile_archive_in(uow, principal, thread)
@@ -1665,7 +1772,10 @@ class EmailExperienceService:
                         provider_thread_id=thread.provider_thread_id,
                         read_server_id=self.account_servers[thread.account_id]["read"],
                         write_server_id=self.account_servers[thread.account_id]["write"],
-                        expected_revision=thread.revision,
+                        # The revision the owner was looking at (ADR-0337).
+                        expected_revision=thread.revision
+                        if expected_revision is None
+                        else expected_revision,
                         archived=archived,
                         expires_at=now + timedelta(seconds=120),
                         spam=spam,
@@ -2380,7 +2490,7 @@ class EmailExperienceService:
                 or task.account_ids != [consent.account_id]
                 or task.expected_revision != consent.expected_revision
                 or consent.expires_at <= self.clock.now()
-                or thread.revision != consent.expected_revision
+                or not thread.inbox_gesture_current(consent.expected_revision)
                 or thread.account_id != consent.account_id
                 or thread.provider_thread_id != consent.provider_thread_id
                 or self.account_servers[consent.account_id].get("read") != consent.read_server_id
@@ -2527,7 +2637,11 @@ class EmailExperienceService:
         update: dict[str, Any] = {
             "archive_operation": operation.model_copy(update={"status": status, "error": error})
         }
-        if status == "completed" and thread.revision == task.expected_revision:
+        if (
+            status == "completed"
+            and task.expected_revision is not None
+            and thread.inbox_gesture_current(task.expected_revision)
+        ):
             archived = operation.target_archived
             arrives, leaves = ("SPAM", "INBOX") if archived else ("INBOX", "SPAM")
 
@@ -3226,6 +3340,9 @@ class EmailExperienceService:
                 ),
                 updated_at=max((message.sent_at for message in messages), default=now),
                 revision=1 if previous is None else previous.revision + 1,
+                own_reply_floor=None
+                if previous is None
+                else own_reply_floor(previous, messages, complete),
                 draft_id=None if previous is None else previous.draft_id,
                 session_id=None if previous is None else previous.session_id,
                 complete=complete,
@@ -3515,11 +3632,9 @@ class EmailExperienceService:
                         reason="email_assessment_stale",
                     )
             urgency = score("urgency")
-            priority = min(
-                1.0, max(content * 0.9, relationship * 0.7 + content * 0.3) + urgency * 0.1
+            priority = assessment_priority(
+                content, relationship, urgency, bulk=bool(assessment.get("bulk"))
             )
-            if assessment.get("bulk"):
-                priority *= 0.4
             # ADR-0165: protection keyed to an address needs a verified address.
             received = [m for m in thread.messages if m.direction == "received"]
             protected = (replies > 0 or supported) and (
@@ -3532,7 +3647,9 @@ class EmailExperienceService:
                 and not thread.spam_cleared
                 and not protected
             )
-            assessment = {**assessment, "suspected_spam": suspected_spam}
+            # ADR-0340: the rating is kept with the assessment, because a new
+            # message resets the thread's own rating until it is assessed again.
+            assessment = {**assessment, "suspected_spam": suspected_spam, "priority": priority}
             topics = assessment.get("topics", [])
             if (
                 not isinstance(topics, list)

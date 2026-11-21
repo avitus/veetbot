@@ -2588,6 +2588,34 @@ ADR-0186, with the configured principal's memory scopes and exact same-origin wr
 checks. No cookie authenticates general API access or renews its own lifetime.
 The original bearer flow and development loopback restrictions remain unchanged.
 
+## Owner recall question page (ADR-0339)
+
+When `AGENT_RECALL_QUESTIONS_ENABLED` is set, `/recall-questions` serves a
+content-free public HTML shell and its two same-origin CSS and JavaScript
+assets under the same restrictive CSP as the dreaming shell. All question
+content requires the owner bearer token, which the page holds in tab memory
+only: never a cookie or browser storage, so a reload asks for it again. The
+dreaming review cookie does not authenticate these routes. Owner text is
+rendered as text. With the flag unset none of these routes exists.
+
+`GET /v1/recall-questions` requires `memory.read` and returns every question,
+optionally filtered by `split` (`development`, `holdout`) and `status`
+(`active`, `retired`), each with its revision, its latest recorded run result
+and whether that run passed. A result is shown only for the content it tested:
+an edit that changes what a question measures clears it. `GET /v1/recall-questions/{id}/history` requires
+`memory.read` and returns every state the question has held, oldest first.
+
+`POST /v1/recall-questions` requires `memory.write` and a strict
+`{key, split, content}` body, and returns 201. `PUT /v1/recall-questions/{id}`
+requires `memory.write` and `{expected_revision, content}`.
+`POST /v1/recall-questions/{id}/status` requires `memory.write` and
+`{expected_revision, status}`. No body accepts a new half for an existing
+question: an unknown field is `malformed_request`, and creating a key that
+exists with different content or in the other half is `conflict`. A write
+against a changed question is `conflict`; repeating a write that already took
+effect returns the stored question. Another owner's identifier is `not_found`.
+Responses use `Cache-Control: private, no-store`.
+
 ## Failure support references (ADR-0205)
 
 A run failure view has an optional `diagnostic_id` UUID, projected from the

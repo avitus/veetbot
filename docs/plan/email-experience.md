@@ -122,7 +122,10 @@ in its originating account; unchecking an archived conversation explicitly
 moves it back to the same account's Inbox. The clearly labelled gesture supplies
 single-action owner consent under ADR-0095. Remove the row immediately while
 the archive request and durable operation finish asynchronously. Normal progress
-and successful completion are silent; other rows remain actionable. Keep the
+and successful completion are silent; other rows remain actionable. Collection
+counts and list totals stay visible meanwhile, each reduced by the hidden
+conversation it counted as it stood for that read (its status is read with each read of the counts, and the counts again, at most twice, when it changed in between), and return to the confirmed value if the row is
+restored. Keep the
 last confirmed mailbox state separate from this optimistic presentation, retain
 draft edits, and restore the row with an actionable error if admission, status
 retrieval, or execution fails or the outcome is uncertain. Archiving the open
@@ -137,6 +140,33 @@ status reads without another archive request. Preserve unread state,
 other labels, and importance feedback. New correspondence is assessed again.
 After a confirmed reply, the thread leaves Needs reply unless another
 unanswered request remains.
+
+**What the counts guarantee while an archive is pending.** The five sidebar
+counts and the total of the list on screen are lowered by what the server's
+numbers held of each hidden conversation. Other mail is totalled as everything
+not Important and a search of all mail as everything that matches; the other
+lists are totalled as they are counted. Numbers are shown only with what the
+same read says of each hidden conversation: its row in the response that
+carried the numbers, or its own status read after them. When that status
+disagrees with what the client held before asking, or another conversation was
+hidden meanwhile, the list is read again, at most twice. A list kept for quick
+return comes back with the membership its numbers had. Once Gmail confirms, the
+conversation leaves the lists that no longer hold it before its hide is lifted,
+and the numbers stay lowered until the next read; Other mail and search still
+list archived mail, so there the row comes back.
+
+The client cannot guarantee exact numbers, for two reasons it cannot remove.
+The numbers and a conversation's status come from separate requests: a
+conversation that changes and changes back between two reads with the numbers
+taken in between, or that is still changing after the second repeat, is counted
+as last read, so a number can be off by one per hidden conversation until the
+next refresh. And the client decides which numbers hold a conversation by its
+own copy of the server's rules (the Important and Inbox thresholds, Needs you,
+Handled, Suspected spam, Other mail, the account filter and the search match),
+so a server rule that changes first makes the adjustment wrong for as long as
+an archive is pending. The remedy is on the server and is follow-up work: the
+list response should say, with its numbers, which of them hold each
+conversation that has a pending archive.
 
 Legacy clients' **Mark handled** command remains a local, reversible dismissal
 of that source revision. It does not archive Gmail and is not evidence that a
@@ -175,8 +205,11 @@ padding and recognizable promotional controls, collapses a forwarded envelope to
 its source attribution, embeds source URLs as labeled links, and restores article
 headings and paragraph flow. A retained HTML alternative supplies the reading
 structure when it represents source prose, with plain-text paragraphs absent
-from it preserved before it. An unrelated image/footer alternative leaves the
-text reader intact.
+from it preserved before it. A paragraph is absent when one of its lines has
+words the HTML lacks, so a reply's quoted history is not judged missing for a
+repeat the plain reader showed once. A link the plain reader could label only by
+its host is present when the HTML links the same destination. An unrelated
+image/footer alternative leaves the text reader intact.
 Rectangular tables with at least two rows and columns become inert Markdown
 tables; the first row is the heading. Column spans keep their text in the first
 column and reserve empty cells for the rest. Layout wrappers, row spans and
@@ -199,6 +232,33 @@ A message containing a code fence keeps its lines as they are. A block of three 
 more lines that repeats an earlier block of the same message, however it wrapped,
 is shown once, which is how a signature quoted at every level appears. No other
 prose is removed for repeating.
+
+A sender's signature is left out of the reading text, at every quote level, and
+stays in the retained body that **Show original** shows and that People and
+memory formation read. Three signs identify one, and nothing else does:
+
+- The mailer's own mark in the HTML: Gmail's `gmail_signature` and
+  `gmail_signature_prefix` classes or `data-smartmail="gmail_signature"`, and the
+  `Signature`, `ms-outlook-mobile-signature` and `AppleMailSignature` ids.
+- In a plain-text part, a `-- ` delimiter line and the unbroken lines under it,
+  at most 12, when only blank lines, the end of that quote level, or the reply or
+  forward it was written above follow. This also removes a mailing-list footer written the same way. A delimiter with
+  more of the message below it stays. Of a removed block only a postscript line is kept; a disclaimer or other sentence there goes.
+- In the writer's own text, a line that is exactly the sender's display name of
+  two or more words, with the lines under it, when those lines run to the end of
+  the text or to the reply or forward below. Each must be at most 100 characters,
+  there are at most 12, and none is a postscript or a sentence of more than eight
+  words. The name alone is a sign-off and stays. So does a name whose nearest line of
+  text above ends in a colon, across any blank lines: that line introduces a list.
+
+The comparison of the two alternatives above uses the HTML with its signature, so
+the plain part's copy is never preserved as missing prose.
+
+People reads the third sign's block from the retained plain body to update a
+known sender's contact details
+([ADR-0336](../adr/0336-sender-signatures-update-people-contact-details.md));
+the rule and its limits are in
+[people-and-relationships.md](people-and-relationships.md#contact-details-from-a-senders-signature).
 
 Native text renders the result across the available Mac reader width, keeping
 its edge padding; iPhone and iPad retain their bounded reading width. External
@@ -310,13 +370,15 @@ after one page. Mixed-version pages cannot establish a reusable snapshot.
 Query, connection and mutation invalidation discard the version with its rows.
 Thread detail accepts `If-None-Match` after current authorization, retention,
 draft and operation checks; a match returns 304 without preparing reader text.
+The validator includes a reader version, raised whenever the same retained
+source would read differently, so a client never keeps an older reader's text.
 Both responses retain `private, no-store`. Reader preparation runs outside the
 API event loop. No body, permission, retention or draft checks are bypassed.
 Native message and conversation parsing runs off the UI thread. Conversation
 parses use a nine-entry least-recently-used cache with exact source and owner
 matching; reset, exclusion and cancellation prevent stale publication. The
 first inbox page renders before independent account freshness finishes loading;
-late account errors remain visible and revoked access clears the cached state.
+late account errors remain visible and revoked access clears the cached state. A refused read of one conversation drops that account's mail at once; other accounts' mail stays only once a list read after the refusal has answered, and a refused or failed list read clears everything.
 Access bookkeeping reuses the source record read under the owner lock unless
 archive recovery has written a newer revision; retention timestamps remain exact.
 
@@ -787,12 +849,22 @@ remaining reads and observed unread search matches, and may select those matches
 by opaque IDs in the next round. Reserve reads for selected files, and for verifying
 any mailbox of theirs not yet verified, before optional further discovery; identical governed reads reuse durable results. Admit the whole
 selected staging set before downloading any of it. All existing caps remain.
+Reaching the five-source cap ends that round's mail discovery without failing
+preparation: later matches stay unread, the evidence says so, and planning receives
+the remaining source allowance and decides whether the reply can be written.
 A general request for meeting materials refers to the relevant documents actually
 circulated. A source's promise of a future supplement alone does not establish
 that it was circulated or that the requester requires it. Search for relevant
 supplements within budget; describe exactly the materials attached without claiming
 an unverified complete packet. An explicitly requested or otherwise essential
 missing document still blocks preparation, as does an unfinished required source.
+
+A planner-reported preparation issue names only a required file or source. It
+blocks when the plan has no reply text or the reply needs files, and not while the
+plan still requests reads with a planning round remaining. A decision only the
+owner can give is not a preparation issue: the reply is still drafted and leaves
+that point open without inventing it. A note beside a finished reply that needs
+no files does not discard that reply.
 
 Set `AGENT_EMAIL_OWNER_TIMEZONE` to the owner’s IANA zone for planning, including
 mail-only preparation. When unset, selected-calendar metadata supplies the zone
@@ -951,10 +1023,99 @@ summary (ADR-0126).
 The assessment prompt and revision are unchanged.
 
 Correspondent and historical Sent evidence remain attributed, inferred,
-sensitivity-governed, and unable to supersede an owner assertion. Current
-tentative communication facts retain the existing thirty-day evidence horizon.
+sensitivity-governed, and unable to supersede an owner assertion. A claim from
+email that contradicts a belief formed from anything else is stored beside it
+and both are flagged; it never replaces that belief. A claim from email that repeats a stored guess never makes that guess direct or durable.
+
+Under the People policy an email memory is kept by its thread's importance and
+may be first-class (ADR-0340). The older evaluated policy keeps the thirty-day
+horizon and the tentative construction.
+
+- **Importance** is the rating the assessment saves on the thread, after the
+  owner's surviving importance feedback. Important sets 1.0 and Less important
+  sets 0.0. A thread with no stored rating counts as 0, and the dated-attention
+  rule does not lower it.
+  A new message resets the stored rating to zero until the thread is assessed
+  again. That zero is read as unknown: the last saved assessment, which keeps
+  the rating it produced, answers instead. Three figures are floors and not ratings: the content share of an assessment record saved before ratings were kept, the rating an assessment saved without a grounded reading (a rejected or ungrounded result, or a junk first pass), and that last saved rating whenever the assessment read another revision of the thread's messages than the one stored now. A floor lengthens a memory and never shortens or demotes one.
+- **Retention**, measured from the memory's last evidence date:
+
+  | Thread | Kept for |
+  | --- | --- |
+  | importance below 0.3 | 30 days |
+  | 0.3 up to 0.6 | 90 days |
+  | 0.6 up to 0.85 | 1 year |
+  | 0.85 and above, or marked Important, or the owner replied | no expiry |
+
+  The owner replied when the thread holds a message the owner sent. These
+  memories carry the lifecycle label `email-retention@1` and are outside the
+  decay sweep; the expiry alone ends them.
+- **A known sender** is the owner on a message the owner sent, or, on a received message whose sender check passed, an address
+  that resolves to exactly one active or provisional person in People through
+  an owner-confirmed, channel-observed or owner-stated identifier. A sender check that failed or gave no verdict,
+  an unresolved or ambiguous address, and the owner's own address
+  on received mail are unknown. A check with no verdict earns no standing and takes none from a memory that is already first-class; a failed check demotes. A passed check vouches for the sending domain, not the mailbox: ADR-0340 records that residual risk and what limits it.
+- **First-class standing** needs a known sender and a thread kept for a year or
+  more. The statement reads `<sender> said by email on <date> that <subject>
+  <predicate>: "<value>".` Confidence is the extraction's, up to the 0.65
+  ceiling of automatic chat captures. The memory is direct and durable, carries
+  no review flag for coming from email, and stays inferred, sensitive,
+  contextual and provisional. Every other email memory keeps the record-line
+  statement, the 0.4 cap, the hypothesis derivation, the tentative longevity
+  and the review flag.
+- **Re-rating.** Retention and standing are recomputed after every saved
+  assessment of the thread, whichever path saved it (each is saved with a mark that the re-rating clears in its own transaction, and a refresh follows up any mark left by a stopped refresh or a pause, whatever the assessment's freshness and wherever its conversation now is: the marks are looked for among all saved assessments of the task's accounts, so an archived conversation's is found too, and new-mail and arrival slices read only the marked assessments from the store, never the unmarked thousands; a follow-up that leaves the mark standing is put off, two minutes at first and doubling up to a day, so debts that keep failing cannot hold back the rest, while one that finds learning paused under the lock is not counted; the mark stays while the assessment describes another revision of the thread; and a new-mail slice whose follow-up changed a memory is not recorded as an empty check), and at once when the owner gives or undoes an importance judgment (Important or Less important)
+  on it; a judgment about replies re-rates nothing. A retried feedback request or a repeated undo writes nothing and re-rates again. Importance feedback on a person or a topic, saved or undone, also lengthens or promotes memories at once in the other threads it matches (up to 250, newest first, within three quarters of a second) and shortens or demotes nothing there; that waits for each thread's next assessment or the command. While learning is paused a re-rating that follows an assessment writes nothing, and it reads the pause under its own mailbox lock; the owner's importance judgment and its undo are the owner's own acts and still reach the memories at once, in their own thread and in the other threads they match. A re-rating lengthens or promotes on whatever the stored thread shows.
+  It shortens only when the importance is known and the thread is held whole,
+  changes standing only when the memory's message is among those held, and
+  demotes only when that sender is no longer known or such a reading rates the
+  thread lower. A known importance is the owner's own feedback, or a grounded assessment's rating of the thread as it is stored now. It reaches a thread's memories through the index of every
+  message observed, since a long thread stores only a window. These two hooks follow only a memory that already carries
+  `email-retention@1`; a memory formed earlier is brought under the table by
+  the command below. Only a live memory that is still inferred, still under this policy,
+  still worded as an email statement and not yet past its expiry is touched. A
+  memory the owner's own words took over is the owner's, and an expired memory
+  is never revived, with one exception: a memory the owner's own feedback left past due is noted on its retained source record, and a later re-rating that gives it a retention still running puts it back as it was. The message that formed it then sets its standing whichever message is read first: the pass reads again the retained messages it covers that list a memory it put back, and a person or topic judgment re-rates its own thread once more after the pass over the other threads. The retained records say which message formed a memory; no statement is asked, so a forming message in a thread the request does not cover waits for that thread's next re-rating or the command. A
+  change of standing rewords the statement in place and moves the derivation,
+  longevity and review flag with it. A promoted guess keeps its stored
+  confidence. Each applied change appends one content-free
+  `email.memory.rerated` event. `agent memory rerate-email --owner
+  TENANT/PRINCIPAL` re-rates every live email memory; it previews unless
+  `--confirm` is given, and its report holds counts only. It commits two hundred sources at a time and reads feedback, threads and senders again for each, so the owner's mark given meanwhile is not undone. When it puts a memory back it reads its sources once more for that memory.
+- **Renewal.** A later message with a strictly later date that states the same
+  subject, predicate and value renews the existing memory: the evidence date
+  moves and the expiry is recomputed and never shortened. A first-class memory
+  becomes active when the later message is from a known sender too; a guess
+  stays provisional. The message that formed a memory sets its standing; the
+  message that supplied its last evidence sets its retention. The retained source record says which messages formed and renewed each memory, so a message is told apart by itself and not by its timestamp. A record written before that was kept formed a memory only when the event the memory was formed from is one of the reads the record keeps for its message and, among the messages of that one read, the memory's own record line names this one; otherwise it never restands or shortens the memory. A statement's words never say which thread or message formed a memory beyond that; when a change of standing rewords a statement, its sender and date are read only in its own attribution, and against the stored message's sender when the thread holds it. The owner's own
+  statement about the same subject takes the memory over under the ordinary
+  rules, and "Still true" replaces it at owner authority.
+- **One fact, one memory (ADR-0341).** A thread's analysis restarts when a
+  message arrives, and a reply quotes what it answers, so the same fact is
+  proposed many times in different words.
+  - A message forms one memory per fact: a proposal with the same subject,
+    belief type and value as a memory the message already formed changes
+    nothing, whatever that memory's status. Values are compared without case,
+    spacing, surrounding quotation marks or a closing punctuation mark. Every other mark is part of the value: `-5 °C` is not `5 °C`. The value is read past the subject the memory is stored under, also when that is a person's identity followed by the subject.
+  - A fact whose quote is quoted text forms nothing and renews nothing. Quoted
+    text appears in the message only on lines marked `>`, or is a quote of at
+    least six words that an earlier message of the stored thread already
+    holds. A forwarded message's content is new to the thread and still forms.
+  - Renewal matches on subject, belief type and value; the predicate's wording
+    no longer has to match.
+  - `agent memory merge-email-duplicates --owner TENANT/PRINCIPAL` merges the
+    copies already stored. Within a thread, live email memories that share a
+    subject, a belief type and a value are one fact: the earliest evidence
+    stays and each copy is superseded by it. The memory kept takes its copies' latest evidence date and longest retention, and the message behind that evidence is linked to it for later re-rating. A memory counts only in the thread that formed it, which the thread's retained records show by their role or, without one, by holding the read the memory was formed from; the statement's words are not asked, and a memory no record places is left alone. A copy whose latest evidence no listed message answers for under the merge's locks is left for a later run, which merges it; each copy with later evidence is checked by itself. Copies under different subjects
+    are counted and left. It previews unless `--confirm` is given, reports
+    counts only, and appends one content-free `email.memory.merged` event per
+    thread it changes, naming every fact merged there.
+- **Not included.** A first-class memory enters the session-start summary only
+  once it is active, as a chat memory does. Email memories are not sent to the
+  dreaming provider.
+
 Historical import measures validity from the original evidence date, not from
-import time. Preserve dated historical records for deliberate historical/as-of
+import time. It keeps the thirty-day horizon whatever the thread is rated. Preserve dated historical records for deliberate historical/as-of
 recall through the existing memory model: an old board appointment can answer
 who served then without becoming a claim that the person serves now. Extend
 the import/source contract and tests to preserve historical validity even when
@@ -1192,7 +1353,12 @@ writes, so that change must not block an immediate move back to Inbox. The
 command applies to the entire conversation, including mail that Gmail knows
 about but the client has not yet loaded, just as Gmail's conversation archive
 does. Expected local content revision is still checked before admission and
-dispatch; a concurrent local update invalidates that gesture. Never replace
+dispatch; a concurrent local update invalidates that gesture, with one
+exception (ADR-0337). A revision that only adds messages the owner sent keeps
+the gesture current, so archiving straight after a reply survives the refresh
+that syncs that reply. The conversation records the earliest such revision
+internally; new mail from anyone else, or any change to an earlier message,
+clears it. A confirmed result then updates Inbox state on that newer revision. Never replace
 cached source or draft content with a partial archive preflight. Exact-content
 freshness for sending remains unchanged.
 

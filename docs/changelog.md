@@ -4,6 +4,195 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-20 — Email memory, signature and Email screen repairs from review (ADR-0336, ADR-0340, ADR-0341)
+
+- An email memory is now shortened or returned to a guess only on a known
+  rating. An older record's partial score, a rejected or ungrounded
+  assessment and a junk first pass can lengthen it but not shorten it.
+- Mail counts as from someone you know only when Gmail's sender check passed,
+  so a message that merely claims a familiar address stays an attributed
+  guess. It is still kept by its thread's importance.
+- Marking a person or topic Important now lengthens their memories in other
+  threads at once. Less important still reaches other threads only at their
+  next assessment or when you run `agent memory rerate-email`, because a
+  shortened memory cannot be brought back.
+- Re-rating tells messages apart by their own record instead of their
+  timestamp, re-reads your feedback for each page of `rerate-email`, and its
+  preview matches what applying does. A retried feedback request resumes a
+  re-rating that did not run.
+- Fact values keep the punctuation that changes them (`-5 °C` is not `5 °C`),
+  and a merge gives the memory it keeps the latest evidence and longest
+  retention of its copies.
+- Undoing Less important now brings back a memory that the feedback itself
+  had pushed past its expiry, also after it was closed. A memory that expired
+  by the table still never returns.
+- A refresh that stopped after rating a thread, or a pause in learning, no
+  longer leaves that thread's memories on their old retention.
+- Merging repeated facts stays inside the thread that formed each memory and
+  leaves a copy alone when its newest evidence cannot be placed. A fact linked
+  to a person is recognised when re-read even if its subject holds a
+  quotation.
+- The records now say plainly that Gmail's sender check vouches for the
+  sending domain, not the mailbox, and what that leaves open.
+- A stored statement is read for its sender, date and message only in its own
+  attribution, never in text quoted inside the claim. A memory your feedback
+  left past due returns with the standing its forming message earns, whichever
+  message is read first. A rating saved for an earlier revision of a thread
+  only lengthens.
+- Re-ratings that follow an assessment write nothing while learning is paused
+  (your own feedback still reaches memories at once),
+  ones that keep failing are put off so they cannot hold back the rest, and a
+  new-mail check whose follow-up changed a memory keeps its audit trail. The
+  merge of repeated facts checks each later copy by itself and records one
+  event per thread.
+- The stored records, not a statement's words, now say which thread and
+  message formed a memory, so the merge and the restore of a memory your
+  feedback left past due cannot be misled by a sender's display name. Only
+  Important and Less important re-rate memories; feedback about replies does
+  not. A new-mail check follows up a pending re-rating for a conversation you
+  have archived, reading only the marked assessments to find it, and a
+  re-rating held by a pause is not counted as a failure.
+- A paged listing of a person's identifiers returns each one once; a later
+  copy could reappear on another page.
+- The Email reading text keeps a postscript written under a `-- ` signature
+  delimiter while still removing the rest of the block, and no longer reads a
+  list of names under a heading as a signature. People places a signature read
+  out of order between the ones already recorded, so only one title holds at
+  a time.
+- Email on Mac, iPad and iPhone: archiving a conversation and then opening
+  another collection, account or page no longer puts it back into the sidebar
+  counts while Gmail is still confirming the archive. Discarding a reply
+  brings Reply and Draft with Veetbot back at once.
+- Email on Mac, iPad and iPhone: the sidebar counts also stay right while an
+  archive waits for Gmail when new mail pushes the archived conversation off
+  the first page, when its reply need changes, when you search, and when you
+  archive from the open conversation. What you typed into Teach Veetbot is
+  still there after you reply and close the reply. On iPhone, pressing Reply
+  brings the reply into view above the keyboard.
+- Email on Mac, iPad and iPhone: going back to a list you had open shows its
+  sidebar counts with archived-but-unconfirmed conversations taken off as they
+  stood when the list was read. If such a conversation changes while the
+  counts are being read, the counts are read again so Needs you does not stay
+  one too high.
+- Email on Mac, iPad and iPhone: the total of Other mail and of a search drops
+  by one when you archive a conversation there, like the other lists. An
+  archive Gmail has confirmed no longer reappears in the Inbox when mail cannot
+  be refreshed right afterwards. If one account can no longer be read while an
+  archive in it is pending, that account's mail is removed and your other
+  accounts' mail stays once the list has confirmed they can still be read.
+
+## 2026-11-20 — A recorded run belongs to the question content it tested (ADR-0338, ADR-0339)
+
+- A recall question's recorded result now names a fingerprint of what the
+  question measured when it ran. A result for content the question no longer
+  holds is refused as stale, and an edit that changes what a question measures
+  clears its recorded result, so the page never shows a pass beside content
+  that has not run. `agent memory questions record` prints how many results it
+  recorded, how many were stale and how many named no question.
+- `agent memory questions export` writes a new private file that takes the
+  destination's place. An existing file with wider permissions used to keep
+  them.
+- A run recorded while a note or status edit was open is no longer written
+  over by that edit, and the edit answers with the result the store holds.
+- In the in-memory store a failed import or a failed erasure now leaves every
+  question as it was, an owner's questions are locked until the unit of work
+  ends, and two owners' questions with one identifier keep separate histories.
+- On the page, a change refused because the question moved on stays explained
+  after the list reloads.
+- A recall trace's candidate ranking lists a merged memory directly after the
+  memory that stands for it, and its total time includes the People revision
+  read. Erasing a memory now reaches a trace that only ranked it or cut it for
+  the budget.
+- The probe tool reads the store once per observation instead of once per
+  expected text.
+
+## 2026-11-20 — One fact in an email thread, one memory (ADR-0341)
+
+- Veetbot was storing the same fact from an email thread many times: 271 of
+  668 live email memories repeated a value already stored from the same
+  thread, and one value was stored 57 times. Each new message made it read the
+  whole thread again and word the same facts differently, and every reply that
+  quoted a sentence counted as saying it again.
+- A message now forms one memory per fact, however the fact is worded.
+- A sentence quoted in a reply is not counted as the replier's statement.
+- A later email that restates a fact in its own words renews the one memory.
+- The copies already stored are merged only when you run
+  `agent memory merge-email-duplicates`, which previews first. The earliest
+  memory of each fact stays and the copies point at it; nothing is deleted.
+
+## 2026-11-20 — Email memories are kept by importance (ADR-0340)
+
+- A memory formed from an email used to expire thirty days after the email,
+  whatever the email was. It is now kept by the thread's importance, the same
+  rating that orders the Inbox: thirty days below 0.3, ninety days up to 0.6,
+  a year up to 0.85, and with no expiry at 0.85 and above, or when you marked
+  the thread Important, or when you replied.
+- Mail from someone you know, in a thread kept a year or more, now forms a
+  plain memory: "Alex said by email on 2026-11-18 that ...". It is no longer
+  capped at low confidence or flagged for review merely for coming from email.
+  Mail from anyone else still forms the short record-line guess.
+- A memory follows its thread. Marking a thread Important, replying, or a new
+  rating changes how long its memories are kept and how they read. A later
+  email that repeats a fact renews the memory.
+- A correspondent's claim still never replaces something you said. It is kept
+  beside your statement and both are flagged for you. An email claim could
+  replace an automatically captured statement of yours before; it no longer
+  can.
+- A memory is shortened or demoted only on a full, current reading of its
+  thread. A thread whose rating is waiting to be redone after a new message,
+  or a long thread only partly stored, never lowers a memory.
+- Memories that already exist change only when you run
+  `agent memory rerate-email`, which previews first.
+- By your choice: an email memory enters the session-start summary only once
+  something repeats or confirms it, and email memories are not sent to the
+  dreaming provider.
+
+## 2026-11-20 — A page for the recall test questions (ADR-0339)
+
+- The questions Veetbot's memory is tested on now live in the database, and you
+  keep them on a private page at `/recall-questions`: add, edit, retire and
+  restore questions, pick the facts each should reach by searching your
+  memories, and see every earlier version.
+- Each question is in the development half or the held-out half, chosen when it
+  is added. Nothing moves it afterwards.
+- After a test run is recorded, each question shows whether it passed or which
+  stage lost the fact.
+- Off by default. Turning it on needs `AGENT_RECALL_QUESTIONS_ENABLED=1`; the
+  page asks for your access token each time it is opened.
+
+## 2026-11-20 — Recall health can be measured again (ADR-0338)
+
+- `agent memory health` had stopped working on production: it timed out on
+  every window. It now reads a small summary stored with each recall and
+  finishes whatever the size of the trace table. Recalls recorded before this
+  release have no summary and are counted separately.
+- Each recall now records how long every stage took, not only the vector
+  search, and a recall led by a question keeps the ranking of every candidate
+  it considered for thirty days, so a missed memory can be traced to the
+  stage that lost it.
+- What Chat recalls is unchanged.
+
+## 2026-11-20 — Archiving right after a reply no longer fails
+
+- Archiving a conversation shortly after replying to it showed "Inbox state
+  could not be changed. Try again." The refresh that synced the sent reply
+  staled the archive. The owner's own sent reply now keeps the archive
+  current; new mail from anyone else still stops it (ADR-0337).
+
+## 2026-11-20 — GPT-6.2 Astra is a chat model choice
+
+- Settings → Models offers GPT-6.2 Astra for Chat beside GPT-6 Astra, Claude
+  Fable 5.1 and GPT-5.6 Sol, when the deployment has an OpenAI key. It applies
+  to new app chats (ADR-0119); the default chat model and the memory model are
+  unchanged.
+- GPT-6.2 discards a step's reasoning when anything before it in the request
+  was rewritten. Messages and tool results now render identically wherever they
+  sit in a request, so a tool loop keeps its reasoning from step to step
+  (ADR-0335). The first message of a chat after the update may cost slightly
+  more while the provider cache refills.
+- Deploying: the model registry version changes, so drain active and suspended
+  runs first, as for any registry change.
+
 ## 2026-11-18 — Email attachments
 
 A researched reply can now carry up to ten files totaling 25 MB. Review the files with the message before sending. To keep an incoming file separately, press Save on the attachment in Email to add it to that conversation.

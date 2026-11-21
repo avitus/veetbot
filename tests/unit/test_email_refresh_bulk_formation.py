@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from email.utils import format_datetime
 from typing import Any
 
@@ -23,7 +23,7 @@ from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.domain.runs import RunStatus
 from tests.contract.memory_fixtures import browse_query
 from tests.gates.test_email_m18 import _email_settings
-from tests.gates.test_email_runtime_m26 import _mailbox_factory, _page, _profile
+from tests.gates.test_email_runtime_m26 import MAIL_NOW, _mailbox_factory, _page, _profile
 
 EVIDENCE = "Please approve the board materials."
 
@@ -83,7 +83,7 @@ async def _mail(*, census: bool) -> Any:
                     summary["bulk"] = {
                         "message_id": "m1",
                         "from": "Colleague <colleague@example.test>",
-                        "date": format_datetime(datetime.now(UTC) - timedelta(days=1)),
+                        "date": format_datetime(MAIL_NOW - timedelta(days=1)),
                         "list_id": "digest.example.test",
                         "unsubscribe": "one_click",
                     }
@@ -126,6 +126,7 @@ async def test_refresh_forms_from_ordinary_mail_and_skips_bulk_with_a_reason(
         settings=settings,
         script=FakeModelScript(turns=[_people_assessment(bulk=bulk)]),
         mcp_client_factory=await _mail(census=census),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         run = await app.runs.get(operation.run_id)

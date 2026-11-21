@@ -23,6 +23,9 @@ plan and directed implementation. Production timing remains to be measured.
    the version of the loaded rows, it retains the rows and pagination without
    reading later pages. A changed or absent version uses ordinary pagination.
    A multi-page load keeps a reusable version only if every page agrees.
+   The client offers its version only while every conversation a pending
+   archive hides is among the loaded rows: the version vouches for the counts
+   and the rows of that view, not for a conversation the rows do not hold.
    Query, connection and local mutation invalidation also discard the version;
    obsolete requests cannot restore it. Existing bounded list snapshots may
    retain their version alongside their rows. Returning to an unchanged list

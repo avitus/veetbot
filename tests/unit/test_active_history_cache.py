@@ -9,6 +9,8 @@ import pytest
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
+from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
+from agent_core.config import PACKAGE_ROOT
 from agent_core.context.builder import _RecallBundle
 from agent_core.domain.context import WorkingState
 from agent_core.domain.messages import (
@@ -24,6 +26,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import ProviderContinuation
 from agent_core.domain.skills import LoadedSkillBody
+from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from tests.contract.support import NOW, agent, principal, session
 from tests.unit.test_history_cache_window import (
     _call,
@@ -178,6 +181,105 @@ async def test_active_history_survives_fresh_step_context(
         # Canonical content and checkpoint state are never replaced by rendering.
         assert isinstance(result.content[0], TextPart)
         assert result.content[0].text == "canonical " * 1000
+
+
+def _only_whole_items_deleted(prefix: list[dict[str, Any]], created: list[dict[str, Any]]) -> bool:
+    """Whether ``prefix`` is ``created`` with whole items removed and nothing else."""
+    remaining = iter(created)
+    return all(any(row == candidate for candidate in remaining) for row in prefix)
+
+
+@pytest.mark.parametrize("carried", [False, True])
+@pytest.mark.parametrize("volatile", ["recall", "recall_shape", "state", "clock", "skill"])
+async def test_replayed_reasoning_keeps_the_prefix_gpt_6_2_created_it_under(
+    monkeypatch: pytest.MonkeyPatch, carried: bool, volatile: str
+) -> None:
+    """GPT-6.2 drops a reasoning item when content before it is inserted or edited.
+
+    Deleting whole earlier items is allowed. Each replayed item must therefore
+    follow only rows the request that produced it already sent, byte for byte.
+    """
+    planner, builder = await _stack()
+    model = await StaticModelRouter(
+        ProviderRegistry.load(PACKAGE_ROOT / "models", adapters=ADAPTER_DEFINITIONS),
+        FixedClock(NOW),
+    ).resolve("astra-6-2", tenant_id="tenant-a")
+    assert model.model == "gpt-6.2-astra"
+    await planner.plan(session(), agent(), principal(), model)
+    active = _second_run()
+    # Every item the runtime appends is read from its recorded event (loop.py).
+    asked = UserMessage(content=[TextPart(text="Research it.")], source_event_sequence=3)
+    cp = _checkpoint(active, [*(_history() if carried else []), asked])
+    tick = 0
+
+    async def recall(*args: object, **kwargs: object) -> _RecallBundle:
+        if volatile == "recall_shape":
+            return _RecallBundle(
+                base="New memory" if tick % 2 else None, delta="New delta" if tick % 3 else None
+            )
+        return (
+            _RecallBundle(base=f'<memory as_of="{tick}">Current fact {tick}</memory>')
+            if volatile == "recall"
+            else _RecallBundle()
+        )
+
+    def refresh() -> None:
+        if volatile == "state":
+            cp.working_state = {
+                "context": WorkingState(objective=f"Step {tick}").model_dump(mode="json")
+            }
+        elif volatile == "clock":
+            assert isinstance(builder._clock, FixedClock)
+            builder._clock.advance(timedelta(days=1))
+        elif volatile == "skill":
+            content = f"Loaded reference {tick}"
+            cp.loaded_skills = [
+                LoadedSkillBody(
+                    name="reference",
+                    revision=tick,
+                    content=content,
+                    tokens=20,
+                    trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                    content_sha256=hashlib.sha256(content.encode()).hexdigest(),
+                )
+            ]
+
+    monkeypatch.setattr(builder, "_recall_once", recall)
+    refresh()
+    # The request that produces the first reasoning item: an unanswered input.
+    created = _wire((await builder.assemble(active, cp, agent(), principal())).request, model)
+    for tick in range(1, 6):
+        result = _result(f"call-{tick}", "canonical " * 1000, tick * 2 + 4)
+        result.context_content = [TextPart(text=f"Page {tick}: " + "excerpt " * 200)]
+        cp.conversation.extend([_call(f"call-{tick}", tick * 2 + 3), result])
+        cp.provider_continuation = ProviderContinuation(
+            provider="openai",
+            opaque_items=[
+                ProviderReasoningItem(
+                    provider="openai",
+                    item_index=0,
+                    provider_payload={
+                        "type": "reasoning",
+                        "id": f"opaque-{tick}",
+                        "encrypted_content": f"opaque-{tick}",
+                        "summary": [],
+                    },
+                ).model_dump(mode="json")
+            ],
+        )
+        refresh()
+        wire = _wire((await builder.assemble(active, cp, agent(), principal())).request, model)
+        replayed = [i for i, row in enumerate(wire) if row.get("type") == "reasoning"]
+        assert [wire[i]["id"] for i in replayed] == [f"opaque-{tick}"]
+        assert _only_whole_items_deleted(wire[: replayed[0]], created), (
+            f"step {tick} inserted or edited content before the reasoning item it replays"
+        )
+        # Its own tool exchange follows it; fresh context comes after that.
+        assert [row.get("call_id") for row in wire[replayed[0] + 1 : replayed[0] + 3]] == [
+            f"call-{tick}",
+            f"call-{tick}",
+        ]
+        created = wire
 
 
 async def test_tool_loop_keeps_corrections_when_recall_yields() -> None:

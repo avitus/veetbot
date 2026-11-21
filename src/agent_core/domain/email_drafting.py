@@ -81,4 +81,11 @@ class DraftResearchPlan(EmailValue):
     source_ids: list[str] = Field(default_factory=list, max_length=5)
     attachment_ids: list[str] = Field(default_factory=list, max_length=DRAFT_ATTACHMENT_LIMIT)
     requires_attachments: bool = False
-    preparation_issue: str | None = Field(default=None, max_length=500)
+    preparation_issue: str | None = Field(
+        default=None,
+        max_length=500,
+        description=(
+            "A required file or source that remains missing or ambiguous after research. "
+            "Never an owner decision, caveat or note; null whenever body is set."
+        ),
+    )

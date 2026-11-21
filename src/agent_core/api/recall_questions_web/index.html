@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Recall questions · Veetbot</title>
+    <link rel="stylesheet" href="/recall-questions/style.css" />
+    <script src="/recall-questions/app.js" defer></script>
+  </head>
+  <body>
+    <div class="page">
+      <header class="masthead">
+        <div class="brand">◔ veetbot</div>
+        <div class="topline">
+          <span>Memory / Recall questions</span>
+          <button class="btn quiet" id="disconnect" hidden>Disconnect</button>
+        </div>
+        <h1>The questions memory is tested on.</h1>
+        <p class="subtitle">
+          Each question names the stored facts an answer should reach. Half are
+          held out: they are run and read, never tuned against.
+        </p>
+      </header>
+
+      <div id="error" class="alert" role="alert" hidden></div>
+
+      <section id="connect" class="panel">
+        <h2>Connect to your question set.</h2>
+        <p>
+          Paste your Veetbot access token. It stays in this tab and is not
+          saved, so a reload asks for it again.
+        </p>
+        <label for="token">Access token</label>
+        <div class="row">
+          <input
+            id="token"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Paste your access token"
+          />
+          <button class="btn primary" id="connect-button">Connect</button>
+        </div>
+        <p class="hint">Local development connects without a token.</p>
+      </section>
+
+      <div id="workspace" hidden>
+        <section class="bar" aria-label="Question set">
+          <p id="summary" class="summary" role="status"></p>
+          <div class="actions">
+            <button class="btn" id="refresh">Reload</button>
+            <button class="btn primary" id="add">Add question</button>
+          </div>
+        </section>
+
+        <section class="filters" aria-label="Filters">
+          <label>
+            Half
+            <select id="filter-split">
+              <option value="">Both halves</option>
+              <option value="development">Development</option>
+              <option value="holdout">Held out</option>
+            </select>
+          </label>
+          <label>
+            Status
+            <select id="filter-status">
+              <option value="active">Active</option>
+              <option value="retired">Retired</option>
+              <option value="">Active and retired</option>
+            </select>
+          </label>
+          <label>
+            Latest run
+            <select id="filter-result">
+              <option value="">Any result</option>
+              <option value="missed">Missed</option>
+              <option value="passed">Passed</option>
+              <option value="none">Not run yet</option>
+            </select>
+          </label>
+          <label class="grow">
+            Find
+            <input id="filter-text" type="search" placeholder="Words in the question or key" />
+          </label>
+        </section>
+
+        <div id="list" aria-label="Questions"></div>
+        <p id="empty" class="panel" hidden>No questions match these filters.</p>
+      </div>
+
+      <dialog id="editor" aria-labelledby="editor-title">
+        <h2 id="editor-title">Add question</h2>
+        <div id="editor-error" class="alert" role="alert" hidden></div>
+
+        <div class="once" id="once-fields">
+          <label for="field-key">Key</label>
+          <input id="field-key" type="text" spellcheck="false" placeholder="home-city" />
+          <p class="hint">Lowercase letters, digits and hyphens. It names this question in run reports and cannot change.</p>
+          <fieldset>
+            <legend>Half</legend>
+            <label class="choice"><input type="radio" name="split" value="development" /> Development: a change may be tuned against it</label>
+            <label class="choice"><input type="radio" name="split" value="holdout" /> Held out: run and read, never tuned against</label>
+            <p class="hint">Chosen once. A question never moves to the other half.</p>
+          </fieldset>
+        </div>
+        <p id="once-summary" class="hint" hidden></p>
+
+        <label for="field-question">Question, as you would ask it</label>
+        <textarea id="field-question" rows="2"></textarea>
+
+        <label for="field-family">Family</label>
+        <select id="field-family">
+          <option value="attributes">Attributes: things about you</option>
+          <option value="preferences">Preferences</option>
+          <option value="relationships">Relationships</option>
+          <option value="goals">Goals</option>
+          <option value="decisions">Decisions</option>
+          <option value="routines">Routines</option>
+          <option value="temporal">Temporal: dates and what changed</option>
+          <option value="complex">Complex: needs several facts</option>
+        </select>
+
+        <h3>Facts the answer should reach</h3>
+        <div id="facts"></div>
+        <button class="btn" id="add-fact">Add a fact</button>
+
+        <div class="finder">
+          <label for="memory-search">Find a stored memory</label>
+          <div class="row">
+            <input id="memory-search" type="search" placeholder="Words in the memory" />
+            <button class="btn" id="memory-search-button">Search memories</button>
+          </div>
+          <p id="memory-status" class="hint" role="status"></p>
+          <div id="memory-results"></div>
+        </div>
+
+        <label for="field-delivered">Names the recalled memories must show, one per line</label>
+        <textarea id="field-delivered" rows="2"></textarea>
+        <label for="field-answer">Words the answer must contain, one per line</label>
+        <textarea id="field-answer" rows="2"></textarea>
+        <label for="field-not-answer">Words the answer must not contain, one per line</label>
+        <textarea id="field-not-answer" rows="2"></textarea>
+        <label for="field-forbidden">Memory text that must not be recalled, one per line</label>
+        <textarea id="field-forbidden" rows="2"></textarea>
+        <label for="field-search">Search text for the deliberate path (optional)</label>
+        <input id="field-search" type="text" />
+        <label for="field-notes">Notes</label>
+        <textarea id="field-notes" rows="2"></textarea>
+
+        <div class="actions end">
+          <button class="btn" id="editor-cancel">Cancel</button>
+          <button class="btn primary" id="editor-save">Save question</button>
+        </div>
+      </dialog>
+
+      <dialog id="history" aria-labelledby="history-title">
+        <h2 id="history-title">History</h2>
+        <div id="history-list"></div>
+        <div class="actions end">
+          <button class="btn" id="history-close">Close</button>
+        </div>
+      </dialog>
+
+      <div class="toast" id="toast" role="status" hidden></div>
+    </div>
+  </body>
+</html>

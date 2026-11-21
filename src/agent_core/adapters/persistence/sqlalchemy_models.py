@@ -1351,6 +1351,7 @@ class RecallTraceRow(Base):
         Index("ix_recall_traces_turn", "turn_id", "created_at"),
         Index("ix_recall_traces_trace_gin", "trace", postgresql_using="gin"),
         Index("ix_recall_traces_operator_expiry", "operator_fields_expire_at"),
+        Index("ix_recall_traces_owner_created", "tenant_id", "principal_id", "created_at"),
         Index(
             "ix_traces_erasure_pending",
             "tenant_id",
@@ -1373,6 +1374,9 @@ class RecallTraceRow(Base):
     )
     turn_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     trace: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    # Identifier-free aggregates for the recall health report; null on traces
+    # recorded before the column existed.
+    summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     erasure_pending: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     operator_fields_expire_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -2506,6 +2510,56 @@ class RecordEntryRow(Base):
     source_session_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     source_event_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RecallQuestionRow(Base):
+    __tablename__ = "recall_questions"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "principal_id", "id", name="pk_recall_questions"),
+        UniqueConstraint("tenant_id", "principal_id", "key", name="uq_recall_questions_key"),
+        CheckConstraint("split IN ('development', 'holdout')", name="split"),
+        CheckConstraint("status IN ('active', 'retired')", name="status"),
+        CheckConstraint("jsonb_typeof(content) = 'object'", name="content"),
+        CheckConstraint("revision >= 1", name="revision"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    key: Mapped[str] = mapped_column(Text)
+    split: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    content: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    revision: Mapped[int] = mapped_column(Integer)
+    latest_result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RecallQuestionRevisionRow(Base):
+    __tablename__ = "recall_question_revisions"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "tenant_id",
+            "principal_id",
+            "question_id",
+            "revision",
+            name="pk_recall_question_revisions",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "principal_id", "question_id"],
+            ["recall_questions.tenant_id", "recall_questions.principal_id", "recall_questions.id"],
+            name="fk_recall_question_revisions_tenant_id_recall_questions",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint("jsonb_typeof(content) = 'object'", name="content"),
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    question_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    revision: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(Text)
+    content: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class PeopleLinkRow(Base):

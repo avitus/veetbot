@@ -672,18 +672,51 @@ class RecallTrace(BaseModel):
     surface_id: str                    # ceiling in force at render time
     sensitivity_ceiling: str
     rendered_sha256: str               # binds the trace to exact bytes
-    arm_latencies_ms: dict[str, int]   # per-tier; nulled after window
+    arm_latencies_ms: dict[str, int]   # per arm and per stage; nulled after window
     candidates: int                    # operator tier
     returned: list[UUID]
     cited: list[UUID]                  # ids the model cited -> "used"
     dropped_for_budget: list[UUID]     # operator tier
     dropped_for_budget_count: int      # survives the operator expiry
+    ranked_candidates: list[UUID]      # operator tier; question-led recalls only
+    returned_classes: RecallClassCounts | None   # as of the recall; no ids
+    dropped_classes: RecallClassCounts | None
     blocked: list[UUID]
     carried_in: list[UUID]             # promotion candidates
     retrieval_policy_version: str
     created_at: datetime
     operator_fields_expire_at: datetime
 ```
+
+`arm_latencies_ms` times the whole recall, not only the vector search
+(ADR-0338). Beside the arms that ran it carries `lock` (opening the unit of
+work and taking the owner lock, absent when the caller already holds it),
+`lexical` (the candidate query, which serves the lexical and the structured
+arm, so `structured` is 0), `semantic` (the vector search, present only when it
+ran), `expand` (identity scoping and merge candidates), `rank` (scoring, fusion
+and ordering), `pack` (budgeted admission and rendering) and `total`. The
+stages are disjoint, so their sum never exceeds `total`; the remainder is
+unattributed. A recall that skipped the candidate query records neither sparse
+arm. Because the timings name stages as well as arms, a reader never iterates
+or sums them: the trace answers `arms_ran` and `recall_latency_ms`, and the
+probe report takes its arms and latency from those.
+
+`ranked_candidates` is every scored candidate of a question-led recall, best
+first, before duplicate and per-subject collapse, to a bound above what recall
+can fetch. Read with `returned` and `dropped_for_budget` it places a missing
+belief: absent from the ranking, the arms never found it or it fell under the
+relevance floor; ranked and in `dropped_for_budget`, a budget cut it; ranked and
+in neither, the collapse removed it. A merged memory the arms found is listed
+directly after the memory that stands for it: it was scored with that memory
+and is returned only under its identity. A snapshot recall has no question and
+records no ranking. `total` covers every read the recall makes, including the
+People revision a People recall records.
+
+Every trace field that is a plain list of belief identifiers is named once, in
+`TRACE_BELIEF_ID_FIELDS`, and the reconsolidation, email and call erasure paths
+scrub exactly that list. A new identifier list belongs there or it outlives the
+belief it names; a test compares the list with the model. The class counts name
+no belief and are not scrubbed.
 
 The user-safe projection is a separate read model, never a second write:
 
@@ -854,7 +887,8 @@ path.
 
 ### Retention is two-tier over one record
 
-The operator fields — arm latencies, candidate counts, dropped ids — are high-volume
+The operator fields — arm and stage latencies, candidate counts, dropped ids, the
+candidate ranking — are high-volume
 and useful only inside the tuning window, and are nulled on a schedule. The user-safe
 fields ride with the session they explain and are deleted with it, on the same delete
 path, so deleting a conversation deletes its explanations.

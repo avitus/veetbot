@@ -101,7 +101,7 @@ import Testing
         }
         // The thread hands both to the panel on the Mac.
         #expect(mode.contains("struct EmailTeachCard"))
-        #expect(mode.contains("if describesInline {\n                                EmailTeachCard("))
+        #expect(mode.contains("if describesInline {\n                                    EmailTeachCard("))
         #expect(mode.contains("inspectorReveal.message(message)"))
         #expect(mode.contains(".macInspector(inspector, mode: .email)"))
     }

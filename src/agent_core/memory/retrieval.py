@@ -21,6 +21,7 @@ from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import (
     ATTENTION_REASONS,
+    RANKED_CANDIDATES_LIMIT,
     SENSITIVITY_ORDER,
     BeliefType,
     EpisodeQuery,
@@ -46,6 +47,7 @@ from agent_core.domain.memory import (
     lexical_term_matched,
     lexical_tokens,
     owner_anchored,
+    recall_class_counts,
     recall_query_terms,
     recall_term_lexemes,
     review_reason,
@@ -121,6 +123,38 @@ _INJECTION = re.compile(
     r"<\s*/?\s*(?:system|memory|untrusted)|override\s+(?:policy|instructions))",
     re.I,
 )
+
+
+def _merged_away(
+    found: Sequence[UUID], kept: Sequence[RecalledBelief], operations: tuple[StoredMerge, ...]
+) -> dict[UUID, list[UUID]]:
+    """For each memory that stands for a merge: the candidates it stood in for.
+
+    A merged member that the arms found is scored with the memory that stands
+    for it and is never returned itself. The diagnostic ranking still names it,
+    or a trace could not tell it from a memory the arms never found.
+    """
+
+    members = {operation.id: operation.plan.member_ids for operation in operations}
+    kept_ids = {item.belief_id for item in kept}
+    gone = [key for key in found if key not in kept_ids]
+    return {
+        item.belief_id: [key for key in gone if key in members.get(item.merge_id, ())]
+        for item in kept
+        if item.merge_id is not None
+    }
+
+
+def _ranked_candidates(
+    ranked: Sequence[RecalledBelief], merged_away: dict[UUID, list[UUID]]
+) -> list[UUID]:
+    """Every scored candidate, best first; a merged member directly after its stand-in."""
+
+    listed: list[UUID] = []
+    for item in ranked:
+        listed.append(item.belief_id)
+        listed.extend(merged_away.get(item.belief_id, ()))
+    return listed[:RANKED_CANDIDATES_LIMIT]
 
 
 def _collapse_merges(
@@ -535,6 +569,7 @@ class HybridMemoryRetriever:
         and the recall trace share one transaction and never reacquire its lock.
         """
 
+        started = perf_counter()
         semantic_queries = (
             bound_semantic_queries
             if existing_uow is not None
@@ -543,7 +578,9 @@ class HybridMemoryRetriever:
             )
         )
 
-        async def apply(uow: RepositoryUnitOfWork, *, recover_sources: bool) -> RecallResult:
+        async def apply(
+            uow: RepositoryUnitOfWork, *, recover_sources: bool, waited: float | None = None
+        ) -> RecallResult:
             return await self._recall(
                 query,
                 uow=uow,
@@ -557,22 +594,29 @@ class HybridMemoryRetriever:
                 people_selection_belief_ids=people_selection_belief_ids,
                 semantic_queries=semantic_queries,
                 recover_sources=recover_sources,
+                started=started,
+                # A caller's unit of work already holds the owner lock, so only
+                # a recall that opened its own has a wait to report.
+                lock_ms=None if waited is None else _elapsed_ms(waited),
             )
 
         if existing_uow is not None:
             return await apply(existing_uow, recover_sources=False)
         try:
+            waited = perf_counter()
             async with self._uow_factory() as uow, uow.people.lock(self._principal):
                 return await apply(
                     uow,
                     recover_sources=moment == RecallMoment.IN_TURN.value
                     and (self._runtime_semantic_queries is None or semantic_queries is not None),
+                    waited=waited,
                 )
         except SourceRecoveryUnavailableError:
             # A timed-out SQL read can abort its transaction. Retry once only
             # after releasing that UOW, with optional recovery disabled.
+            waited = perf_counter()
             async with self._uow_factory() as uow, uow.people.lock(self._principal):
-                result = await apply(uow, recover_sources=False)
+                result = await apply(uow, recover_sources=False, waited=waited)
                 return result.model_copy(
                     update={"arms_degraded": [*result.arms_degraded, "source_recovery"]}
                 )
@@ -592,8 +636,21 @@ class HybridMemoryRetriever:
         people_selection_belief_ids: tuple[UUID, ...],
         semantic_queries: SemanticQueryLookup | None,
         recover_sources: bool,
+        started: float,
+        lock_ms: int | None,
     ) -> RecallResult:
         """Rank governed evidence and render whole records within shared recall limits."""
+        # Stage timings for the trace. Each lap closes the stage that just ran,
+        # so the stages are disjoint and their sum never exceeds the total.
+        stage_ms: dict[str, int] = {}
+        lap_started = perf_counter()
+
+        def lap(stage: str) -> None:
+            nonlocal lap_started
+            finished = perf_counter()
+            stage_ms[stage] = stage_ms.get(stage, 0) + round((finished - lap_started) * 1000)
+            lap_started = finished
+
         authorized = query.tenant_id == self._principal.tenant_id and (
             query.principal_id == self._principal.principal_id
         )
@@ -616,16 +673,20 @@ class HybridMemoryRetriever:
             records: list[MemoryRecord] = []
             head = 0
         else:
-            started = perf_counter()
+            semantic_started = perf_counter()
             semantic_hits, semantic_key = await self._semantic_candidates(
                 uow, effective_query, semantic_queries
             )
-            semantic_latency = round((perf_counter() - started) * 1000)
-            records = (
-                []
-                if semantic_key is not None and self._profile.semantic_channel == "dense"
-                else await uow.memories.query(effective_query)
-            )
+            semantic_latency = round((perf_counter() - semantic_started) * 1000)
+            lap_started = perf_counter()
+            if semantic_key is not None and self._profile.semantic_channel == "dense":
+                records = []
+            else:
+                # One candidate query serves the lexical and the structured arm,
+                # so the structured arm has no time of its own to report.
+                records = await uow.memories.query(effective_query)
+                stage_ms["structured"] = 0
+                lap("lexical")
             by_id = {record.id: record for record in records}
             by_id.update((hit.record.id, hit.record) for hit in semantic_hits)
             records = list(by_id.values())
@@ -683,6 +744,7 @@ class HybridMemoryRetriever:
         if authorized and self._reconsolidation_enabled:
             records, merges = await self._merge_candidates(uow, effective_query, records, now)
             head = await uow.memories.head_position(self._principal)
+        lap("expand")
         # Equivalence transfers relevance before scoring. A permitted canonical
         # can lack its own vector during backfill; dropping it here would make
         # citation identity depend on which duplicate finished indexing first.
@@ -759,7 +821,9 @@ class HybridMemoryRetriever:
             if _is_durable(record, owner_facts=effective_query.candidate_selection == "relevance"):
                 durable_ids.add(record.id)
             recalled.append(candidate)
+        found = [item.belief_id for item in recalled]
         recalled = _collapse_merges(recalled, merges)
+        merged_away = _merged_away(found, recalled, merges)
         before_fusion = {item.belief_id: item.score for item in recalled}
         recalled = _rrf_fuse(
             recalled,
@@ -817,6 +881,7 @@ class HybridMemoryRetriever:
             chosen.add(item.belief_id)
             partners.update(item.conflict_with)
             collapsed.append(item)
+        lap("rank")
         coverage = effective_query.candidate_selection == "relevance"
         page_people = (
             tuple(
@@ -1124,6 +1189,18 @@ class HybridMemoryRetriever:
             rendered = ""
             rendered_tokens = 0
         rendered_bytes = rendered.encode("utf-8")
+        lap("pack")
+        classified = {record.id: record for record in records}
+        # Read before the total is taken: this read is part of what the recall cost.
+        people_dependencies = (
+            PeopleRecallDependencies(
+                people_revision=await uow.people.watermark(self._principal),
+                memory_revision=head,
+                selection_belief_ids=people_selection_belief_ids,
+            )
+            if authorized and (people_items or effective_query.people_scope)
+            else None
+        )
         trace_id = self._ids.new_id()
         trace = RecallTrace(
             id=trace_id,
@@ -1145,26 +1222,28 @@ class HybridMemoryRetriever:
             rendered=rendered,
             rendered_sha256=hashlib.sha256(rendered_bytes).hexdigest(),
             arm_latencies_ms={
-                "structured": 0,
-                "lexical": 0,
+                **stage_ms,
                 **({"semantic": semantic_latency} if semantic_key is not None else {}),
+                **({} if lock_ms is None else {"lock": lock_ms}),
+                "total": _elapsed_ms(started),
             },
             candidates=len(records),
             returned=[item.belief_id for item in selected_items],
             dropped_for_budget=dropped,
+            ranked_candidates=(
+                []
+                if effective_query.profile is RecallProfile.CORE
+                else _ranked_candidates(ranked, merged_away)
+            ),
+            returned_classes=recall_class_counts(
+                (item.belief_id for item in selected_items), classified
+            ),
+            dropped_classes=recall_class_counts(dropped, classified),
             blocked=[item.belief_id for item in selected_items if item.blocked],
             carried_in=[item.belief_id for item in selected_items if item.carried],
             beliefs=[item.model_copy(deep=True) for item in selected_items],
             people=selected_people,
-            people_dependencies=(
-                PeopleRecallDependencies(
-                    people_revision=await uow.people.watermark(self._principal),
-                    memory_revision=head,
-                    selection_belief_ids=people_selection_belief_ids,
-                )
-                if authorized and (people_items or effective_query.people_scope)
-                else None
-            ),
+            people_dependencies=people_dependencies,
             retrieval_policy_version=policy_version,
             created_at=self._clock.now(),
             operator_fields_expire_at=(
@@ -1725,6 +1804,10 @@ def _durable_ahead(candidates: list[RecalledBelief], durable_ids: set[UUID]) -> 
         durable = candidates[index].belief_id in durable_ids
         ahead[index] = ahead[index + 1] + int(durable)
     return ahead[:-1]
+
+
+def _elapsed_ms(started: float) -> int:
+    return round((perf_counter() - started) * 1000)
 
 
 def _arm_match(

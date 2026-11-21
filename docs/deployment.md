@@ -336,6 +336,17 @@ Anthropic adapter's default five-minute TTL. Astra retains the 272,000-token
 window required by ADR-0039's single-tier pricing rule; Fable uses 1,000,000
 tokens, and both allow up to 128,000 output tokens.
 
+The owner may also choose `astra-6-2`, OpenAI `gpt-6.2-astra`, for new app
+chats in Settings (ADR-0119); it needs the same `VEETBOT_OPENAI_KEY` and changes
+no default. Its standard prices were verified on 2026-11-20 in the
+[OpenAI model documentation](https://developers.openai.com/api/docs/models/gpt-6.2-astra):
+USD 8 input, USD 0.40 cached input, USD 10 cache write and USD 40 output per
+million tokens. It keeps the same 272,000-token window, because OpenAI prices a
+request above 272,000 input tokens at a higher tier, and allows up to 128,000
+output tokens. That page states only that reasoning effort `none` is rejected;
+the profile lists the five efforts `gpt-6-astra` accepts, which a live request
+has not yet confirmed.
+
 Changing these profiles changes the registry version. Drain active and
 suspended runs before deploying: existing provider pins fail closed when
 their registry version is unavailable. Provider-assisted memory also requires
@@ -2122,8 +2133,11 @@ are separate from branch implementation; neither is implied by passing tests.
 `agent memory health --hours 336 --json`, run from the protected owner operator
 environment like the reliability report, reads only the database and prints
 content-free recall aggregates: runs with delivered recall and with citations,
-returned and dropped-for-budget items by class, recall latency, store
-composition, lifecycle events by authority, and semantic index coverage. Read it
+returned and dropped-for-budget items by class as of each recall, the whole
+recall's latency, store composition, lifecycle events by authority, and semantic
+index coverage. It reads each trace's stored summary, never the trace document
+(ADR-0338); `summarized_traces` below `traces` means the window reaches back
+before the summary existed, and those older traces add nothing else. Read it
 before and after a retrieval change and after a deploy; a citation rate of zero
 with delivered runs above zero means the model is not emitting the citation
 form, and a dropped-for-budget share dominated by one class names the ranking
@@ -2139,6 +2153,84 @@ never in Git; the report it writes holds identifiers, stages, ranks and
 latencies only. Without `--live-model` the answer is scripted, so the Used stage
 and answer correctness are not judged; with it the configured model answers and
 costs apply.
+
+The owner question set (ADR-0338, ADR-0339) is the standing measure for a recall
+change: questions the owner asked, each with the stored facts it should reach,
+split once into a development half a change may be tuned against and a held-out
+half that is run and read but never tuned against. Before a change to candidate
+selection, ranking, packing or the semantic index reaches `dev`, run both halves
+on a fresh clone at the base revision and at the change, and keep the two
+summaries with the change: expected evidence delivered, facts missed, and the
+furthest stage each missed fact reached. An expected text that matches no stored
+belief reports `not_stored`, which is a formation finding, not a recall one.
+
+The set lives in the database once `AGENT_RECALL_QUESTIONS_ENABLED=1` is set for
+the API (and for the operator environment that runs the commands below); the
+default is off. The owner keeps it at `https://api.veetbot.com/recall-questions`,
+connecting with the owner token, which needs `memory.read` and `memory.write`.
+Do not place a token in a URL. No proxy change is needed. The first version was
+placed as two probe files beside the incident probes on 2026-11-20; load them
+once, naming the half each joins:
+
+```sh
+agent memory questions import --probes /etc/veetbot/recall/probes/owner-questions.v1.dev.jsonl --split development
+agent memory questions import --probes /etc/veetbot/recall/probes/owner-questions.v1.holdout.jsonl --split holdout
+```
+
+An import adds or updates by key, all of the file or none of it, and refuses a
+key that already exists in the other half. To measure a change, run the stored
+set on a clone and record the outcome on production, where the page then shows
+each question as passed or missed:
+
+```sh
+agent memory probe --questions all --output /var/tmp/question-run.json   # on the clone
+agent memory questions record --report /var/tmp/question-run.json         # on production
+```
+
+`record` prints `{"recorded": N, "stale": N, "unknown": N}`. A stale result was
+measured against content the question no longer holds, because it was edited
+after the clone was taken; run the set again on a fresh clone to replace it.
+
+`agent memory questions export --split holdout --output PATH` writes a half back
+out as a probe file readable by its owner alone, also when a file with wider
+permissions was already at that path.
+
+### Email memories kept by importance (ADR-0340)
+
+A deploy changes no existing memory. New email memories take their retention
+and standing as they form, and those memories follow their thread at each
+later assessment and at each piece of owner feedback. A memory that formed
+before the change is left as it was until the owner re-rates the live email
+memories with one command, run as the operator from the current release:
+
+```sh
+agent memory rerate-email --owner TENANT/PRINCIPAL            # preview: counts only
+agent memory rerate-email --owner TENANT/PRINCIPAL --confirm  # apply
+```
+
+The report is content-free: memories examined and changed, how many became
+first-class or returned to a guess, and how many fall in each retention tier.
+Run the preview first and keep its output. The command needs People enabled,
+revives no expired memory (it puts back only one the owner's own feedback left past due, once that feedback no longer holds), and is safe to repeat; a second run changes
+nothing. Run the owner question set on a clone before the first `--confirm`
+and again after it, as for any recall change.
+
+### Repeated email facts (ADR-0341)
+
+New mail forms one memory per fact. The copies stored before that are merged
+with one command, run as the operator from the current release:
+
+```sh
+agent memory merge-email-duplicates --owner TENANT/PRINCIPAL            # preview: counts only
+agent memory merge-email-duplicates --owner TENANT/PRINCIPAL --confirm  # apply
+```
+
+The report is content-free: memories examined, facts stored more than once,
+copies superseded, and copies left because they sit under a different subject.
+The earliest memory of each fact stays and each copy is superseded by it, so
+nothing is deleted. The memory kept takes its copies' latest evidence date and longest retention. Run the preview first and keep its output. A run can leave a copy for later when a new message renewed it meanwhile, so repeat the command until it reports nothing superseded; from then on a further run
+changes nothing while no new mail has arrived. Run it before `agent memory rerate-email --confirm`, so the
+re-rating works on one memory per fact.
 
 ### Conflict reconciliation (ADR-0248)
 

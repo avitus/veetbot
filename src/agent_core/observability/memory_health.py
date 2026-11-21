@@ -4,7 +4,8 @@ The report answers the operator's question "is recall delivering what the
 store holds?" with counts, shares and latencies only: no statement text, no
 query text, no identifiers. Citation figures are diagnostics; the primary
 signals are what was delivered, what was dropped, what decayed, and whether
-the semantic index covers the live store.
+the semantic index covers the live store. Returned and dropped items are
+classed as they were when recall ran, and latency is the whole recall.
 """
 
 from __future__ import annotations
@@ -49,8 +50,10 @@ class MemoryHealthReport(BaseModel):
     cited_beliefs: int = Field(default=0, ge=0)
     charged_beliefs: int = Field(default=0, ge=0)
     ambiguous_citations: int = Field(default=0, ge=0)
-    # Traces.
+    # Traces. Latencies, arms and class shares come from each trace's summary;
+    # a trace recorded before the summary existed counts here and nowhere else.
     traces: int = Field(default=0, ge=0)
+    summarized_traces: int = Field(default=0, ge=0)
     traces_with_lexical: int = Field(default=0, ge=0)
     traces_with_structured: int = Field(default=0, ge=0)
     traces_with_semantic: int = Field(default=0, ge=0)
@@ -111,9 +114,10 @@ def render_memory_health_report(report: MemoryHealthReport) -> str:
             "timed-out limitation events)."
         ),
         (
-            f"Traces: {report.traces} (lexical {report.traces_with_lexical}, structured "
-            f"{report.traces_with_structured}, semantic {report.traces_with_semantic}); "
-            f"latency p50 {_ms(report.p50_recall_latency_ms)}, p95 "
+            f"Traces: {report.traces}, {report.summarized_traces} with a summary (lexical "
+            f"{report.traces_with_lexical}, structured {report.traces_with_structured}, "
+            f"semantic {report.traces_with_semantic}); latency p50 "
+            f"{_ms(report.p50_recall_latency_ms)}, p95 "
             f"{_ms(report.p95_recall_latency_ms)}; {report.slow_traces} over 1s."
         ),
         _share("Returned", report.returned),

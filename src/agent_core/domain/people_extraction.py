@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
+from agent_core.domain.email_signature import SIGNATURE_NAMESPACE
 from agent_core.domain.people_time import SourceTimezone
 
 
@@ -33,6 +34,13 @@ class PersonEvidence(Proposal):
             raise ValueError("owner is a reserved evidence key")
         if self.end - self.start != len(self.text):
             raise ValueError("People evidence offsets must match its exact text")
+        return self
+
+    @model_validator(mode="after")
+    def unreserved_namespace(self) -> "PersonEvidence":
+        if self.namespace == SIGNATURE_NAMESPACE:
+            # ADR-0336: only a sender's own signature writes that namespace.
+            raise ValueError("signature is a reserved identifier namespace")
         return self
 
 

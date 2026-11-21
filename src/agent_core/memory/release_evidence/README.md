@@ -78,7 +78,11 @@ three runs verified the development seeded restatement and all three holdout
 restatements. There were zero boundary failures. Every publication gate passed.
 The schema-8 artifact records every run and null reasoning effort. It replaces
 the 2026-09-10 artifact at `0e3ca2f8d6291baa2b81d39e12b7c265306da255`;
-automatic selection continues to activate formation@9 for this production tuple.
+automatic selection activates formation@9 for this tuple only when People is
+disabled or the policy is pinned. Production runs with People enabled and no
+pin, so startup selects formation@11 without reading this artifact (ADR-0101);
+the production selection audit read on 2026-11-20 names formation@11 with
+reason `people_default`. No artifact evidences formation@11.
 
 An earlier `formation@9` artifact, produced on 2026-09-03 at
 commit `a904417ff95882cccc922095b02b1702849027f0` under `distillation-scorer@2`

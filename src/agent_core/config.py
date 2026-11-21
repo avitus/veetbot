@@ -145,6 +145,8 @@ class Settings:
     memory_api_enabled: bool = False
     memory_reconsolidation_api_enabled: bool = False
     memory_dreaming_review_enabled: bool = False
+    # ADR-0339: the owner's recall question page and its routes; off by default.
+    recall_questions_enabled: bool = False
     memory_semantic_index_enabled: bool = False
     memory_semantic_index_evidence: Path | None = None
     memory_semantic_index_manifest: Path | None = None
@@ -2357,6 +2359,7 @@ def _load_settings(
             values, "AGENT_MEMORY_RECONSOLIDATION_API_ENABLED"
         ),
         memory_dreaming_review_enabled=_parse_flag(values, "AGENT_MEMORY_DREAMING_REVIEW_ENABLED"),
+        recall_questions_enabled=_parse_flag(values, "AGENT_RECALL_QUESTIONS_ENABLED"),
         memory_semantic_index_enabled=_parse_flag(values, "AGENT_MEMORY_SEMANTIC_INDEX_ENABLED"),
         memory_semantic_index_evidence=(
             Path(values["AGENT_MEMORY_SEMANTIC_INDEX_EVIDENCE"]).expanduser()

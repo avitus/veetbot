@@ -165,14 +165,24 @@ async def test_shipped_models_declare_the_efforts_and_names_the_owner_chooses_fr
     every_effort = tuple(ReasoningEffort)
 
     astra = await router.resolve("astra", tenant_id="tenant-a")
+    astra_6_2 = await router.resolve("astra-6-2", tenant_id="tenant-a")
     fable = await router.resolve("fable", tenant_id="tenant-a")
     sol = await router.resolve("balanced", tenant_id="tenant-a")
     local = await router.resolve("local", tenant_id="tenant-a")
 
-    assert registry.policies.selectable_chat_policies == ["astra", "fable", "balanced"]
+    assert registry.policies.selectable_chat_policies == [
+        "astra",
+        "astra-6-2",
+        "fable",
+        "balanced",
+    ]
     assert astra.capabilities.explicit_cache_control
     assert astra.limits.max_cache_breakpoints == 3
     assert (astra.display_name, astra.reasoning_efforts) == ("GPT-6 Astra", every_effort)
+    assert (astra_6_2.display_name, astra_6_2.reasoning_efforts) == (
+        "GPT-6.2 Astra",
+        every_effort,
+    )
     assert (fable.display_name, fable.reasoning_efforts) == ("Claude Fable 5.1", every_effort)
     assert (sol.display_name, sol.reasoning_efforts) == ("GPT-5.6 Sol", every_effort)
     assert local.reasoning_efforts == ()

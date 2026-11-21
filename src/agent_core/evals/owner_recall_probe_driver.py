@@ -26,6 +26,7 @@ from uuid import UUID
 
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.memory import (
+    MemoryBrowseQuery,
     MemoryRecord,
     MemoryStatus,
     RecallResult,
@@ -47,8 +48,11 @@ from agent_core.evals.owner_recall_probes import (
     stage_rank,
     summarize,
 )
+from agent_core.evals.owner_recall_questions import question_fingerprint
 
 _SHORT_ID = re.compile(r"\[m:([0-9a-f]{8})\]")
+# The store's largest browse page; the locator walks every page.
+_BROWSE_PAGE = 200
 SCRIPTED_ANSWER = "Answered from the delivered evidence."
 Finish = Callable[[Any, UUID], Awaitable[Run]]
 
@@ -113,6 +117,7 @@ async def observe_probes(
                     probe_id=probe.id,
                     incident=probe.incident,
                     family=probe.family,
+                    content_sha256=question_fingerprint(probe),
                     paths=tuple(path_observations),
                     save=save,
                 )
@@ -200,15 +205,16 @@ async def _observe_path(
         for text in probe.delivered_must_contain
     )
     answer = run.final_message if script is None else None
-    arms = tuple(sorted({arm for trace in traces for arm in trace.arm_latencies_ms}))
-    recall_latency = max((sum(trace.arm_latencies_ms.values()) for trace in traces), default=0)
+    arms = tuple(sorted({arm for trace in traces for arm in trace.arms_ran}))
+    recall_latency = max((trace.recall_latency_ms or 0 for trace in traces), default=0)
     within = None
     if probe.latency_ceiling_ms is not None:
         within = recall_latency <= probe.latency_ceiling_ms
 
     evidence: list[EvidenceObservation] = []
+    store = _StoreSnapshot(app)
     for index, expected in enumerate(probe.expected):
-        record = await _resolve(app, expected.belief_id, expected.statement_contains)
+        record = await _resolve(app, expected.belief_id, expected.statement_contains, store)
         located, stages = _locate(record, traces, results)
         stage = evidence_stage(
             record,
@@ -282,8 +288,28 @@ async def _belief_for_short_id(app: Any, match: re.Match[str] | None) -> UUID | 
     return None
 
 
+class _StoreSnapshot:
+    """The owner's whole store, read once and only when an expected text asks for it.
+
+    One observation may name many expected texts. Reading every belief again
+    for each of them multiplies the store by the number of texts.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self._app = app
+        self._records: list[MemoryRecord] | None = None
+
+    async def records(self) -> list[MemoryRecord]:
+        if self._records is None:
+            self._records = await _every_belief(self._app)
+        return self._records
+
+
 async def _resolve(
-    app: Any, belief_id: UUID | None, statement_contains: str | None
+    app: Any,
+    belief_id: UUID | None,
+    statement_contains: str | None,
+    store: _StoreSnapshot | None = None,
 ) -> MemoryRecord | None:
     if belief_id is not None:
         async with app.uow_factory() as uow:
@@ -293,11 +319,8 @@ async def _resolve(
                 return None
     assert statement_contains is not None
     needle = statement_contains.casefold()
-    matches = [
-        record
-        for record in await app.memory.list_memories(include_inactive=True, limit=200)
-        if needle in record.statement.casefold()
-    ]
+    records = await (store or _StoreSnapshot(app)).records()
+    matches = [record for record in records if needle in record.statement.casefold()]
     live = [
         record
         for record in matches
@@ -306,7 +329,36 @@ async def _resolve(
     chosen = live or matches
     if not chosen:
         return None
-    return cast(MemoryRecord, max(chosen, key=lambda record: record.store_position))
+    return max(chosen, key=lambda record: record.store_position)
+
+
+async def _every_belief(app: Any) -> list[MemoryRecord]:
+    """Every belief the owner's store holds, in any status, read page by page.
+
+    One page is not the store: an expected text that matched a belief outside
+    the first page was reported as never stored, a formation finding the run
+    did not make.
+    """
+
+    records: list[MemoryRecord] = []
+    cursor: tuple[int, UUID] | None = None
+    async with app.uow_factory() as uow:
+        while True:
+            page = await uow.memories.browse(
+                MemoryBrowseQuery(
+                    tenant_id=app.principal.tenant_id,
+                    principal_id=app.principal.principal_id,
+                    ceiling=Sensitivity.RESTRICTED,
+                    statuses=tuple(MemoryStatus),
+                    limit=_BROWSE_PAGE,
+                    cursor=cursor,
+                )
+            )
+            records.extend(page[:_BROWSE_PAGE])
+            if len(page) <= _BROWSE_PAGE:
+                return records
+            last = page[_BROWSE_PAGE - 1]
+            cursor = (last.store_position, last.id)
 
 
 def _locate(

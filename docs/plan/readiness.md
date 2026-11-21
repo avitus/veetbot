@@ -1002,7 +1002,7 @@ review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
 Section 15 column at `engineering-plan.md:1824`, and the sibling join
 at `runtime-loop.md:1270` reads it. Restricted context is
-`context-engine.md:586`, where `runs.seed_event_sequence` is nullable
+`context-engine.md:596`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
 child-run recall class at `memory-retrieval-and-ranking.md:96`, which
@@ -1788,7 +1788,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1564` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2663` against
-    `model-gateway.md:2013` and `milestone-map.md:1987`. The map
+    `model-gateway.md:2024` and `milestone-map.md:1987`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -2009,7 +2009,7 @@ gates remain pending. Recorded offline comparisons and owner judgments preserve
 failed precision and answer-lift results against frozen synthetic development
 and holdout corpora and unchanged M16 controls. Unattended activation stays off.
 ADR-0174 authorizes daily proposals and individually approved application; its
-supervised production deployment remains pending. Milestone 21's open evidence
+supervised production mode is deployed. Milestone 21's open evidence
 remains open and the verified ceiling stays 14.
 
 ## Milestone 33: General memory recall, authorized; implementation in progress

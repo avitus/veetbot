@@ -15,6 +15,7 @@ from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.domain.runs import RunStatus
 from tests.gates.test_email_m18 import _email_settings
 from tests.gates.test_email_runtime_m26 import (
+    MAIL_NOW,
     MailboxFactory,
     _assessment_turn,
     _current_mail_factory,
@@ -77,6 +78,7 @@ async def test_existing_top_three_drafts_occupy_automatic_slots_on_unchanged_ref
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=script,
         mcp_client_factory=await _unchanged_mailbox(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         await _seed_threads(app, 6)
         first = await app.services.email.submit_task(app.principal, kind="refresh")
@@ -96,6 +98,7 @@ async def test_profile_churn_cannot_starve_historical_body_assessment() -> None:
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[_assessment_turn() for _ in range(12)]),
         mcp_client_factory=await _unchanged_mailbox(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         threads = await _seed_threads(app, 5, archived_last=True)
         for _ in range(3):
@@ -159,6 +162,7 @@ async def test_a_window_holding_discovery_is_assessed_before_older_pending_mail(
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[_assessment_turn() for _ in range(20)]),
         mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         session = await app.sessions.create()
         backlog = []
@@ -223,6 +227,7 @@ async def test_deleting_cached_message_preserves_partial_thread_coverage() -> No
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         session = await app.sessions.create()
         page = _page(changed=True)
@@ -309,6 +314,7 @@ async def test_history_tombstones_cancel_only_earlier_changes_for_the_same_messa
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         session = await app.sessions.create()
         thread = await app.services.email.import_thread(app.principal, "default", _page(), session)

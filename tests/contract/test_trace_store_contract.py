@@ -148,6 +148,7 @@ async def test_expire_operator_fields_nulls_only_expired_operator_tier() -> None
         "returned": [kept.belief_id],
         "cited": [kept.belief_id],
         "dropped_for_budget": [UUID(int=642)],
+        "ranked_candidates": [kept.belief_id, UUID(int=642)],
     }
     oldest = trace().model_copy(
         update={**operator_tier, "operator_fields_expire_at": NOW - timedelta(days=2)}
@@ -176,6 +177,7 @@ async def test_expire_operator_fields_nulls_only_expired_operator_tier() -> None
     assert swept.candidates == 0
     assert swept.dropped_for_budget == []
     assert swept.dropped_for_budget_count == 1
+    assert swept.model_dump().get("ranked_candidates") == []
     assert swept.beliefs == [kept]
     assert swept.returned == [kept.belief_id]
     assert swept.cited == [kept.belief_id]
@@ -273,3 +275,46 @@ async def people_trace_scope_erasure_contract(store: TraceStore) -> None:
 
 async def test_people_trace_erasure_includes_query_only_identity() -> None:
     await people_trace_scope_erasure_contract(InMemoryTraceStore())
+
+
+@pytest.mark.parametrize("field", ["ranked_candidates", "dropped_for_budget", "cited"])
+async def test_belief_erasure_reaches_a_trace_that_only_lists_the_identifier(field: str) -> None:
+    """Erasure follows every list of belief identifiers, not the returned ones alone."""
+
+    store = InMemoryTraceStore()
+    belief_id = UUID(int=781)
+    listed = trace().model_copy(update={"id": UUID(int=782), field: [belief_id]})
+    untouched = trace().model_copy(update={"id": UUID(int=783)})
+    await store.record(listed)
+    await store.record(untouched)
+    assert await store.erase_people(principal(), [], [belief_id]) == 1
+    with pytest.raises(NotFoundError):
+        await store.get(listed.id, principal())
+    assert await store.get(untouched.id, principal()) == untouched
+
+
+def test_a_trace_reports_its_arms_and_whole_latency_apart_from_its_stages() -> None:
+    """Readers ask the trace; summing every timing would count the total twice."""
+
+    staged = trace().model_copy(
+        update={
+            "arm_latencies_ms": {
+                "structured": 0,
+                "lexical": 4,
+                "semantic": 40,
+                "lock": 1,
+                "expand": 2,
+                "rank": 3,
+                "pack": 5,
+                "total": 57,
+            }
+        }
+    )
+    # A trace recorded before stages were timed carries only its arms.
+    legacy = trace().model_copy(
+        update={"arm_latencies_ms": {"structured": 0, "lexical": 0, "semantic": 40}}
+    )
+    assert getattr(staged, "arms_ran", None) == ("structured", "lexical", "semantic")
+    assert getattr(staged, "recall_latency_ms", None) == 57
+    assert getattr(legacy, "recall_latency_ms", None) == 40
+    assert getattr(trace(), "recall_latency_ms", 0) is None

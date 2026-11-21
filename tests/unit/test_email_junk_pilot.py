@@ -19,7 +19,12 @@ from agent_core.domain.email_junk import JUNK_MODEL, JUNK_PILOT_POLICY, EmailJun
 from agent_core.domain.judgment import ChoiceAnswer, JudgmentResult, NoulAnswer
 from agent_core.domain.messages import FakeModelScript
 from agent_core.domain.runs import RunStatus
-from tests.gates.test_email_runtime_m26 import _assessment_turn, _current_mail_factory
+from tests.gates.test_email_runtime_m26 import (
+    _assessment_turn,
+    _current_mail_factory,
+    _page,
+    _recently,
+)
 from tests.unit.test_email_junk_first_pass import decision, filter_settings
 
 
@@ -58,8 +63,12 @@ def pilot_settings(tmp_path: Path) -> Any:
 
 
 async def work_factory() -> Any:
-    """Reuse the governed mailbox transport for the explicitly named work account."""
-    factory = await _current_mail_factory()
+    """Reuse the governed mailbox transport for the explicitly named work account.
+
+    Pilot and standing evidence is issued and expires against today's date, so these
+    tests run on the system clock; their mail is dated against it too.
+    """
+    factory = await _current_mail_factory(sent_at=_recently())
 
     def work(config: Any, credential: Any, environment: Any) -> Any:
         """Translate scripted server names while retaining the production work-account roster."""
@@ -233,7 +242,8 @@ async def test_pilot_topic_veto_exception_does_not_change_general_filter(tmp_pat
     from tests.gates.test_email_spam_m31 import _seed
 
     async with build(settings=filter_settings(tmp_path)) as app:
-        thread = await _seed(app)
+        # The pilot packet is issued against today's date, so the mail is dated against it too.
+        thread = await _seed(app, _page(sent_at=_recently()))
         request = junk_request(thread, {"junk_protected_topics": ["board"]}, app.clock.now())
         assert request is not None
         receipt = {

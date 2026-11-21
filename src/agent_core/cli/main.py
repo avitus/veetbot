@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib
 import json
 import math
@@ -10,6 +11,7 @@ import os
 import signal
 import socket
 import sys
+import tempfile
 from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
 from contextlib import aclosing
 from datetime import datetime, timedelta
@@ -54,6 +56,7 @@ from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.dreaming_recovery import LegacyAttributionManifest
 from agent_core.domain.errors import (
     AgentCoreError,
+    AuthorizationError,
     ConflictError,
     EvalExpectationError,
     ExportConsentError,
@@ -148,6 +151,8 @@ approval_app = typer.Typer(name="approval", no_args_is_help=True)
 memory_app = typer.Typer(name="memory", no_args_is_help=True)
 reconsolidations_app = typer.Typer(name="reconsolidations", no_args_is_help=True)
 memory_app.add_typer(reconsolidations_app)
+questions_app = typer.Typer(name="questions", no_args_is_help=True)
+memory_app.add_typer(questions_app)
 knowledge_app = typer.Typer(name="knowledge", no_args_is_help=True)
 email_app = typer.Typer(name="email", no_args_is_help=True)
 persona_app = typer.Typer(name="persona", no_args_is_help=True)
@@ -1233,6 +1238,76 @@ def reconsolidations_undo(
     )
 
 
+async def _memory_rerate_email(owner: str, confirm: bool) -> dict[str, Any]:
+    async with build(storage="postgres") as composition:
+        principal = composition.principal
+        if owner != f"{principal.tenant_id}/{principal.principal_id}":
+            raise AuthorizationError("--owner must match the configured tenant/principal")
+        rerating = composition.email_memory_rerating
+        if rerating is None:
+            raise NotFoundError("People is disabled")
+        return (await rerating(principal, confirm)).model_dump(mode="json")
+
+
+@memory_app.command("rerate-email")
+def memory_rerate_email(
+    owner: Annotated[
+        str, typer.Option("--owner", help="Exact configured tenant/principal identity.")
+    ],
+    confirm: Annotated[
+        bool, typer.Option("--confirm", help="Apply the re-rating. Without it, only preview.")
+    ] = False,
+) -> None:
+    """Keep live email memories by their thread's importance (ADR-0340); previews unless --confirm.
+
+    Each live memory formed from email takes the expiry its thread's current
+    importance gives, and the standing its sender and thread give. The report
+    holds counts only. Expired memories are not revived.
+    """
+
+    try:
+        report = asyncio.run(_memory_rerate_email(owner, confirm))
+    except (ConfigurationError, AuthorizationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(report))
+
+
+async def _memory_merge_email_duplicates(owner: str, confirm: bool) -> dict[str, Any]:
+    async with build(storage="postgres") as composition:
+        principal = composition.principal
+        if owner != f"{principal.tenant_id}/{principal.principal_id}":
+            raise AuthorizationError("--owner must match the configured tenant/principal")
+        merge = composition.email_memory_merge
+        if merge is None:
+            raise NotFoundError("People is disabled")
+        return (await merge(principal, confirm)).model_dump(mode="json")
+
+
+@memory_app.command("merge-email-duplicates")
+def memory_merge_email_duplicates(
+    owner: Annotated[
+        str, typer.Option("--owner", help="Exact configured tenant/principal identity.")
+    ],
+    confirm: Annotated[
+        bool, typer.Option("--confirm", help="Apply the merge. Without it, only preview.")
+    ] = False,
+) -> None:
+    """Keep one memory per fact in each email thread (ADR-0341); previews unless --confirm.
+
+    Live email memories of one thread that share a subject, a belief type and
+    a value are one fact. The earliest stays and each copy is superseded by it.
+    The report holds counts only.
+    """
+
+    try:
+        report = asyncio.run(_memory_merge_email_duplicates(owner, confirm))
+    except (ConfigurationError, AuthorizationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(report))
+
+
 @memory_app.command("get")
 def memory_get(belief_id: UUID) -> None:
     """Inspect one governed memory, including formation and source identifiers."""
@@ -1603,8 +1678,36 @@ def memory_health(
     typer.echo(report.model_dump_json() if json_output else render_memory_health_report(report))
 
 
+_QUESTION_SETS = ("development", "holdout", "all")
+
+
+def _question_service(composition: Any) -> Any:
+    service = composition.services.recall_questions
+    if service is None:
+        raise ConfigurationError(
+            "Recall questions are not enabled; set AGENT_RECALL_QUESTIONS_ENABLED=1."
+        )
+    return service
+
+
+async def _stored_question_probes(composition: Any, which: str) -> Any:
+    """Load the stored question set as probes; the evaluators stay behind importlib."""
+
+    from agent_core.domain.recall_questions import QuestionSplit
+
+    questions = cast(Any, importlib.import_module("agent_core.evals.owner_recall_questions"))
+    stored = await _question_service(composition).stored_questions(
+        composition.principal, split=None if which == "all" else QuestionSplit(which)
+    )
+    return questions.loaded_from_questions(stored, label=which)
+
+
 async def _memory_probe(
-    probes_path: Path, output: Path, paths: list[str], live_model: bool
+    probes_path: Path | None,
+    output: Path,
+    paths: list[str],
+    live_model: bool,
+    questions: str | None = None,
 ) -> dict[str, Any]:
     # The probe driver lives with the evaluators; the entry point reaches it
     # only at call time, the way the other eval commands do.
@@ -1615,7 +1718,7 @@ async def _memory_probe(
     driver = cast(Any, importlib.import_module("agent_core.evals.owner_recall_probe_driver"))
     probes_module = cast(Any, importlib.import_module("agent_core.evals.owner_recall_probes"))
     database.validate_probe_database(load_settings())
-    loaded = probes_module.load_probes(probes_path)
+    loaded = None if probes_path is None else probes_module.load_probes(probes_path)
     script = (
         None
         if live_model
@@ -1632,6 +1735,9 @@ async def _memory_probe(
 
     selected = [path for path in paths if path in {"automatic", "deliberate"}]
     async with build(storage="postgres", script=script) as composition:
+        if loaded is None:
+            # The clone carries the question set as it stood when it was taken.
+            loaded = await _stored_question_probes(composition, questions or "all")
         report = await driver.observe_probes(
             composition,
             script,
@@ -1647,12 +1753,20 @@ async def _memory_probe(
 
 @memory_app.command("probe")
 def memory_probe(
-    probes: Annotated[
-        Path, typer.Option("--probes", help="JSONL probe file (never a frozen control).")
-    ],
     output: Annotated[
         Path, typer.Option("--output", help="Where to write the content-free report.")
     ],
+    probes: Annotated[
+        Path | None,
+        typer.Option("--probes", help="JSONL probe file (never a frozen control)."),
+    ] = None,
+    questions: Annotated[
+        str | None,
+        typer.Option(
+            "--questions",
+            help="Run the stored question set instead of a file: development, holdout or all.",
+        ),
+    ] = None,
     paths: Annotated[
         str, typer.Option("--paths", help="Comma-separated: automatic,deliberate.")
     ] = "automatic,deliberate",
@@ -1663,14 +1777,145 @@ def memory_probe(
 ) -> None:
     """Replay owner recall probes through the run loop against a probe clone."""
 
+    if (probes is None) == (questions is None):
+        raise typer.BadParameter("give exactly one of --probes or --questions")
+    if questions is not None and questions not in _QUESTION_SETS:
+        raise typer.BadParameter("--questions must be development, holdout or all")
     try:
         summary = asyncio.run(
-            _memory_probe(probes, output, [item.strip() for item in paths.split(",")], live_model)
+            _memory_probe(
+                probes,
+                output,
+                [item.strip() for item in paths.split(",")],
+                live_model,
+                questions,
+            )
         )
     except (ConfigurationError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(4) from exc
     typer.echo(json.dumps(summary))
+
+
+async def _questions_import(probes_path: Path, split: str) -> dict[str, int]:
+    from agent_core.domain.recall_questions import QuestionSplit
+
+    probes_module = cast(Any, importlib.import_module("agent_core.evals.owner_recall_probes"))
+    questions = cast(Any, importlib.import_module("agent_core.evals.owner_recall_questions"))
+    loaded = probes_module.load_probes(probes_path)
+    items = [(probe.id, questions.content_from_probe(probe)) for probe in loaded.probes]
+    async with build(storage="postgres") as composition:
+        outcome = await _question_service(composition).import_questions(
+            composition.principal, split=QuestionSplit(split), items=items
+        )
+    return cast(dict[str, int], outcome.model_dump(mode="json"))
+
+
+@questions_app.command("import")
+def questions_import(
+    probes: Annotated[Path, typer.Option("--probes", help="JSONL probe file to import.")],
+    split: Annotated[
+        str, typer.Option("--split", help="The half these questions join: development or holdout.")
+    ],
+) -> None:
+    """Add or update stored recall questions from a probe file, by key."""
+
+    if split not in _QUESTION_SETS[:2]:
+        raise typer.BadParameter("--split must be development or holdout")
+    try:
+        outcome = asyncio.run(_questions_import(probes, split))
+    except (ConfigurationError, AgentCoreError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(outcome))
+
+
+def _write_private_file(output: Path, text: str) -> None:
+    """Write a file only its owner can read, replacing whatever was at the path.
+
+    Opening an existing file keeps the mode it already had, so a file that was
+    readable by others would stay readable with the owner's facts in it. The
+    text goes to a new private file beside the destination, which then takes
+    its place; a failure leaves the older file as it was and no scrap behind.
+    """
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, scratch = tempfile.mkstemp(dir=output.parent, prefix=f".{output.name}.")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as target:
+            target.write(text)
+        os.replace(scratch, output)
+    except BaseException:
+        Path(scratch).unlink(missing_ok=True)
+        raise
+
+
+async def _questions_export(which: str) -> list[str]:
+    async with build(storage="postgres") as composition:
+        loaded = await _stored_question_probes(composition, which)
+    return [probe.model_dump_json(exclude_defaults=True) for probe in loaded.probes]
+
+
+@questions_app.command("export")
+def questions_export(
+    output: Annotated[Path, typer.Option("--output", help="Where to write the JSONL file.")],
+    split: Annotated[str, typer.Option("--split", help="development, holdout or all.")] = "all",
+) -> None:
+    """Write the stored active questions as a probe file readable only by its owner."""
+
+    if split not in _QUESTION_SETS:
+        raise typer.BadParameter("--split must be development, holdout or all")
+    try:
+        lines = asyncio.run(_questions_export(split))
+    except (ConfigurationError, AgentCoreError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    try:
+        _write_private_file(output, "".join(line + "\n" for line in lines))
+    except OSError as exc:
+        typer.echo(f"the export could not be written: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps({"exported": len(lines)}))
+
+
+async def _questions_record(report_bytes: bytes) -> dict[str, int]:
+    probes_module = cast(Any, importlib.import_module("agent_core.evals.owner_recall_probes"))
+    questions = cast(Any, importlib.import_module("agent_core.evals.owner_recall_questions"))
+    report = probes_module.ProbeReport.model_validate_json(report_bytes)
+    async with build(storage="postgres") as composition:
+        results = questions.results_from_report(
+            report,
+            report_digest=hashlib.sha256(report_bytes).hexdigest(),
+            recorded_at=composition.clock.now(),
+        )
+        outcome = await _question_service(composition).record_results(
+            composition.principal, results
+        )
+        return cast(dict[str, int], outcome.model_dump())
+
+
+@questions_app.command("record")
+def questions_record(
+    report: Annotated[
+        Path, typer.Option("--report", help="A probe report written by `agent memory probe`.")
+    ],
+) -> None:
+    """Record each question's outcome from a probe report as its latest result.
+
+    A result measured against content the question no longer holds is counted
+    as stale and not stored.
+    """
+
+    try:
+        with report.open("rb") as source:
+            data = source.read(20_000_001)
+        if len(data) > 20_000_000:
+            raise ValueError("The probe report exceeds the input limit")
+        outcome = asyncio.run(_questions_record(data))
+    except (OSError, ConfigurationError, AgentCoreError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(outcome))
 
 
 async def _memory_replay(session_id: UUID) -> Any:

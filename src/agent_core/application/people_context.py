@@ -9,6 +9,7 @@ from uuid import UUID
 
 from agent_core.application.authorization import require_scope
 from agent_core.domain.agents import Principal
+from agent_core.domain.email_signature import SIGNATURE_NAMESPACE
 from agent_core.domain.errors import NotFoundError, ToolValidationError
 from agent_core.domain.hazards import is_safe_text
 from agent_core.domain.memory import (
@@ -424,7 +425,8 @@ class PeopleContextService:
                                 if (
                                     row.identifier_kind == "role"
                                     and row.verification != "owner_confirmed"
-                                ):
+                                ) or row.namespace == SIGNATURE_NAMESPACE:
+                                    # ADR-0336: a signature detail selects no context.
                                     continue
                                 label, person_id = row.value, row.person_id
                             else:

@@ -17,6 +17,7 @@ import pytest
 
 from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
+from agent_core.domain.agents import Principal
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
@@ -241,6 +242,147 @@ async def test_recall_item_budget_records_what_was_dropped() -> None:
     async with factory() as uow:
         trace = await uow.traces.get(result.trace_id, principal())
     assert set(trace.dropped_for_budget) == {UUID(int=612), UUID(int=613)}
+
+
+async def test_recall_trace_keeps_the_ranking_of_candidates_it_did_not_return() -> None:
+    """A miss is attributable only if the trace says where each candidate ranked."""
+
+    _clock, factory, _service, retriever = await formation_stack()
+    best = memory(belief_id=611).model_copy(
+        update={"subject": "style-a", "confidence": 0.9, "store_position": 1}
+    )
+    second = memory(belief_id=612).model_copy(
+        update={"subject": "style-b", "confidence": 0.7, "store_position": 2}
+    )
+    third = memory(belief_id=613).model_copy(
+        update={"subject": "style-c", "confidence": 0.5, "store_position": 3}
+    )
+    async with factory() as uow:
+        for record in (third, best, second):
+            await uow.memories.upsert_belief(record)
+
+    result = await retriever.recall(recall_query(max_items=1), session_id=SESSION_ID)
+    core = await retriever.recall(
+        recall_query(text=None, profile=RecallProfile.CORE),
+        session_id=SESSION_ID,
+        moment=RecallMoment.SNAPSHOT.value,
+    )
+    async with factory() as uow:
+        in_turn = (await uow.traces.get(result.trace_id, principal())).model_dump()
+        snapshot = (await uow.traces.get(core.trace_id, principal())).model_dump()
+
+    assert in_turn.get("ranked_candidates") == [UUID(int=611), UUID(int=612), UUID(int=613)]
+    # The snapshot has no question to rank against, so it keeps no ranking.
+    assert snapshot.get("ranked_candidates") == []
+
+
+async def test_recall_trace_counts_returned_and_dropped_items_by_class() -> None:
+    """The health report reads these counts instead of joining trace documents."""
+
+    _clock, factory, _service, retriever = await formation_stack()
+    stated = memory(belief_id=621).model_copy(
+        update={"subject": "style-a", "confidence": 0.9, "store_position": 1}
+    )
+    inferred = memory(belief_id=622).model_copy(
+        update={
+            "subject": "style-b",
+            "confidence": 0.6,
+            "store_position": 2,
+            "status": MemoryStatus.PROVISIONAL,
+            "authority": MemoryAuthority.INFERRED,
+            "flagged_for_review": True,
+        }
+    )
+    learned = memory(belief_id=623).model_copy(
+        update={
+            "subject": "style-c",
+            "confidence": 0.35,
+            "store_position": 3,
+            "status": MemoryStatus.PROVISIONAL,
+            "authority": MemoryAuthority.INFERRED,
+            "flagged_for_review": True,
+            "consolidation_policy_version": "owner-source-learning@2",
+        }
+    )
+    async with factory() as uow:
+        for record in (stated, inferred, learned):
+            await uow.memories.upsert_belief(record)
+
+    result = await retriever.recall(recall_query(max_items=1), session_id=SESSION_ID)
+    async with factory() as uow:
+        trace = (await uow.traces.get(result.trace_id, principal())).model_dump()
+
+    assert [item.belief_id for item in result.items] == [UUID(int=621)]
+    assert trace.get("returned_classes") == {
+        "total": 1,
+        "flagged": 0,
+        "provisional": 0,
+        "source_learned": 0,
+        "owner_authority": 1,
+    }
+    assert trace.get("dropped_classes") == {
+        "total": 2,
+        "flagged": 2,
+        "provisional": 2,
+        "source_learned": 1,
+        "owner_authority": 0,
+    }
+
+
+async def test_recall_trace_times_every_stage_not_only_the_vector_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each read of the clock advances one millisecond, so every stage is nonzero."""
+
+    ticks = iter(range(1, 10_000))
+    monkeypatch.setattr("agent_core.memory.retrieval.perf_counter", lambda: next(ticks) / 1000)
+    _clock, factory, _service, retriever = await formation_stack()
+    async with factory() as uow:
+        await uow.memories.upsert_belief(memory())
+
+    result = await retriever.recall(recall_query(), session_id=SESSION_ID)
+    async with factory() as uow:
+        latencies = (await uow.traces.get(result.trace_id, principal())).arm_latencies_ms
+
+    stages = ("lock", "lexical", "expand", "rank", "pack")
+    assert {"structured", "total", *stages} <= set(latencies)
+    assert all(latencies[stage] >= 1 for stage in stages)
+    assert latencies["total"] >= sum(latencies[stage] for stage in stages)
+    # No vector search ran, so the trace must not claim one.
+    assert "semantic" not in latencies
+
+
+async def test_recall_total_time_includes_the_people_revision_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow read made while the trace is assembled is part of the recall's time."""
+
+    ticks = iter(range(1, 10_000))
+    monkeypatch.setattr("agent_core.memory.retrieval.perf_counter", lambda: next(ticks) / 1000)
+    _clock, factory, _service, retriever = await formation_stack()
+    async with factory() as uow:
+        await uow.memories.upsert_belief(memory())
+        people = uow.people
+    read_at: list[int] = []
+    original = people.watermark
+
+    async def slow(owner: Principal) -> int:
+        # The read costs half a second of the fake clock.
+        for _ in range(500):
+            next(ticks)
+        read_at.append(next(ticks))
+        return await original(owner)
+
+    monkeypatch.setattr(people, "watermark", slow)
+    result = await retriever.recall(
+        recall_query().model_copy(update={"people_scope": (UUID(int=9001),)}),
+        session_id=SESSION_ID,
+    )
+    async with factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+
+    assert read_at and trace.people_dependencies is not None
+    assert trace.arm_latencies_ms["total"] >= 500
 
 
 async def test_recall_token_budget_binds_before_the_item_cap() -> None:

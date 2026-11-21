@@ -1,3 +1,19 @@
+# ADR-0337: On 2026-11-20 an archive made 38 seconds after a reply failed in
+# production because the refresh that synced the owner's sent message staled
+# the gesture. The owner asked for the repair: an Inbox gesture stays current
+# across revisions that only add the owner's own sent messages. Offline tests
+# only; no real mailbox run. No milestone or gate moves.
+# ADR-0336: On 2026-11-20 the owner asked that an email signature update the
+# sender's contact details in People. A DMARC-passing sender already in People
+# gains the phone numbers and title line of their own signature as contextual
+# rows in a reserved namespace that never identify or merge anyone. Offline
+# tests only; no real mailbox run. The owner accepted the decision the same
+# day. No milestone or gate moves.
+# ADR-0335: On 2026-11-20 the owner asked for GPT-6.2 Astra as a chat model
+# choice and a prefix-aware integration. The `astra-6-2` policy is selectable
+# (ADR-0119); event-sourced items keep their envelope nonce at any position so
+# GPT-6.2 keeps replayed reasoning. Offline tests only; no live GPT-6.2 request.
+# Proposed; no milestone or gate moves.
 # ADR-0334: Owner-authorized W3/W6 continuation adds reviewed extraction row
 # and completeness requirements. Insufficient evidence cannot advance to later
 # actions. No public schema, deployed recipe, milestone or gate moves.
@@ -98,6 +114,40 @@
 # saved jobs. Each schedule names its servers, the approval lists them, and a
 # job's grant names what it may read. Implemented, not yet delivered: the schedule
 # environment must mirror AGENT_SVP_ENABLED first. No milestone or gate moves.
+# ADR-0341 (Accepted, 2026-11-20): production held the same email fact many
+# times (271 of 668 live email memories repeated a value from their own thread).
+# The owner chose rules in code: one memory per fact per message whatever the
+# wording, a quoted sentence is not the replier's statement, a restatement
+# renews the one memory, and an owner-run `agent memory merge-email-duplicates`
+# supersedes the stored copies. Sandbox tests only. No milestone or gate moves.
+# ADR-0340 (Accepted, 2026-11-20): the owner asked that email memories be kept
+# longer the more important the email is, and that email still form first-class
+# memories. Retention now follows the thread's importance (30 days, 90 days,
+# 1 year, no expiry); mail from a known sender in a thread kept a year or more
+# forms a plain, direct, unflagged memory. A correspondent's claim still never
+# replaces an owner belief. While People memory is on, each saved assessment of
+# a thread and the owner's feedback on it re-rate that thread's memories already
+# under the table. A memory formed before the change joins the table only when
+# the owner runs `agent memory rerate-email`, which re-rates every live email
+# memory. Asked the same day, the owner chose retention by
+# importance for every sender, entry to the session-start summary only once a
+# memory is active, and no email memories sent to the dreaming provider.
+# Sandbox tests only; no real mailbox run. No milestone or gate moves.
+# ADR-0339 (Proposed, 2026-11-20): the owner asked for a page on the server to
+# keep the recall question set current. The set moves from two files to the
+# database with full history; a default-off signed-in page and routes maintain
+# it; a question's development or held-out half is fixed at creation; the probe
+# tool runs the stored set and records each question's latest result.
+# Implemented on the recall-questions branch, not yet delivered. No milestone or
+# gate moves.
+# ADR-0338 (Proposed, 2026-11-20): `agent memory health` timed out on
+# production because its aggregates read whole trace documents (24,862 traces,
+# 413 MB). Each trace now carries an identifier-free summary the report reads
+# instead; traces time every recall stage and keep the candidate ranking of a
+# question-led recall. Ranking and rendering are unchanged. The same review
+# read the production selection audit: formation@11 (People default) is
+# selected, not formation@9, and has no quality evidence. Implemented on a
+# branch, not yet delivered. No milestone or gate moves.
 # ADR-0290: On 2026-11-03 the owner directed that semantic retrieval be
 # activated and stay on ("turned on and off for many months now and we are
 # failing to make progress"). A standing owner admission
@@ -2173,7 +2223,7 @@ milestones:
       - >-
         Run hosted CI and the CodeRabbit review loop on the final head
       - >-
-        Verify from a production selection audit that the deploy selects formation@9 for the production tuple; the refreshed evidence reached main in pull request 156 on 2026-10-10
+        Supply quality evidence for the formation policy production runs: the 2026-11-20 selection audit names formation@11 (People default), not formation@9. The owner decided on 2026-11-20 to keep formation@11 for now and to revisit the choice by 2027-02-20; evaluating it on the distillation corpora, or pinning formation@9, stays open until then
       - >-
         Memory formation temporarily remains on GPT-5.6 Sol under ADR-0093;
         audit scorer semantics and compare Sol/Astra under controlled reasoning
@@ -3214,6 +3264,7 @@ milestones:
     open_items:
       - Verify the first authorized ADR-0274 release in production, including trial expiry, semantic role bindings, sparse fallback and jobs
       - Complete the staged implementation and comparative activation evidence
+      - "Owner decision on 2026-11-20: memory text may be sent to an outside embedding provider for recall, to be revisited by 2027-05-20. No provider is configured; measuring a stronger encoder against the owner question set needs its own decision record, since the standing admission binds the local encoder (ADR-0290)"
       - Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
   "34":
     title: Owner records

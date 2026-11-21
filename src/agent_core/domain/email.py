@@ -285,6 +285,33 @@ class EmailThread(EmailValue):
     suspected_spam: bool = False
     spam_cleared: bool = False
     in_spam: bool = False
+    # ADR-0337: the earliest revision that differs from this one only by the
+    # owner's own sent messages. None means no earlier revision qualifies.
+    own_reply_floor: int | None = None
+
+    def inbox_gesture_current(self, seen_revision: int) -> bool:
+        """An Inbox gesture stays current while only the owner's own replies were added."""
+        floor = self.revision if self.own_reply_floor is None else self.own_reply_floor
+        return floor <= seen_revision <= self.revision
+
+
+def own_reply_floor(
+    previous: EmailThread, messages: list[EmailMessage], complete: bool
+) -> int | None:
+    """Carry the floor across a content revision that only adds the owner's sent messages."""
+    known = {message.id for message in previous.messages}
+    added = [message for message in messages if message.id not in known]
+    kept = [message for message in messages if message.id in known]
+    exclude = {"labels", "sender_check", "reader_html"}
+    if (
+        not added
+        or previous.complete != complete
+        or any(message.direction != "sent" for message in added)
+        or [message.model_dump(exclude=exclude) for message in kept]
+        != [message.model_dump(exclude=exclude) for message in previous.messages]
+    ):
+        return None
+    return previous.revision if previous.own_reply_floor is None else previous.own_reply_floor
 
 
 class EmailDraftStatus(StrEnum):
@@ -466,6 +493,14 @@ class EmailSyncState(EmailValue):
     anchor: str | None = None
     history_policy: str | None = None
     history_since: int | None = None
+
+
+def assessment_priority(
+    content: float, relationship: float, urgency: float, *, bulk: bool
+) -> float:
+    """The thread rating an assessment's features give; it orders the Inbox."""
+    priority = min(1.0, max(content * 0.9, relationship * 0.7 + content * 0.3) + urgency * 0.1)
+    return priority * 0.4 if bulk else priority
 
 
 def addresses(values: list[str]) -> list[str]:

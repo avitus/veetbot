@@ -22,6 +22,7 @@ from agent_core.domain.email import (
 )
 from agent_core.domain.email_drafting import DraftAttachment
 from agent_core.domain.email_junk import JunkAuthorization
+from agent_core.domain.email_memory import EmailRerateReport
 from agent_core.domain.email_semantics import EmailSemanticFact, EmailSemanticSource
 from agent_core.domain.memory import MemoryRecord
 from agent_core.domain.messages import ConversationItem
@@ -109,6 +110,19 @@ class EmailStore(Protocol):
         self, principal: Principal, *, created_before: datetime, limit: int = 100
     ) -> builtins.list[EmailRecord]:
         """Settled server checks that found nothing and cost nothing, created before the cutoff."""
+        ...
+
+    async def list_pending_reratings(
+        self, principal: Principal, *, after: str | None = None, limit: int = 1000
+    ) -> builtins.list[EmailRecord]:
+        """Key-ordered `assessment` records that carry the pending re-rating mark (ADR-0340).
+
+        A mailbox holds thousands of saved assessments and a handful of marks,
+        and a refresh looks for them many times an hour. A backend selects on
+        the stored document, so an unmarked record is neither transferred nor
+        decoded. A put-off record is still marked: whether its time has come
+        is for the caller to read.
+        """
         ...
 
     async def put(self, record: EmailRecord, *, expected_revision: int) -> EmailRecord: ...
@@ -359,6 +373,19 @@ class EmailSemanticPort(Protocol):
         run: Run | None = None,
         lease: WorkerLease | None = None,
     ) -> list[MemoryRecord]: ...
+
+    async def rerate_thread(
+        self,
+        account_id: str,
+        provider_thread_id: str,
+        *,
+        apply: bool = True,
+        cause: str = "assessment",
+        run: Run | None = None,
+        lease: WorkerLease | None = None,
+    ) -> EmailRerateReport:
+        """Make one thread's live email memories follow its importance and sender (ADR-0340)."""
+        ...
 
     async def next_correspondence_summaries(
         self, account_ids: Sequence[str], *, limit: int

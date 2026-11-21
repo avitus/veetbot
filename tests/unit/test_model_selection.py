@@ -52,6 +52,30 @@ async def test_requested_models_resolve_with_verified_pricing_and_limits(
     assert resolved.pricing.reasoning_priced_separately is False
 
 
+async def test_astra_6_2_resolves_with_verified_pricing_and_limits() -> None:
+    """The optional chat model keeps Astra's single-tier window at its own prices."""
+    router = StaticModelRouter(
+        ProviderRegistry.load(PACKAGE_ROOT / "models", adapters=ADAPTER_DEFINITIONS),
+        FixedClock(NOW),
+    )
+
+    resolved = await router.resolve(
+        "astra-6-2",
+        tenant_id="tenant-a",
+        required=frozenset({Capability.STRUCTURED_OUTPUT, Capability.STREAMING}),
+    )
+
+    assert (resolved.provider, resolved.model) == ("openai", "gpt-6.2-astra")
+    assert resolved.limits.context_window_tokens == 272000
+    assert resolved.limits.max_output_tokens == 128000
+    assert resolved.pricing.input_per_mtok == Decimal("8.00")
+    assert resolved.pricing.cached_input_per_mtok == Decimal("0.40")
+    assert resolved.pricing.cache_write_per_mtok == Decimal("10.00")
+    assert resolved.pricing.cache_write_1h_per_mtok is None
+    assert resolved.pricing.output_per_mtok == Decimal("40.00")
+    assert resolved.pricing.reasoning_priced_separately is False
+
+
 @pytest.mark.parametrize(
     ("model", "one_hour_write"),
     [("claude-fable-5-1", "20.00"), ("claude-opus-5", "10.00")],

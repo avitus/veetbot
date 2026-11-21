@@ -36,6 +36,7 @@ from agent_core.api.middleware import (
 )
 from agent_core.api.model_settings import model_settings_router
 from agent_core.api.people import people_router
+from agent_core.api.recall_questions import recall_questions_router
 from agent_core.api.reconsolidation import reconsolidation_router
 from agent_core.api.sse import EventStreamResponse, encode_sse, heartbeat
 from agent_core.application.errors import (
@@ -62,6 +63,7 @@ from agent_core.application.services import (
     NotificationService,
     PeopleService,
     PersonaService,
+    RecallQuestionService,
     ReconsolidationService,
     RunService,
     ScheduleService,
@@ -233,6 +235,9 @@ class ApplicationServices(Protocol):
 
     @property
     def model_settings(self) -> ModelSettingsService | None: ...
+
+    @property
+    def recall_questions(self) -> RecallQuestionService | None: ...
 
     @property
     def folders(self) -> FolderService: ...
@@ -631,6 +636,7 @@ def _error_response(
             "/v1/calls",
             "/v1/dreaming",
             "/v1/memory-reconsolidations",
+            "/v1/recall-questions",
             "/v1/integration-secrets",
         )
     ):
@@ -2269,6 +2275,9 @@ def create_app(
     model_settings = getattr(services, "model_settings", None)
     if model_settings is not None:
         app.include_router(model_settings_router(model_settings, secured))
+    recall_questions = getattr(services, "recall_questions", None)
+    if recall_questions is not None:
+        app.include_router(recall_questions_router(recall_questions, secured))
     if settings.email_mode_enabled:
         app.include_router(email_router(services.email, secured))
     if settings.email_mode_enabled and settings.email_unsubscribe_enabled:
