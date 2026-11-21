@@ -89,6 +89,10 @@ title: Changelog
   server's rule for mail that is also in Spam, and a retried archive no longer
   lowers a count twice. A count can be one off for a moment and is right at
   the next refresh.
+- Email on Mac, iPad and iPhone: when an account can no longer be read while
+  several of its archives are pending, a conversation you have open from
+  another account stays open and what you have typed in its reply is kept. An
+  archive that failed stays visible when an older status answer arrives late.
 - An importance judgment on a person or topic re-rates its own thread a second
   time even when the pass over that person's other threads fails part-way.
 
