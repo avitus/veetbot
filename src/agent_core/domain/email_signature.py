@@ -2,13 +2,14 @@
 
 The Email reader leaves the block out of the reading text; People reads a known
 sender's contact details from it. Both use the one rule here, so what the owner
-no longer sees and what People reads are the same lines.
+no longer sees and what People reads are the same lines. The rule for what a
+code fence holds lives here too, so the reader's placement and this rule agree.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from email.utils import parseaddr
 
@@ -23,6 +24,8 @@ HISTORY = re.compile(
     r"On\s.*(?:\d{4}|wrote:)|-{2,}.*|_{5,}|From:\s.*|Begin forwarded message:.*", re.I
 )
 POSTSCRIPT = re.compile(r"P\.?\s?S\b", re.I)
+# A fence line: up to three spaces, then three or more backticks or tildes.
+_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
 
 # Gmail's plain text repeats an anchor or a detected number as a `<target>`.
 _TARGET = re.compile(r"<[^<>]{0,512}>")
@@ -67,6 +70,42 @@ def sender_name(sender: str) -> str:
 def starts_history(line: str) -> bool:
     """A reply or forward header; a bare delimiter or rule is not one."""
     return len(line) < 400 and bool(HISTORY.match(line)) and bool(line.strip("-_ "))
+
+
+def fence_after(line: str, fence: tuple[str, int] | None) -> tuple[str, int] | None:
+    """The code fence open after this line: its mark and length, as CommonMark closes it.
+
+    The one definition of what a fence holds, for the reader's placement and for
+    signatures. A fence that is never closed holds everything under it.
+    """
+    marker = _FENCE.fullmatch(line)
+    if not marker:
+        return fence
+    run, rest = marker[1], marker[2]
+    if fence is None:
+        # A backtick fence's info string cannot itself hold a backtick.
+        return (run[0], len(run)) if run[0] != "`" or "`" not in rest else None
+    return None if run[0] == fence[0] and len(run) >= fence[1] and not rest.strip() else fence
+
+
+def named_in_code(source: Iterable[str], name: str, *, visible: Callable[[str], str]) -> bool:
+    """Whether a line indented as code (four columns or a tab) is exactly the writer's name.
+
+    `source` is the text as it was written, before any line is stripped. Such a
+    block is an example of a signature, so no signature is read from that text.
+    """
+    for line in source:
+        if line[:1] not in (" ", "\t"):
+            continue
+        written = line.strip()
+        indent = line[: len(line) - len(line.lstrip(" \t"))]
+        if (
+            ("\t" in indent or len(indent) >= 4)
+            and len(name) <= len(written) <= len(name) + 8
+            and visible(written).casefold() == name
+        ):
+            return True
+    return False
 
 
 def _list_continues(line: str, listed: bool) -> bool:
@@ -125,13 +164,22 @@ def named_signature(
 
     The name alone is a sign-off. Prose, a postscript or a long block under it
     is the message, and so is anything followed by more than history. A name
-    inside a list is an entry of it, wherever in the list it stands. With
+    inside a list is an entry of it, wherever in the list it stands. A fenced
+    block is the message: nothing in it is a signature, and a fence or a table
+    under the name makes that block the message too. With
     `own_text_only`, the name must come before any quoted line or reply or
     forward header, so a signature inside history is never found.
     """
     above = ""
     below = False
+    fence: tuple[str, int] | None = None
     for index, line in enumerate(lines):
+        inside, fence = fence, fence_after(line, fence)
+        if inside or fence:
+            # A fence line or a line a fence holds. The block is one unit of the
+            # message, so it also ends a list and is no heading of one.
+            above, below = "", False
+            continue
         # The nearest line with text above this one, across any blank lines, and
         # whether this line is an entry of a list that a line above introduced.
         heading, above = above, line or above
@@ -164,6 +212,9 @@ def named_signature(
                     or not 0 < len(text) <= SIGNATURE_LINE_WIDTH
                     or POSTSCRIPT.match(text)
                     or (len(text.split()) > 8 and text[-1] in ".?!")
+                    # A code block or a table row under the name is the message.
+                    or fence_after(following, None)
+                    or (following.startswith("|") and following.endswith("|"))
                 ):
                     block = 0
                     break
@@ -192,7 +243,10 @@ def sender_contact(body: str, sender: str) -> SignatureContact | None:
     name = sender_name(sender)
     if not name:
         return None
-    lines = [line.strip() for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    source = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if named_in_code(source, name, visible=_written):
+        return None
+    lines = [line.strip() for line in source]
     found = named_signature(lines, name, visible=_written, own_text_only=True)
     if found is None:
         return None

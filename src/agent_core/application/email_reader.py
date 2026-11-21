@@ -16,7 +16,12 @@ from urllib.parse import urlsplit
 from agent_core.domain.email_signature import HISTORY as _HISTORY
 from agent_core.domain.email_signature import POSTSCRIPT as _POSTSCRIPT
 from agent_core.domain.email_signature import SIGNATURE_LINES as _SIGNATURE_LINES
-from agent_core.domain.email_signature import named_signature, sender_name
+from agent_core.domain.email_signature import (
+    fence_after,
+    named_in_code,
+    named_signature,
+    sender_name,
+)
 from agent_core.domain.web import is_public_https_url
 
 _INVISIBLE = str.maketrans("", "", "\u00ad\u034f\u200b\ufeff")
@@ -43,8 +48,6 @@ _RULE = re.compile(r"(?:[-*_]\s*){3,}")
 _UNDERLINE = re.compile(r"-+|=+")
 _TABLE_RULE = re.compile(r"[\s|:-]+")
 _ORDERED_MARKER = re.compile(r"^\d{1,3}[.)]\s+")
-# A fence line: up to three spaces, then three or more backticks or tildes.
-_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
 # A reader image marker, whose alt text is no word of the HTML text.
 _IMAGE_MARKER = re.compile(r"!\[[^\]\n]*\]\([^)\s]*\)")
 # Fewer lines than this can repeat by chance; a sign-off is not a signature.
@@ -253,15 +256,19 @@ def _visible(line: str) -> str:
     return re.sub(r"[\[\]*_\\]", "", "".join(kept)).strip()
 
 
-def _without_named_signature(lines: list[str], sender: str) -> list[str]:
+def _without_named_signature(lines: list[str], sender: str, source: str = "") -> list[str]:
     """Blank the writer's own name and the short lines under it that end their text.
 
     The name alone is a sign-off and stays. Prose, a postscript or a long block
     under it is the message, and so is anything followed by more than history.
+    `source` is the plain text as written: where it holds the name indented as
+    code, the block is an example and stays, as a fenced one does.
     People reads the same block for a sender's contact details (ADR-0336).
     """
     name = sender_name(sender)
-    found = named_signature(lines, name, visible=_visible) if name else None
+    if not name or named_in_code(source.split("\n"), name, visible=_visible):
+        return lines
+    found = named_signature(lines, name, visible=_visible)
     if found is None:
         return lines
     index, end = found
@@ -614,7 +621,8 @@ def reading_body(
     if reflows:
         result = _without_repeated_blocks(result)
     if sender and not keep_signatures:
-        result = _without_named_signature(result, sender)
+        # Extracted HTML text has no indentation of the writer's own to read.
+        result = _without_named_signature(result, sender, "" if extracted else text)
     title = _inert(title)
     if title:
         for index, line in enumerate(result):
@@ -742,16 +750,7 @@ def _placed(plan: list[tuple[bool, str]], rich: str, words: Callable[[str], str]
         else:
             blocks.append(paragraph)
         for line in paragraph.split("\n"):
-            marker = _FENCE.fullmatch(line)
-            if not marker:
-                continue
-            run, rest = marker[1], marker[2]
-            if fence is None:
-                # A backtick fence's info string cannot itself hold a backtick.
-                if run[0] != "`" or "`" not in rest:
-                    fence = (run[0], len(run))
-            elif run[0] == fence[0] and len(run) >= fence[1] and not rest.strip():
-                fence = None
+            fence = fence_after(line, fence)
     # The word sequence of the rich text, and where each block's words end in it.
     # Image markers carry no words of the HTML text the anchors came from.
     sequence = " "

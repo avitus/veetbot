@@ -1164,6 +1164,46 @@ def test_a_signature_under_a_list_that_has_ended_still_goes() -> None:
     assert reading_body(kept, sender=RILEY) == reading_body(kept)
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        # A fenced example of the writer's own signature is the message.
+        "Here is the format I mean.\n\n```\nRiley Example\nPartner\n650.555.0100\n```",
+        "Here is the format I mean.\n\n~~~\nRiley Example\nPartner\n650.555.0100\n~~~",
+        "````text\nRiley Example\nPartner\n```\n650.555.0100\n````",
+        # A fence that is never closed holds everything under it.
+        "Like this.\n\n```\nRiley Example\nPartner\n650.555.0100",
+        # An indented block is code as well: the plain text keeps its indentation.
+        "Here is the format I mean.\n\n    Riley Example\n    Partner\n    650.555.0100",
+        # A code block or a table under the name is the message as well.
+        "Thanks.\n\nRiley Example\nPartner\n```\nprint('x')\n```",
+        "Riley Example\n\n| Metric | Value |\n| --- | --- |\n| Revenue | 42 |",
+        # These never were a signature: a quoted line and a table row are not the name line.
+        "Format it like this:\n\n> Riley Example\n> Partner\n> 650.555.0100",
+        "<table><tr><th>Name</th><th>Title</th></tr>"
+        "<tr><td>Riley Example</td><td>Partner</td></tr></table>",
+    ],
+)
+def test_a_signature_shaped_example_in_a_code_block_stays(body: str) -> None:
+    result = reading_body(body, sender=RILEY)
+    assert result == reading_body(body)
+    # Nothing was taken out, so no fence is left open by the reader.
+    assert "Riley Example" in result and result.count("```") == body.count("```")
+
+
+def test_a_signature_under_a_closed_fence_still_goes() -> None:
+    signature = "\n\nRiley Example\nPartner\n650.555.0100"
+    for above in (
+        "Run this:\n\n```\nmake check\n```\n\nSee you there.",
+        # The fenced block is what the colon introduced, so no list is left open.
+        "Run this:\n\n```\nmake check\n```",
+    ):
+        assert reading_body(above + signature, sender=RILEY) == reading_body(above)
+    # Three spaces of indentation are not a code block.
+    indented = "See you there.\n\n   Riley Example\n   Partner\n   650.555.0100"
+    assert reading_body(indented, sender=RILEY) == "See you there."
+
+
 def test_reply_alternatives_are_compared_line_by_line() -> None:
     """A link the reader labelled by host, or a repeat shown once, is not missing prose."""
     from agent_core.application.email_reader import merge_image_body

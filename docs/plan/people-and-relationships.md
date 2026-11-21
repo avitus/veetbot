@@ -316,7 +316,8 @@ first quoted line, reply header or forward header, so a signature inside
 quoted history or a forward is never read. The sender's name inside a list is
 an entry of that list and not that line, so a list of names gives no title;
 a signature straight under a list that nothing ends is left unread for the
-same reason. Two details are taken:
+same reason. A signature-shaped example in a code block, fenced or indented, is
+the message and gives nothing either. Two details are taken:
 
 - each phone number, written with a `+` or in the ten-digit North American
   shape, at most four, skipping one written after a fax label;

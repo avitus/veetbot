@@ -161,6 +161,86 @@ def test_the_list_rule_stays_quick_on_hostile_lines() -> None:
     assert time.monotonic() - started < 5
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        # A fenced example of a signature is the message, whoever it names.
+        "Here is the format I mean.\n\n```\nRory O'Driscoll\nPartner, Scale\n650.378.6038\n```\n",
+        "~~~\nRory O'Driscoll\nPartner, Scale\n650.378.6038\n~~~\n",
+        # A longer fence closes only on its own marker, and may name a language.
+        "````text\nRory O'Driscoll\nPartner, Scale\n```\n650.378.6038\n````\n",
+        "~~~\nRory O'Driscoll\nPartner, Scale\n```\n",
+        # A fence that is never closed runs to the end of the text.
+        "Like this.\n\n```\nRory O'Driscoll\nPartner, Scale\n650.378.6038\n",
+        "Thanks.\n\n~~~~~~~~\nRory O'Driscoll\nPartner, Scale\n650.378.6038\n",
+        # A code block under the name is the message too, not the sender's details.
+        "Thanks.\n\nRory O'Driscoll\nPartner, Scale\n```\nprint('x')\n```\n",
+        # So is a table under the name.
+        "Rory O'Driscoll\n| Metric | Value |\n| --- | --- |\n| Revenue | 42 |\n",
+        # An indented block is code as well: People reads the retained indentation.
+        "Here is the format I mean.\n\n    Rory O'Driscoll\n    Partner, Scale\n    650.378.6038\n",
+        "Here is the format I mean.\n\n\tRory O'Driscoll\n\tPartner, Scale\n",
+    ],
+)
+def test_a_signature_shaped_example_in_a_code_block_is_not_read(body: str) -> None:
+    assert sender_contact(body, RORY) is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Format it like this:\n\n> Rory O'Driscoll\n> Partner, Scale\n> 650.378.6038\n",
+        "| Name | Title |\n| --- | --- |\n| Rory O'Driscoll | Partner, Scale |\n",
+    ],
+)
+def test_a_quoted_or_tabled_example_never_was_a_signature(body: str) -> None:
+    """A quoted line is never the name line, and a table row is not exactly the name."""
+    assert sender_contact(body, RORY) is None
+
+
+@pytest.mark.parametrize(
+    "above",
+    [
+        # A closed fence is over: the signature under it is the sender's own.
+        "```\nmake check\n```\n\nThanks.\n\n",
+        "Run this:\n\n~~~sh\nmake check\n~~~\n\nThanks.\n\n",
+        # What a fence holds is code, so a header or a quote mark in it ends nothing.
+        "Headers look like this:\n\n```\nFrom: someone\n> quoted\n```\n\nThanks.\n\n",
+        # The fenced block is what the colon introduced, so no list is left open.
+        "Run this:\n\n```\nmake check\n```\n\n",
+        # A backtick line whose label holds a backtick opens no fence.
+        "```a`b\n\nThanks.\n\n",
+        # Up to three spaces of indentation are not a code block.
+        "Thanks.\n\n   ",
+    ],
+)
+def test_a_signature_outside_any_code_block_is_still_read(above: str) -> None:
+    body = above + "Rory O'Driscoll\nPartner, Scale\n650.378.6038\n"
+    assert sender_contact(body, RORY) == SignatureContact(
+        title="Partner, Scale", phones=("650.378.6038",)
+    )
+
+
+def test_the_fence_rule_is_the_readers_and_stays_quick() -> None:
+    """One definition says what a fence holds, for the reader and for People."""
+    import time
+
+    from agent_core.domain.email_signature import fence_after
+
+    fence = None
+    seen = []
+    for line in ["````", "```", "~~~~", "````a", "`````  ", "```", "~~~", "```"]:
+        fence = fence_after(line, fence)
+        seen.append(fence)
+    # Only as long a run of the same mark, with nothing after it, closes a fence.
+    assert seen == [("`", 4), ("`", 4), ("`", 4), ("`", 4), None, ("`", 3), ("`", 3), None]
+    assert fence_after("```a`b", None) is None and fence_after("~~~a`b", None) == ("~", 3)
+    started = time.monotonic()
+    sender_contact("\n".join(["```", "`" * 200_000, "~" * 200_000, "```"] * 50), RORY)
+    sender_contact("\n".join(["```", "Rory O'Driscoll", "```"] * 20_000), RORY)
+    assert time.monotonic() - started < 5
+
+
 def test_a_sender_without_a_two_word_display_name_gives_nothing() -> None:
     assert sender_contact(SIGNED, "rory@scalevp.test") is None
     assert sender_contact(SIGNED.replace("Rory O'Driscoll", "Rory"), "Rory <r@x.test>") is None

@@ -256,12 +256,12 @@ memory formation read. Three signs identify one, and nothing else does:
   at most 12, when only blank lines, the end of that quote level, or the reply or
   forward it was written above follow. This also removes a mailing-list footer written the same way. A delimiter with
   more of the message below it stays. Of a removed block only a postscript line is kept; a disclaimer or other sentence there goes.
-- In the writer's own text, a line that is exactly the sender's display name of
-  two or more words, with the lines under it, when those lines run to the end of
-  the text or to the reply or forward below. Each must be at most 100 characters,
-  there are at most 12, and none is a postscript or a sentence of more than eight
-  words. The name alone is a sign-off and stays. So does a name inside a list, wherever in it: a bulleted line, or a line under one that introduces a list
-  (ending in a colon, a short label such as `Cc:`, a bold line or a heading) until a finished sentence, a closing such as "Best,", a `--` rule or a quote ends it.
+- In the writer's own text, a line that is exactly the sender's display name of two or more words, with the lines under it, when those
+  lines run to the end of the text or to the reply or forward below. Each must be at most 100 characters, there are at most 12, and none
+  is a postscript, a sentence of more than eight words, a code fence or a table row. The name alone is a sign-off and stays. So does a
+  name inside a list, wherever in it: a bulleted line, or a line under one that introduces a list (ending in a colon, a short label such
+  as `Cc:`, a bold line or a heading) until a finished sentence, a closing such as "Best,", a `--` rule or a quote ends it. So does a name
+  inside a code block, which is an example: a fenced block, closed or not, or plain text that holds the name indented four columns or a tab.
 
 The comparison of the two alternatives above uses the HTML with its signature, so
 the plain part's copy is never preserved as missing prose.

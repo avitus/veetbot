@@ -153,6 +153,11 @@ Four existing rules bound the design:
   and contributes nothing. That is chosen on purpose: reading the next entry as
   the sender's title, or removing real names from an email, is the worse error.
   A list with no line that introduces it is not recognised.
+- A signature-shaped example in a code block is the message and contributes
+  nothing: a fenced block, closed or not, by the same definition of a fence the
+  reader's placement uses, or a body that holds the sender's name indented four
+  columns or a tab. A code fence or a table row under the name makes that block
+  the message as well. A signature after a closed fence is read as before.
 - A motto under the name is stored as that person's line. It is shown as the
   sender's own words, and the owner can end it.
 - Someone who alternates between two signatures with different numbers will
