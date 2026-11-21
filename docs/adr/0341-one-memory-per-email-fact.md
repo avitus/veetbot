@@ -91,24 +91,35 @@ Everything here applies to the People policy, `email-semantic@2`.
    `email.memory.merged` event per thread it changes. The event names every
    fact merged in that thread, each as the memory kept and the copies it
    superseded, and sits in the session of the earliest memory kept there. A
-   preview appends none. A second run changes nothing.
+   preview appends none. Running the command again after a merge that placed
+   every copy changes nothing while the stored memories and messages are as
+   that merge left them. A run can leave copies for later (rule 7), and a
+   later run merges those.
 5. **What the merge leaves alone.** Copies stored under different subjects are
    not merged, because two people in one thread can each hold the same value.
    The preview counts them.
-6. **A memory belongs to the thread that formed it.** A message of another
-   thread that renewed or only found a memory lists it too. That listing is
-   no membership: the listing record says its message formed the memory, or,
-   on a record written before roles were kept, the memory's own record line
-   names the thread. Without this a thread's earlier copy could supersede a
-   memory another thread formed. The thread a record line names is the one in
-   its own header; a record line that its claim quotes names nothing
-   (ADR-0340).
+6. **A memory belongs to the thread that formed it, and the retained records
+   say which that is.** A message of another thread that renewed or only
+   found a memory lists it too. That listing is no membership. Under a
+   thread's locks the command reads again the thread's retained records that
+   list the memory. One of them shows the thread formed it in either of two
+   ways: its role says its message formed the memory; or it was written
+   before roles were kept, and the event the memory was formed from is one of
+   the reads the record keeps for its message. A read holds messages of one
+   thread only, so this places the memory without reading its statement.
+   The statement's words are not asked: a sender chooses the display name,
+   and a name can hold a dated mailbox clause that names another thread.
+   When no record of the thread shows it, the memory is no member there: it
+   is not counted, and it neither supersedes nor is superseded. Without this
+   rule a thread's earlier copy could supersede a memory another thread
+   formed.
 7. **A copy's later evidence is handed over only to a message that answers
    for it.** The command reads which messages list each memory before it
    takes a thread's locks. Under the locks it reads the copy and those
-   messages again. The message behind the copy's latest evidence formed or
-   renewed it, or is the one its record line names, and carries that evidence
-   date. If a copy was renewed in between, none of the messages read answers
+   messages again. The message behind the copy's latest evidence carries that
+   evidence date, and its record says it formed or renewed the copy, or keeps
+   no role and holds the read the copy was formed from. If a copy was renewed
+   in between, none of the messages read answers
    for its new evidence, and the copy is left as it is; the next run reads the
    renewing message and merges it. Each copy with later evidence is checked
    by itself: a message found for the newest copy answers for that copy only.

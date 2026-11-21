@@ -597,6 +597,181 @@ async def test_the_owners_mark_reaches_a_memory_at_once_while_learning_is_paused
         assert (await service.learning(app.principal)).paused is True
 
 
+async def _owed(app: Any) -> object:
+    """Whether the one saved assessment still owes its thread's memories a re-rating."""
+    async with app.uow_factory() as uow:
+        [assessment] = await uow.email.list(app.principal, "assessment")
+    return assessment.payload.get("rerating_pending")
+
+
+async def test_feedback_about_replies_cannot_apply_a_pending_assessment_during_a_pause() -> None:
+    """Only an importance judgment is the owner's word on what a thread's memories are
+    worth. Needs reply says nothing about that, so it re-rates nothing: a low assessment
+    saved during a pause stays unapplied, with its mark, until the pause is over."""
+    lower = json.loads(_assessment(0.2).text or "")
+    lower["people_facts"] = []
+    low = ScriptedTurn(text=json.dumps(lower))
+    settings = replace(_email_settings(), email_mode_enabled=True, people_enabled=True)
+    async with build(
+        settings=settings,
+        script=FakeModelScript(turns=[_assessment(0.8), low, low]),
+        mcp_client_factory=await _mail(census=False),
+        fixed_clock_at=NOW,
+    ) as app:
+        service = app.services.email
+        await service.submit_task(app.principal, kind="refresh")
+        [memory] = await _memories(app)
+        assert memory.expires_at == memory.last_evidence_at + timedelta(days=365)
+        async with app.uow_factory() as uow:
+            [thread] = await uow.email.list(app.principal, "thread")
+        thread_id = UUID(str(thread.payload["id"]))
+        await service.pause_learning(app.principal, True)
+        # A reply judgment changes what the assessment sees, so the thread is assessed again.
+        await service.feedback(
+            app.principal, thread_id=thread_id, target="thread", judgment="no_reply_needed"
+        )
+        await service.submit_task(app.principal, kind="refresh")
+        async with app.uow_factory() as uow:
+            [rated] = await uow.email.list(app.principal, "thread")
+        assert rated.payload["priority"] == pytest.approx(0.18)
+        assert (await _memories(app))[0].expires_at == memory.expires_at
+        assert await _owed(app) is True
+
+        marked = await service.feedback(
+            app.principal, thread_id=thread_id, target="thread", judgment="needs_reply"
+        )
+        assert (await _memories(app))[0].expires_at == memory.expires_at
+        assert await _owed(app) is True
+        await service.undo_feedback(app.principal, UUID(str(marked["feedback_id"])))
+        assert (await _memories(app))[0].expires_at == memory.expires_at
+        assert await _owed(app) is True
+
+        await service.pause_learning(app.principal, False)
+        operation = await service.submit_task(app.principal, kind="refresh")
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure
+        [followed] = await _memories(app)
+        assert followed.expires_at == memory.last_evidence_at + timedelta(days=30)
+        assert await _owed(app) is None
+
+
+async def test_only_an_importance_judgment_rerates_and_a_persons_rerates_its_thread_twice() -> None:
+    """The feedback hook is for importance judgments and their undo. On a person or a
+    topic it re-rates the feedback's own thread, then the other threads it matches, then
+    its own thread once more: a memory the other threads' pass put back takes its
+    standing from the message that formed it, which may sit in the feedback's thread."""
+    settings = replace(_email_settings(), email_mode_enabled=True, people_enabled=True)
+    async with build(
+        settings=settings,
+        script=FakeModelScript(turns=[_assessment(0.6)]),
+        mcp_client_factory=await _mail(census=False),
+        fixed_clock_at=NOW,
+    ) as app:
+        email = app.services.email
+        await email.submit_task(app.principal, kind="refresh")
+        async with app.uow_factory() as uow:
+            [thread] = await uow.email.list(app.principal, "thread")
+        [memory] = await _memories(app)
+        await _second_thread(app, memory)
+        calls: list[str] = []
+
+        async def own(*_: object) -> None:
+            calls.append("own")
+
+        async def others(*_: object) -> None:
+            calls.append("others")
+
+        email.rerate_memories, email.lengthen_memories = own, others
+
+        async def given(target: str, judgment: str) -> list[str]:
+            calls.clear()
+            marked = await email.feedback(
+                app.principal,
+                thread_id=UUID(str(thread.payload["id"])),
+                target=target,  # type: ignore[arg-type]
+                judgment=judgment,  # type: ignore[arg-type]
+            )
+            first = list(calls)
+            calls.clear()
+            await email.undo_feedback(app.principal, UUID(str(marked["feedback_id"])))
+            assert calls == first, "an undo follows the same path as the judgment it undoes"
+            return first
+
+        assert await given("thread", "important") == ["own"]
+        assert await given("thread", "less_important") == ["own"]
+        assert await given("person", "important") == ["own", "others", "own"]
+        assert await given("person", "less_important") == ["own", "others", "own"]
+        for judgment in ("needs_reply", "no_reply_needed"):
+            assert await given("thread", judgment) == []
+            assert await given("person", judgment) == []
+
+
+async def test_a_follow_up_that_a_pause_holds_is_not_counted_as_a_failure() -> None:
+    """The refresh reads the pause before it follows up a mark, and the owner can pause
+    in between. The re-rating then writes nothing, and nothing was tried: the mark keeps
+    its place and its time, so the follow-up runs as soon as learning resumes."""
+    from unittest.mock import AsyncMock
+
+    from agent_core.adapters.determinism import FixedClock
+    from agent_core.domain.email import EmailLearningState, EmailRecord, EmailThread
+    from agent_core.runtime.email_tasks import _TaskIO
+    from tests.contract.people_mail_fixtures import correspondence_stack
+    from tests.contract.support import principal
+
+    factory, semantics = await correspondence_stack()
+    owner = principal()
+    thread = EmailThread(
+        id=UUID(int=5_100),
+        account_id="work",
+        provider_thread_id="t-mail",
+        subject="Atlas board",
+        updated_at=NOW,
+        last_accessed_at=NOW,
+    )
+    marked: dict[str, Any] = {"priority": 0.5, "rerating_pending": True}
+    rows = {
+        ("thread", str(thread.id)): thread.model_dump(mode="json"),
+        ("assessment", str(thread.id)): marked,
+        ("learning", "shared"): EmailLearningState(paused=True).model_dump(mode="json"),
+    }
+    async with factory() as uow:
+        for (kind, key), payload in rows.items():
+            await uow.email.put(
+                EmailRecord(
+                    tenant_id=owner.tenant_id,
+                    principal_id=owner.principal_id,
+                    kind=kind,
+                    key=key,
+                    revision=1,
+                    payload=payload,
+                    created_at=NOW,
+                    updated_at=NOW,
+                ),
+                expected_revision=0,
+            )
+    io = _TaskIO.__new__(_TaskIO)
+    vars(io).update(
+        context=SimpleNamespace(
+            run=None,
+            lease=None,
+            uow_factory=factory,
+            principal=owner,
+            clock=FixedClock(NOW),
+        ),
+        task=SimpleNamespace(account_ids=["work"]),
+        semantics=semantics,
+        # What the refresh read before the owner paused learning.
+        service=SimpleNamespace(learning_context=AsyncMock(return_value={"paused": False})),
+        found_work=False,
+        _write_fence=AsyncMock(),
+    )
+    await _TaskIO._resume_reratings(io)
+
+    async with factory() as uow:
+        row = await uow.email.get(owner, "assessment", str(thread.id))
+    assert row is not None and (row.revision, row.payload) == (1, marked)
+
+
 async def test_the_refresh_continues_when_a_memory_rerating_is_refused() -> None:
     from unittest.mock import AsyncMock
 
@@ -613,40 +788,60 @@ async def test_the_refresh_continues_when_a_memory_rerating_is_refused() -> None
 
 async def test_pending_reratings_that_keep_failing_do_not_hold_back_the_rest() -> None:
     """A slice follows up twenty debts. When the same twenty are refused every time, each
-    is put off for a while, so the twenty-first has its turn in the next slice."""
+    is put off for a while, so the twenty-first has its turn in the next slice. The
+    marks are found among all saved assessments, archived conversations included, and
+    only this task's accounts' are followed up."""
     from unittest.mock import AsyncMock
 
     from agent_core.adapters.determinism import FixedClock
-    from agent_core.domain.email import EmailRecord
+    from agent_core.domain.email import EmailRecord, EmailThread
     from agent_core.runtime.email_tasks import RERATING_RESUME_LIMIT, _TaskIO
     from tests.contract.people_mail_fixtures import correspondence_stack
     from tests.contract.support import principal
 
     factory, _ = await correspondence_stack()
     owner = principal()
-    threads = [
-        SimpleNamespace(id=UUID(int=5_000 + n), account_id="work", provider_thread_id=f"t-{n:02}")
-        for n in range(RERATING_RESUME_LIMIT + 1)
-    ]
+
+    def conversation(number: int, account_id: str, provider_thread_id: str) -> EmailThread:
+        return EmailThread(
+            id=UUID(int=5_000 + number),
+            account_id=account_id,
+            provider_thread_id=provider_thread_id,
+            subject="Atlas board",
+            updated_at=NOW,
+            last_accessed_at=NOW,
+            # Archived: in no shortlist of arriving mail.
+            in_inbox=False,
+        )
+
+    threads = [conversation(n, "work", f"t-{n:02}") for n in range(RERATING_RESUME_LIMIT + 1)]
+    # Another mailbox's debt, which this task does not cover, sorts before them all.
+    elsewhere = conversation(-1, "home", "t-home")
     async with factory() as uow:
-        for thread in threads:
-            await uow.email.put(
-                EmailRecord(
-                    tenant_id=owner.tenant_id,
-                    principal_id=owner.principal_id,
-                    kind="assessment",
-                    key=str(thread.id),
-                    revision=1,
-                    payload={"priority": 0.5, "rerating_pending": True},
-                    created_at=NOW,
-                    updated_at=NOW,
-                ),
-                expected_revision=0,
+        for thread in (elsewhere, *threads):
+            seeded: tuple[tuple[str, dict[str, object]], ...] = (
+                ("thread", thread.model_dump(mode="json")),
+                ("assessment", {"priority": 0.5, "rerating_pending": True}),
             )
+            for kind, payload in seeded:
+                await uow.email.put(
+                    EmailRecord(
+                        tenant_id=owner.tenant_id,
+                        principal_id=owner.principal_id,
+                        kind=kind,
+                        key=str(thread.id),
+                        revision=1,
+                        payload=payload,
+                        created_at=NOW,
+                        updated_at=NOW,
+                    ),
+                    expected_revision=0,
+                )
     last = threads[-1].provider_thread_id
     attempted: list[str] = []
 
     async def refusing(account_id: str, thread_id: str, **kwargs: Any) -> EmailRerateReport:
+        assert account_id == "work", "a task follows up only its own accounts' debts"
         attempted.append(thread_id)
         if thread_id != last:
             raise ConflictError("erased")
@@ -662,6 +857,7 @@ async def test_pending_reratings_that_keep_failing_do_not_hold_back_the_rest() -
             principal=owner,
             clock=clock,
         ),
+        task=SimpleNamespace(account_ids=["work"]),
         semantics=SimpleNamespace(people_enabled=True, rerate_thread=refusing),
         service=SimpleNamespace(learning_context=AsyncMock(return_value={})),
         found_work=False,
@@ -671,7 +867,7 @@ async def test_pending_reratings_that_keep_failing_do_not_hold_back_the_rest() -
 
     async def slice_() -> list[str]:
         attempted.clear()
-        await _TaskIO._resume_reratings(io, threads)  # type: ignore[arg-type]
+        await _TaskIO._resume_reratings(io)
         assert len(attempted) <= RERATING_RESUME_LIMIT
         return list(attempted)
 
@@ -688,6 +884,80 @@ async def test_pending_reratings_that_keep_failing_do_not_hold_back_the_rest() -
         rows = await uow.email.list(owner, "assessment", limit=100)
     assert all(row.payload["rerating_pending"] is True for row in rows)
     assert {row.updated_at for row in rows} == {NOW}
+    # The other mailbox's debt was never tried and never counted.
+    [untried] = [row for row in rows if row.key == str(elsewhere.id)]
+    assert untried.revision == 1
+
+
+async def test_a_new_mail_slice_follows_up_a_rerating_owed_by_an_archived_conversation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new-mail slice assesses only what recently arrived in the Inbox. A conversation
+    archived after its assessment was saved is in no such shortlist, and above the
+    learning share no full slice runs; its mark is found all the same."""
+    from decimal import Decimal
+
+    from agent_core.adapters.determinism import FixedClock
+    from agent_core.domain.email import EmailBudgetLimits
+    from tests.gates.test_email_arrival_checks_m26 import _seed_spend
+
+    stopped = True
+    original = EmailPeopleFormationService.rerate_thread
+
+    async def stopping(self: Any, account_id: str, thread_id: str, **kwargs: Any) -> Any:
+        if stopped:
+            return EmailRerateReport()
+        return await original(self, account_id, thread_id, **kwargs)
+
+    monkeypatch.setattr(EmailPeopleFormationService, "rerate_thread", stopping)
+    clock = FixedClock(NOW)
+    settings = replace(_email_settings(), email_mode_enabled=True, people_enabled=True)
+    async with build(
+        settings=settings,
+        script=FakeModelScript(turns=[_assessment(0.6)]),
+        mcp_client_factory=await _mail(census=False),
+        clock=clock,
+    ) as app:
+        service = app.services.email
+        await service.submit_task(app.principal, kind="refresh")
+        [memory] = await _memories(app)
+        async with app.uow_factory() as uow:
+            [thread] = await uow.email.list(app.principal, "thread")
+        await service.feedback(
+            app.principal,
+            thread_id=UUID(str(thread.payload["id"])),
+            target="thread",
+            judgment="important",
+        )
+        assert (await _memories(app))[0].expires_at == memory.expires_at
+        assert await _owed(app) is True
+        # The owner archives the conversation: it leaves the Inbox.
+        async with app.uow_factory() as uow, uow.email.lock(app.principal):
+            [row] = await uow.email.list(app.principal, "thread")
+            await uow.email.put(
+                row.model_copy(
+                    update={
+                        "revision": row.revision + 1,
+                        "payload": {**row.payload, "in_inbox": False},
+                    }
+                ),
+                expected_revision=row.revision,
+            )
+        stopped = False
+
+        service.budget_limits = EmailBudgetLimits(
+            daily_cost=Decimal("40"), monthly_cost=Decimal("600")
+        )
+        await _seed_spend(app, "460", NOW - timedelta(days=10))
+        clock.advance(timedelta(minutes=1))
+        operation = await service.submit_task(app.principal, kind="refresh")
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure
+        task = await service.get_task(app.principal, run.id)
+        assert task is not None and task.scope == "new_mail" and run.usage.model_calls == 0
+        [kept] = await _memories(app)
+        assert kept.id == memory.id and kept.expires_at is None
+        assert await _owed(app) is None and task.empty_check is False
 
 
 def test_a_put_off_rerating_waits_longer_each_time_and_a_new_save_starts_afresh() -> None:

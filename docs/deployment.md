@@ -2228,8 +2228,8 @@ agent memory merge-email-duplicates --owner TENANT/PRINCIPAL --confirm  # apply
 The report is content-free: memories examined, facts stored more than once,
 copies superseded, and copies left because they sit under a different subject.
 The earliest memory of each fact stays and each copy is superseded by it, so
-nothing is deleted. The memory kept takes its copies' latest evidence date and longest retention. Run the preview first and keep its output. A second run
-changes nothing. Run it before `agent memory rerate-email --confirm`, so the
+nothing is deleted. The memory kept takes its copies' latest evidence date and longest retention. Run the preview first and keep its output. A run can leave a copy for later when a new message renewed it meanwhile, so repeat the command until it reports nothing superseded; from then on a further run
+changes nothing while no new mail has arrived. Run it before `agent memory rerate-email --confirm`, so the
 re-rating works on one memory per fact.
 
 ### Conflict reconciliation (ADR-0248)

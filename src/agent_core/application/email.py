@@ -114,6 +114,9 @@ INBOX_RELEVANCE_FLOOR = 0.1
 # Other threads one piece of person or topic feedback lengthens memories in at
 # once, newest first (ADR-0340). The rest follow at their own next assessment.
 FEEDBACK_FOLLOW_THREADS = 250
+# The judgments that say what a thread's memories are worth (ADR-0340). Only
+# these, given or undone, re-rate memories; a judgment about replies does not.
+IMPORTANCE_JUDGMENTS = frozenset({"important", "less_important"})
 
 
 async def records(store: EmailStore, principal: Principal, kind: str) -> AsyncIterator[EmailRecord]:
@@ -703,7 +706,7 @@ class EmailExperienceService:
             }
         # A replayed request re-rates too: the first one may have ended after its
         # feedback committed and before the memories followed.
-        await self._memories_follow(principal, thread, item)
+        await self._memories_follow(principal, thread, item, judgment)
         return result
 
     async def _save_feedback(
@@ -766,9 +769,19 @@ class EmailExperienceService:
         return item
 
     async def _memories_follow(
-        self, principal: Principal, thread: EmailThread, feedback: EmailFeedback | None
+        self,
+        principal: Principal,
+        thread: EmailThread,
+        feedback: EmailFeedback | None,
+        judgment: str,
     ) -> None:
-        """Let email memories follow the owner's feedback at once (ADR-0340).
+        """Let email memories follow the owner's importance judgment at once (ADR-0340).
+
+        Only Important and Less important, given or undone, say what a
+        thread's memories are worth. A judgment about replies says nothing of
+        that and re-rates nothing: it must not carry out, as if it were the
+        owner's word on importance, whatever else is waiting for the thread,
+        such as an assessment saved while learning is paused.
 
         The feedback is already committed. A refused re-rating never fails it:
         a retry of the request, a repeated undo, or the next assessment of the
@@ -779,18 +792,16 @@ class EmailExperienceService:
         matches, and their memories gain at once what it gives them: a longer
         retention, or first-class standing. That pass never shortens and never
         demotes; what the feedback takes away there waits for each thread's
-        next assessment or the owner's command.
+        next assessment or the owner's command. The feedback's own thread is
+        then re-rated once more: a memory the pass put back takes its standing
+        from the message that formed it, which may sit in this thread and was
+        read before the memory came back.
         """
-        if self.rerate_memories is None:
+        if self.rerate_memories is None or judgment not in IMPORTANCE_JUDGMENTS:
             return
         with suppress(ConflictError, NotFoundError):
             await self.rerate_memories(principal, thread.account_id, thread.provider_thread_id)
-        if (
-            self.lengthen_memories is None
-            or feedback is None
-            or feedback.target == "thread"
-            or feedback.judgment not in {"important", "less_important"}
-        ):
+        if self.lengthen_memories is None or feedback is None or feedback.target == "thread":
             return
         try:
             async with self.uow_factory() as uow:
@@ -810,6 +821,7 @@ class EmailExperienceService:
                 await self.lengthen_memories(
                     principal, [(stored.account_id, stored.provider_thread_id) for stored in others]
                 )
+                await self.rerate_memories(principal, thread.account_id, thread.provider_thread_id)
         except Exception:
             # The pass is a courtesy to an already committed judgment; a retry,
             # each thread's next assessment or the owner's command makes it up.
@@ -842,7 +854,7 @@ class EmailExperienceService:
             )
         # A repeated undo writes nothing and re-rates again: the first one may have
         # ended after it committed and before the memories followed.
-        await self._memories_follow(principal, thread, item)
+        await self._memories_follow(principal, thread, item, item.judgment)
         return summary
 
     async def _draft(self, store: EmailStore, principal: Principal, draft_id: UUID) -> EmailDraft:

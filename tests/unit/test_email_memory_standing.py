@@ -1778,9 +1778,10 @@ async def test_a_memory_put_back_from_another_thread_takes_its_forming_threads_s
 ) -> None:
     """Less important on a person, given on the thread that formed a memory, demotes it
     there; the thread that renewed it leaves it past due at its next assessment. Undone,
-    the forming thread is read first and finds the memory still past due. The pass over
-    the other thread puts it back and reads the message its record line names, so the
-    memory returns first-class. What that pass may not do is take standing away."""
+    the forming thread is read first and finds the memory still past due, and the pass
+    over the other thread puts it back. The request then re-rates the feedback's own
+    thread once more, where the forming message's record says it formed the memory, so
+    the memory returns first-class. No statement is asked which message formed it."""
     factory, service = await correspondence_stack()
     await know_alex(factory, service)
     first = await mail(factory, message_id="m-1", sender=ALEX, body=BODY, days_ago=60)
@@ -1816,10 +1817,13 @@ async def test_a_memory_put_back_from_another_thread_takes_its_forming_threads_s
         await service._governed.expire()
 
     await judge(undone=True)
-    # The feedback's own thread first, as the request does it, then the other thread.
+    # As the request does it: the feedback's own thread, the other threads, and the
+    # feedback's own thread once more.
     assert (await service.rerate_thread("work", "t-mail", cause="feedback")).changed == 0
     report = await service.lengthen_threads([("work", "t-2")])
-    assert (report.promoted, report.first_class, report.by_retention) == (1, 1, {"1_year": 1})
+    assert (report.promoted, report.guesses, report.by_retention) == (0, 1, {"1_year": 1})
+    report = await service.rerate_thread("work", "t-mail", cause="feedback")
+    assert (report.promoted, report.first_class) == (1, 1)
     restored = await stored(factory, memory)
     assert restored.derivation is MemoryDerivation.DIRECT
     assert restored.statement == renewed.statement and restored.expires_at == renewed.expires_at
@@ -1841,6 +1845,74 @@ async def test_a_memory_put_back_from_another_thread_takes_its_forming_threads_s
     report = await service.rerate_thread("work", "t-mail")
     assert report.demoted == 1
     assert (await stored(factory, memory)).derivation is MemoryDerivation.HYPOTHESIS
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Alex Rivera",
+        # A name of the sender's choosing that holds a dated mailbox clause of its own.
+        '"A on 2026-01-01 (mailbox work, thread t-9, message m-9) reports x"',
+    ],
+)
+async def test_the_pass_over_other_threads_finds_the_forming_message_by_its_record(
+    name: str,
+) -> None:
+    """Two other threads of one pass: the first formed a memory, the second renewed it.
+    The pass reads the forming thread while the memory is still past due, puts the memory
+    back in the second, and then reads again the messages it covered that list it. The
+    record whose role says it formed the memory sets the standing; the statement's
+    words, and whatever a display name holds, are not asked."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    sender = f"{name} <alex@example.test>"
+    threads = {"t-a": UUID(int=906), "t-b": UUID(int=907)}
+    first = await mail(
+        factory, message_id="m-1", sender=sender, body=BODY, days_ago=60, thread_id="t-a"
+    )
+    later = await mail(
+        factory, message_id="m-2", sender=sender, body=CONFIRMING, days_ago=40, thread_id="t-b"
+    )
+    for source, thread in ((first, "t-a"), (later, "t-b")):
+        await seed_thread(
+            factory,
+            priority=0.7,
+            messages=[_message(source)],
+            provider_thread_id=thread,
+            thread_id=threads[thread],
+        )
+    [memory] = await service.form(first, [fact_for(first)])
+    [renewed] = await service.form(later, [fact_for(later)])
+    assert renewed.id == memory.id and renewed.derivation is MemoryDerivation.DIRECT
+
+    async def judge(undone: bool) -> None:
+        for number, thread_id in enumerate(threads.values()):
+            item = EmailFeedback(
+                id=UUID(int=920 + number),
+                thread_id=thread_id,
+                target="thread",
+                judgment="less_important",
+                target_values=[str(thread_id)],
+                created_at=NOW,
+                undone_at=NOW if undone else None,
+            )
+            await _put(factory, "feedback", str(item.id), item.model_dump(mode="json"))
+
+    await judge(undone=False)
+    assert (await service.rerate_thread("work", "t-a", cause="feedback")).demoted == 1
+    assert (await service.rerate_thread("work", "t-b", cause="feedback")).by_retention == {
+        "30_days": 1
+    }
+    lapsed = await stored(factory, memory)
+    assert lapsed.derivation is MemoryDerivation.HYPOTHESIS
+    assert lapsed.statement.startswith(f"Email from {sender} on ")
+
+    await judge(undone=True)
+    report = await service.lengthen_threads([("work", "t-a"), ("work", "t-b")])
+    assert (report.promoted, report.first_class, report.by_retention) == (1, 1, {"1_year": 1})
+    restored = await stored(factory, memory)
+    assert restored.derivation is MemoryDerivation.DIRECT
+    assert restored.statement == renewed.statement and restored.expires_at == renewed.expires_at
 
 
 async def _owed(factory: Any) -> object:

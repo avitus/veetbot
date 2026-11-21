@@ -335,7 +335,9 @@ def _collapsed(text: str) -> str:
     return " ".join(text.split())
 
 
-def _record_attribution(statement: str, sender: str | None = None) -> _Attribution | None:
+def _record_attribution(
+    statement: str, sender: str | None = None, *, guess: bool = False
+) -> _Attribution | None:
     """A record line's own header, or None when the statement is not a record line.
 
     The header is the only place a statement is read for a date or for the
@@ -343,12 +345,17 @@ def _record_attribution(statement: str, sender: str | None = None) -> _Attributi
     record line the claim quotes is part of the claim. With `sender`, the
     stored message's own, the header must open with exactly that sender, so a
     display name that holds a clause of its own is never read as one.
+
+    `guess` says the store holds the row as a guess, so the statement is a
+    record line whatever its sender's name reads like. Without it the words
+    decide, and a statement whose plain attribution comes first is a plain
+    statement: a mailbox clause further on is inside its claim.
     """
     if not statement.startswith(f"{_RECORD_OPENING} "):
         return None
     if sender is None:
         head = _GUESS_HEAD.search(statement, len(_RECORD_OPENING))
-        plain = _PLAIN_HEAD.search(statement)
+        plain = None if guess else _PLAIN_HEAD.search(statement)
         if head is not None and plain is not None and plain.start() < head.start():
             # A plain statement whose sender's name begins "Email from".
             return None
@@ -387,39 +394,27 @@ def _source_ids(account_id: str, thread_id: str, message_id: str) -> str:
 
 
 def names_message(
-    statement: str, account_id: str, thread_id: str, message_id: str, sender: str | None = None
+    statement: str,
+    account_id: str,
+    thread_id: str,
+    message_id: str,
+    sender: str | None = None,
+    *,
+    guess: bool = False,
 ) -> bool:
     """Whether a statement is the record line of this very message.
 
-    A guess says which message formed it. That identifies the message by
-    itself, where a date can be shared by two. Only the line's own header is
-    read: an email the claim quotes names nothing. `sender` is the stored
-    message's sender when the caller holds it.
+    This is no way to find the message that formed a memory: the retained
+    source records say that, by the role each keeps and by which of them the
+    memory's own source event read. It only tells apart the messages of that
+    one read, on records written before roles were kept.
+
+    Only the line's own header is read: an email the claim quotes names
+    nothing. `sender` is the stored message's sender when the caller holds it,
+    and `guess` says the store holds the row as a guess.
     """
-    header = _record_attribution(statement, sender)
+    header = _record_attribution(statement, sender, guess=guess)
     return header is not None and header.source == _source_ids(account_id, thread_id, message_id)
-
-
-def names_thread(statement: str, account_id: str, thread_id: str) -> bool:
-    """Whether a statement is the record line of some message of this thread."""
-    header = _record_attribution(statement)
-    opening = _collapsed(f"{account_id}, thread {thread_id}, message")
-    return header is not None and header.source.startswith(f"{opening} ")
-
-
-def named_message(statement: str) -> tuple[str, str, str] | None:
-    """The mailbox, thread and message a record line's own header names, if it names one.
-
-    This says only where to look. Whether that message formed the memory is
-    for its retained record to say, or for `names_message` on a record that
-    keeps no role.
-    """
-    header = _record_attribution(statement)
-    if header is None:
-        return None
-    account_id, first, rest = header.source.partition(", thread ")
-    thread_id, second, message_id = rest.partition(", message ")
-    return (account_id, thread_id, message_id) if first and second and message_id else None
 
 
 def restated(
@@ -469,7 +464,7 @@ def restated(
         if found is None and sender is not None:
             found = _plain_attribution(statement)
     else:
-        found = _record_attribution(statement, sender)
+        found = _record_attribution(statement, sender, guess=True)
         if found is not None and found.source != _source_ids(account_id, thread_id, message_id):
             found = None
     if found is None:
@@ -622,11 +617,17 @@ class EmailMergeReport(BaseModel):
 
 
 class EmailRerateReport(BaseModel):
-    """Counts only: what a re-rating found and changed."""
+    """Counts only: what a re-rating found and changed.
+
+    `paused` says the re-rating found learning paused once it held the mailbox
+    lock and so read and wrote nothing. That is no failure of the re-rating:
+    whatever it was to follow up is still owed, and is due as before.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     applied: bool = False
+    paused: bool = False
     examined: int = 0
     changed: int = 0
     promoted: int = 0

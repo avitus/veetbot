@@ -43,9 +43,7 @@ from agent_core.domain.email_memory import (
     first_class_statement,
     guess_statement,
     kept_label,
-    named_message,
     names_message,
-    names_thread,
     owner_judgment,
     quoted_text,
     reads_current_source,
@@ -141,6 +139,27 @@ def _source_role(facts: object, memory_id: UUID | str) -> str | None:
         return None
     return next(
         (role for role in (_FORMED, _RENEWED, _SEEN) if f"{role}:{memory_id}" in facts), None
+    )
+
+
+def _read_for(record: EmailRecord, memory: MemoryRecord) -> bool:
+    """Whether the memory's own source event is one of this retained message's reads.
+
+    A memory keeps the session and event it was formed from, and a retained
+    record keeps every read of its message. So a record written before roles
+    were kept can still show, without any of the statement's words, that the
+    read that formed a memory was a read of its message's thread. A read can
+    hold several messages of that thread; it never holds another thread's.
+    The forming event is the first the memory lists: a later event of the
+    same session only repeated it.
+    """
+    session_id, occurrences = str(memory.source_session_id), record.payload.get("occurrences")
+    formed_from = min(memory.source_event_ids)
+    return any(
+        isinstance(read, dict)
+        and read.get("session_id") == session_id
+        and read.get("event_sequence") == formed_from
+        for read in (occurrences if isinstance(occurrences, list) else [])
     )
 
 
@@ -1105,12 +1124,14 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
 
         A record written before roles were kept says nothing of what its
         message did, and two messages can share a sent time. Such a record
-        formed the memory only when the memory's own record line names its
-        message. Then it restands and shortens as any forming message does,
-        and the role is written down, since a promoted statement names no
-        message. Named by nothing, it never restands the memory and never
-        shortens it; it may lengthen it when its date is the last evidence
-        date, which needs only what is visible.
+        formed the memory only when two things hold. The memory's own source
+        event is one of the reads the record keeps for its message, which no
+        wording can fake. And, since one read can hold several messages of a
+        thread, the memory's record line names this one. Then it restands and
+        shortens as any forming message does, and the role is written down,
+        since a promoted statement names no message. Otherwise it never
+        restands the memory and never shortens it; it may lengthen it when
+        its date is the last evidence date, which needs only what is visible.
 
         Only the owner's command adopts a memory formed before the table
         existed; the hooks follow memories already under it, so nothing is
@@ -1127,9 +1148,9 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         need not be the one that formed it: the pass remembers each memory
         it put back, so its caller reads the forming message again.
 
-        A statement is read for its sender, its date and its message only in
-        its own attribution, and against the stored message's sender when the
-        thread holds that message.
+        When a change of standing rewords a statement, its sender and date
+        are read only in its own attribution, and against the stored
+        message's sender when the thread holds that message.
         """
         payload = record.payload
         account_id, thread_id, message_id = (
@@ -1179,11 +1200,17 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             memory = projection if baseline == stored else stored
             role = _source_role(facts, memory.id)
             first_class = memory.derivation is MemoryDerivation.DIRECT
-            # A first-class row is a plain statement and names no message.
+            # Without a role, the record must first show that the memory was
+            # formed from a read of its own message. Among the messages of that
+            # one read, a guess's record line says which. A first-class row is
+            # a plain statement and names none.
             named = (
                 role is None
                 and not first_class
-                and names_message(memory.statement, account_id, thread_id, message_id, sender)
+                and _read_for(record, memory)
+                and names_message(
+                    memory.statement, account_id, thread_id, message_id, sender, guess=True
+                )
             )
             latest = role in {None, _FORMED, _RENEWED} and memory.last_evidence_at == evidence_at
             origin = role == _FORMED or named
@@ -1384,12 +1411,11 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         Each memory this pass put back therefore has the messages that list
         it read once more, so the outcome does not depend on which was first.
 
-        The forming message may also sit in a thread this pass does not
-        cover. A guess's record line names it, and it is read too, in the
-        raising direction only: what another thread's reading would take
-        away waits for that thread's own re-rating or the owner's command.
-        A first-class statement names no message; one that returns keeps its
-        standing until the thread that formed it is next re-rated.
+        Which message formed a memory is for the retained records to say, by
+        the role each keeps. No statement is asked. So a forming message in a
+        thread no pass of the request covers is not looked for: the memory
+        keeps its standing until that thread is next re-rated or the owner's
+        command runs.
         """
         changed: list[UUID] = []
         earlier = set(seen.reopened)
@@ -1400,18 +1426,28 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     uow, record, seen, apply=apply, adopt=adopt, lower=lower, owner=owner
                 )
         reopened = seen.reopened - earlier
-        if not reopened:
-            return changed
+        if reopened:
+            changed += await self._reread_for(
+                uow, keys, reopened, seen, apply=apply, adopt=adopt, lower=lower, owner=owner
+            )
+        return changed
+
+    async def _reread_for(
+        self,
+        uow: RepositoryUnitOfWork,
+        keys: Sequence[str],
+        reopened: set[UUID],
+        seen: _Rerating,
+        *,
+        apply: bool,
+        adopt: bool,
+        lower: bool,
+        owner: bool,
+    ) -> list[UUID]:
+        """Read these retained messages again, only for the memories a pass just put back."""
         wanted = frozenset(str(value) for value in reopened)
-        elsewhere: list[str] = []
-        for memory_id in sorted(reopened, key=str):
-            stored = await uow.memories.get(memory_id, self._principal)
-            baseline, projection = seen.projected.get(stored.id, (stored, stored))
-            named = named_message((projection if baseline == stored else stored).statement)
-            origin = None if named is None else semantic_source_key(*named)
-            if origin is not None and origin not in keys and origin not in elsewhere:
-                elsewhere.append(origin)
-        for key in (*keys, *elsewhere):
+        changed: list[UUID] = []
+        for key in keys:
             record = await uow.email.get(self._principal, "semantic_source", key)
             if record is not None:
                 changed += await self._rerate_source(
@@ -1420,8 +1456,8 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     seen,
                     apply=apply,
                     adopt=adopt,
-                    lower=lower and key in keys,
-                    owner=owner and key in keys,
+                    lower=lower,
+                    owner=owner,
                     only=wanted,
                 )
         return changed
@@ -1442,9 +1478,11 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         re-rating that follows an assessment reads the pause here, under the
         mailbox lock it is saved under, because a caller's earlier reading
         may be out of date by the time the lock is held; while learning is
-        paused it writes nothing. The owner's feedback is the owner's own act
+        paused it writes nothing, and its report says it was paused. The
+        owner's importance judgment, given or undone, is the owner's own act
         and re-rates at once, pause or not: Important given during a pause
-        must still keep a memory from expiring.
+        must still keep a memory from expiring. The feedback cause is for
+        that judgment alone; a judgment about replies re-rates nothing.
         """
         seen = _Rerating()
         if not self.enabled:
@@ -1456,8 +1494,8 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         ):
             if cause != "feedback" and await self._learning_paused(uow):
                 # Nothing is written, so the saved assessment keeps its mark
-                # for the refresh after the pause.
-                return seen.report(applied=apply)
+                # for the refresh after the pause. This was no attempt.
+                return seen.report(applied=apply).model_copy(update={"paused": True})
             await self._standing(uow, account_id, provider_thread_id, "", seen=seen)
             source_key = thread_source_key(account_id, provider_thread_id)
             thread = seen.threads.get(source_key)
@@ -1536,6 +1574,13 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
 
         The pass is the owner's own feedback at work. A pause in learning
         holds neither it nor the re-rating of the feedback's own thread.
+
+        A memory the pass puts back in one thread may have been formed in a
+        thread it read earlier, while the memory was still past due. So the
+        pass then reads again the retained messages it has covered so far,
+        for that memory only; threads it reads afterwards find the memory
+        back. The feedback's own thread is not among these: its caller
+        re-rates that thread once more after this pass.
         """
         seen = _Rerating()
         if not self.enabled:
@@ -1549,6 +1594,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 and elapsed() - started >= _LENGTHEN_SECONDS
             )
 
+        covered: list[str] = []
         for start in range(0, len(threads), _LENGTHEN_PAGE):
             if spent():
                 break
@@ -1562,14 +1608,24 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 for account_id, provider_thread_id in threads[start : start + _LENGTHEN_PAGE]:
                     if spent():
                         break
+                    keys = await self._thread_sources(uow, account_id, provider_thread_id)
+                    earlier = set(seen.reopened)
                     changed += await self._rerate_sources(
-                        uow,
-                        await self._thread_sources(uow, account_id, provider_thread_id),
-                        seen,
-                        apply=True,
-                        adopt=False,
-                        lower=False,
+                        uow, keys, seen, apply=True, adopt=False, lower=False
                     )
+                    reopened = seen.reopened - earlier
+                    if reopened and covered:
+                        changed += await self._reread_for(
+                            uow,
+                            covered,
+                            reopened,
+                            seen,
+                            apply=True,
+                            adopt=False,
+                            lower=False,
+                            owner=False,
+                        )
+                    covered += keys
                 await self._audit_rerating(uow, changed, cause=cause, run=None, lease=None)
         return seen.report(applied=True)
 
@@ -1620,11 +1676,16 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
 
         A memory belongs to the thread that formed it. A message of another
         thread that renewed or found it lists it too, and that listing is no
-        membership: the record's role says its message formed the memory, or,
-        on a record that keeps no role, the memory's own record line names the
-        thread. The listings are read before the locks are taken, so a copy
-        whose latest evidence none of them answers for under the locks is left
-        as it is; the next run places it.
+        membership. The retained records decide, read again under the locks:
+        a record's role says its message formed the memory, or, on a record
+        that keeps no role, the memory's own source event is one of the reads
+        the record keeps for its message. The statement's words are not
+        asked, so nothing a sender wrote can place a memory in a thread. When
+        no record shows it, the memory is no member and is left alone.
+
+        The listings are read before the locks are taken, so a copy whose
+        latest evidence none of them answers for under the locks is left as
+        it is; a later run places it.
 
         An applied merge appends one content-free event per thread it changed,
         naming every fact it merged there; a preview appends none.
@@ -1632,9 +1693,9 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         report = EmailMergeReport(applied=apply)
         if not self.enabled:
             return report
-        # The memories each thread may have formed: true where a record's role
-        # says so, false where a record without roles lists the memory.
-        by_thread: dict[tuple[str, str], dict[str, bool]] = {}
+        # For each thread, the memories its retained messages may have formed,
+        # with the records that list each one under the forming role or none.
+        by_thread: dict[tuple[str, str], dict[str, list[str]]] = {}
         # The retained messages that list each memory, by record key.
         listing: dict[str, list[str]] = {}
         after: str | None = None
@@ -1661,19 +1722,19 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                         listing.setdefault(str(value), []).append(record.key)
                         role = _source_role(payload.get("facts"), str(value))
                         if role in {None, _FORMED}:
-                            formed[str(value)] = formed.get(str(value), False) or role == _FORMED
+                            formed.setdefault(str(value), []).append(record.key)
             if len(page) < _RERATE_PAGE:
                 break
             after = page[-1].key
         examined = facts = superseded = other_subjects = 0
-        for (account_id, thread_id), listed_ids in sorted(by_thread.items()):
+        for _thread, listed_ids in sorted(by_thread.items()):
             async with (
                 self._uow_factory() as uow,
                 uow.email.lock(self._principal),
                 uow.people.lock(self._principal),
             ):
                 groups: dict[tuple[str, str, str], list[MemoryRecord]] = {}
-                for value, formed_here in listed_ids.items():
+                for value, record_keys in listed_ids.items():
                     try:
                         memory = await uow.memories.get(UUID(value), self._principal)
                     except (NotFoundError, ValueError):
@@ -1683,9 +1744,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                         stated is None
                         or memory.polarity is not Polarity.ASSERT
                         or not self._governed_by_table(memory)
-                        or not (
-                            formed_here or names_thread(memory.statement, account_id, thread_id)
-                        )
+                        or not await self._formed_among(uow, memory, record_keys)
                     ):
                         continue
                     examined += 1
@@ -1798,9 +1857,10 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         """The retained message that supplied a memory's last evidence, read now.
 
         Its record says it formed or renewed the memory, or keeps no role and
-        is the message the memory's own record line names. A record that only
-        found the memory, one since excluded, and one known by its date alone
-        answer for nothing.
+        holds, among its message's reads, the event the memory was formed
+        from. A record that only found the memory, one since excluded, and
+        one known by its date alone answer for nothing. The statement's words
+        are not asked.
         """
         for key in record_keys:
             record = await uow.email.get(self._principal, "semantic_source", key)
@@ -1813,19 +1873,29 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 continue
             role = _source_role(payload.get("facts"), copy.id)
             if evidence_at == copy.last_evidence_at and (
-                role in {_FORMED, _RENEWED}
-                or (
-                    role is None
-                    and names_message(
-                        copy.statement,
-                        str(payload.get("account_id")),
-                        str(payload.get("provider_thread_id")),
-                        str(payload.get("message_id")),
-                    )
-                )
+                role in {_FORMED, _RENEWED} or (role is None and _read_for(record, copy))
             ):
                 return record
         return None
+
+    async def _formed_among(
+        self, uow: RepositoryUnitOfWork, memory: MemoryRecord, record_keys: Sequence[str]
+    ) -> bool:
+        """Whether one of a thread's retained messages shows that the thread formed a memory.
+
+        The records are read now, under the caller's locks. One says so by
+        its role. One that keeps no role says so when the memory's own source
+        event is one of the reads it keeps for its message. A record that
+        only lists the memory, or is since excluded, shows nothing.
+        """
+        for key in record_keys:
+            record = await uow.email.get(self._principal, "semantic_source", key)
+            if record is None or record.payload.get("excluded"):
+                continue
+            role = _source_role(record.payload.get("facts"), memory.id)
+            if role == _FORMED or (role is None and _read_for(record, memory)):
+                return True
+        return False
 
     async def _keep_later_evidence(
         self,
