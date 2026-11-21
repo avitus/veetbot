@@ -1,0 +1,23 @@
+{
+  "title": "Daily funding signal collector",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "config"
+    ],
+    "properties": {
+      "config": {
+        "type": "object"
+      }
+    },
+    "additionalProperties": false
+  },
+  "calls": [
+    "feed.publish",
+    "mcp.read",
+    "model.complete"
+  ],
+  "feeds": [
+    "agent.emerging-market-radar"
+  ]
+}
