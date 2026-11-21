@@ -67,8 +67,12 @@ async def _put(factory: Any, kind: str, key: str, payload: dict[str, object]) ->
         )
 
 
-def _message(source: Any, *, direction: str = "received", check: str = "none") -> EmailMessage:
-    """The message as the mailbox projection holds it, body included."""
+def _message(source: Any, *, direction: str = "received", check: str = "pass") -> EmailMessage:
+    """The message as the mailbox projection holds it, body included.
+
+    Gmail's sender check passed unless a test says otherwise: a familiar From
+    address counts for nothing without it.
+    """
     return EmailMessage(
         id=source.message_id,
         sender=source.sender,
@@ -343,6 +347,7 @@ async def test_extraction_confidence_below_the_ceiling_is_kept_as_extracted() ->
     [
         (0.2, "pass", ALEX),  # a known sender in an unimportant thread
         (0.9, "fail", ALEX),  # the sender check failed: the address proves nothing
+        (0.9, "none", ALEX),  # no check passed: a From line alone is not a known sender
         (0.9, "none", OWNER),  # the owner's own address on received mail
     ],
 )
@@ -375,7 +380,9 @@ async def test_the_owners_own_sent_mail_is_a_known_sender() -> None:
     source = await mail(
         factory, message_id="m-out", sender=OWNER, to=ALEX, labels=["SENT"], body=BODY
     )
-    await seed_thread(factory, priority=0.2, messages=[_message(source, direction="sent")])
+    # Sent mail carries no Gmail verdict, and the owner's own needs none.
+    sent = _message(source, direction="sent", check="none")
+    await seed_thread(factory, priority=0.2, messages=[sent])
     [memory] = await service.form(source, [fact_for(source)])
     # The owner wrote in the thread, so it is kept without expiry and is first-class.
     assert memory.expires_at is None
@@ -1076,3 +1083,77 @@ async def test_a_first_class_claim_never_upgrades_a_hypothesis_it_repeats() -> N
     kept = await stored(factory, hypothesis)
     assert kept.derivation is MemoryDerivation.HYPOTHESIS
     assert kept.longevity is MemoryLongevity.TENTATIVE
+
+
+async def test_a_familiar_address_needs_gmails_passed_check_to_be_a_known_sender() -> None:
+    """Anyone can write a familiar address in a From line. Only Gmail's passed sender
+    check ties a received message to that address; `none` says nothing either way."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY)
+    await seed_thread(factory, priority=0.7, messages=[_message(source, check="none")])
+    [memory] = await service.form(source, [fact_for(source)])
+    assert memory.statement.startswith("Email from Alex Rivera")
+    assert memory.derivation is MemoryDerivation.HYPOTHESIS
+    assert memory.confidence <= 0.4 and memory.flagged_for_review
+    # It is still kept by its thread's importance, as every sender's mail is.
+    assert memory.expires_at == source.sent_at + timedelta(days=365)
+
+    # The owner's mark lengthens it; no re-rating promotes it without the check.
+    await seed_feedback(factory, "important")
+    report = await service.rerate_thread("work", "t-mail")
+    assert (report.promoted, report.by_retention) == (0, {"no_expiry": 1})
+    assert (await service.rerate_all(apply=True)).promoted == 0
+    assert (await stored(factory, memory)).derivation is MemoryDerivation.HYPOTHESIS
+
+    # Read again with the check passed, the same message is from someone the owner knows.
+    await seed_thread(factory, priority=0.7, messages=[_message(source, check="pass")])
+    assert (await service.rerate_thread("work", "t-mail")).promoted == 1
+    assert (await stored(factory, memory)).derivation is MemoryDerivation.DIRECT
+
+
+async def test_a_repeat_without_a_passed_check_settles_nothing() -> None:
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    first = await mail(factory, message_id="m-1", sender=ALEX, body=BODY, days_ago=12)
+    later = await mail(factory, message_id="m-2", sender=ALEX, body=CONFIRMING, days_ago=2)
+    await seed_thread(
+        factory,
+        priority=0.7,
+        messages=[_message(first, check="pass"), _message(later, check="none")],
+    )
+    [memory] = await service.form(first, [fact_for(first)])
+    assert memory.derivation is MemoryDerivation.DIRECT
+    [renewed] = await service.form(later, [fact_for(later)])
+    assert renewed.id == memory.id and renewed.last_evidence_at == later.sent_at
+    assert renewed.status is MemoryStatus.PROVISIONAL
+
+
+@pytest.mark.parametrize(
+    "priority, check, demoted",
+    [
+        # Mail cached before the check existed reads `none`: no reason to take standing away.
+        (0.7, "none", 0),
+        # A failed check is evidence that the address proves nothing.
+        (0.7, "fail", 1),
+        # A current, complete reading that keeps the thread under a year still demotes.
+        (0.1, "none", 1),
+    ],
+)
+async def test_a_first_class_memory_keeps_its_standing_when_only_the_check_is_missing(
+    priority: float, check: str, demoted: int
+) -> None:
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY)
+    await seed_thread(factory, priority=0.7, messages=[_message(source, check="pass")])
+    [memory] = await service.form(source, [fact_for(source)])
+    assert memory.derivation is MemoryDerivation.DIRECT
+
+    await seed_thread(factory, priority=priority, messages=[_message(source, check=check)])
+    assert (await service.rerate_thread("work", "t-mail")).demoted == demoted
+    assert (await service.rerate_all(apply=True)).demoted == 0
+    current = await stored(factory, memory)
+    assert (current.derivation is MemoryDerivation.HYPOTHESIS) is bool(demoted)
+    if not demoted:
+        assert current == memory

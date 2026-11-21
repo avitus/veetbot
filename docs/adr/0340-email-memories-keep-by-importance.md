@@ -48,14 +48,17 @@ evaluated construction unchanged.
 - **The owner replied** when the thread holds a message the owner sent.
 - **A known sender** is one of:
   - the owner, on a message the owner sent;
-  - an address that resolves to exactly one active or provisional person in
-    People, through an owner-confirmed, channel-observed or owner-stated
-    identifier. Under ADR-0121 that is someone the owner created, confirmed or
-    named, or someone the owner has written to.
+  - on a received message whose sender check passed (ADR-0165), an address
+    that resolves to exactly one active or provisional person in People,
+    through an owner-confirmed, channel-observed or owner-stated identifier.
+    Under ADR-0121 that is someone the owner created, confirmed or named, or
+    someone the owner has written to.
 
-  A message whose sender check failed (ADR-0165) never has a known sender. An
-  address that is unresolved, ambiguous, or one of the owner's own on received
-  mail is unknown.
+  Anyone can write a familiar address in a From line, so the address alone is
+  not enough. Gmail's passed check is what ties a received message to it, as
+  ADR-0336 requires before it reads a signature. A message whose check failed,
+  or gave no verdict, never has a known sender. An address that is unresolved,
+  ambiguous, or one of the owner's own on received mail is unknown.
 
 A stored thread is not always a full, current reading, and the first read of
 production on 2026-11-20 showed how much that matters. The 667 live email
@@ -154,7 +157,10 @@ No ranking code changes, so the `retrieval@7` label stays.
   not a gap. It changes standing only when the memory's message is among those
   held, and it demotes only when that sender is no longer known or such a
   reading rates the thread lower. A reset rating, a floor, an abstention, a
-  partial thread, or a message that left the window lowers nothing.
+  partial thread, or a message that left the window lowers nothing. Neither
+  does a sender check that merely reads no verdict: the stored message may
+  have been cached before the check existed, so it earns no standing and takes
+  none from a memory that is already first-class. A failed check demotes.
 - **Older memories wait for the command.** The two hooks follow only a memory
   already under the table, one that carries `email-retention@1`. A memory
   formed before this change is brought under it only by the owner's command
@@ -299,6 +305,11 @@ under the table. A memory that already expired is not revived.
   measure, run before and after.
 - A first-class memory needs a repeat or a confirmation before the
   session-start summary shows it, and dreaming never sees email memories.
+- Requiring a passed sender check has a cost. A sender whose domain publishes
+  no DMARC policy never passes, so that sender's mail forms attributed guesses
+  however well the owner knows them. Mail cached before the check existed
+  reads no verdict and forms guesses until Gmail returns it again. Both are
+  still kept by the thread's importance.
 - A first-class statement no longer carries identifiers, so two emails that say
   the same thing read alike apart from sender and date. The renewal rule folds
   the exact repeats.
@@ -313,6 +324,10 @@ under the table. A memory that already expired is not revived.
 - **First-class standing for any thread rated important, whoever sent it.**
   Rejected. The rating is a model's reading of the sender's own text, so a
   stranger could write their way to it.
+- **Accept a familiar address whose sender check gave no verdict.** Rejected
+  in review of the change. An unauthenticated From line is what a spoofed
+  claim would arrive under, and two such messages could have made the claim
+  active. ADR-0336 rejects it for signatures for the same reason.
 - **Lower the sensitivity so the review flag and dreaming follow by rule.**
   Rejected. It would widen which surfaces and providers see correspondence.
 - **A new policy label, `email-semantic@3`.** Rejected: see decision 9.

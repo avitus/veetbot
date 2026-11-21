@@ -1023,11 +1023,11 @@ horizon and the tentative construction.
   The owner replied when the thread holds a message the owner sent. These
   memories carry the lifecycle label `email-retention@1` and are outside the
   decay sweep; the expiry alone ends them.
-- **A known sender** is the owner on a message the owner sent, or an address
+- **A known sender** is the owner on a message the owner sent, or, on a received message whose sender check passed, an address
   that resolves to exactly one active or provisional person in People through
-  an owner-confirmed, channel-observed or owner-stated identifier. A failed
-  sender check, an unresolved or ambiguous address, and the owner's own address
-  on received mail are unknown.
+  an owner-confirmed, channel-observed or owner-stated identifier. A sender check that failed or gave no verdict,
+  an unresolved or ambiguous address, and the owner's own address
+  on received mail are unknown. A check with no verdict earns no standing and takes none from a memory that is already first-class; a failed check demotes.
 - **First-class standing** needs a known sender and a thread kept for a year or
   more. The statement reads `<sender> said by email on <date> that <subject>
   <predicate>: "<value>".` Confidence is the extraction's, up to the 0.65

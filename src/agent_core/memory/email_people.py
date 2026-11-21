@@ -112,6 +112,10 @@ _RERATE_PAGE = 200
 # record's `facts` map keeps one `<role>:<memory id>` entry beside each fact's
 # identity, so a message is told apart by itself and not by its timestamp.
 _FORMED, _RENEWED, _SEEN = "formed", "renewed", "seen"
+# What stored state says of a message's sender. Unverified is an address the
+# owner knows on a received message Gmail gave no verdict for: it earns no
+# standing, and takes none away from a memory that already has it.
+_KNOWN, _UNVERIFIED, _UNKNOWN = "known", "unverified", "unknown"
 
 
 def _source_role(facts: object, memory_id: UUID | str) -> str | None:
@@ -164,7 +168,7 @@ class _Rerating:
         self.owned: frozenset[str] | None = None
         self.threads: dict[str, EmailThread | None] = {}
         self.ratings: dict[str, tuple[float | None, bool, bool]] = {}
-        self.known: dict[tuple[str, str, str], bool] = {}
+        self.known: dict[tuple[str, str, str], str] = {}
 
     def report(self, *, applied: bool) -> EmailRerateReport:
         by_retention: dict[str, int] = {}
@@ -802,7 +806,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         importance, marked, rating_known = seen.ratings[source_key]
         message = next((item for item in thread.messages if item.id == message_id), None)
         sender_seen = message is not None and (sender is None or message.sender == sender)
-        known = False
+        known = _UNKNOWN
         if message is not None and sender_seen:
             known_key = (account_id, provider_thread_id, message_id)
             if known_key not in seen.known:
@@ -812,7 +816,8 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             importance=importance or 0.0,
             owner_marked_important=marked,
             owner_replied=any(item.direction == "sent" for item in thread.messages),
-            known_sender=known,
+            known_sender=known == _KNOWN,
+            sender_unverified=known == _UNVERIFIED,
             # A floor lengthens on what it shows and is no rating to shorten by.
             rated=importance is not None and rating_known,
             complete=thread.complete,
@@ -821,14 +826,21 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
 
     async def _known_sender(
         self, uow: RepositoryUnitOfWork, message: EmailMessage, seen: _Rerating
-    ) -> bool:
-        """The owner on their own sent mail, or one person the owner knows or writes to."""
+    ) -> str:
+        """Whether the sender is the owner on their own sent mail, or one person the
+        owner knows or writes to, on a received message whose sender check passed.
+
+        Anyone can write a familiar address in a From line. Gmail's passed
+        check (ADR-0165) is what ties a received message to the address, as it
+        is for a signature (ADR-0336). Without a verdict the sender is
+        unverified: not known, and not shown to be anyone else either.
+        """
         if message.sender_check == "fail":
-            # ADR-0165: an address that failed its check proves nothing about who wrote.
-            return False
+            # An address that failed its check proves nothing about who wrote.
+            return _UNKNOWN
         senders = _addresses(message.sender)
         if len(senders) != 1:
-            return False
+            return _UNKNOWN
         address = senders[0][1]
         if seen.owned is None:
             accounts = await uow.email.list(self._principal, "account", limit=101)
@@ -839,9 +851,10 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 for _, owned in _addresses([account.email_address, *account.verified_addresses])
             )
         if address.casefold() in seen.owned:
-            return message.direction == "sent"
+            # The owner's own sent mail carries no verdict and needs none.
+            return _KNOWN if message.direction == "sent" else _UNKNOWN
         if message.direction == "sent":
-            return False
+            return _UNKNOWN
         match = await resolve_identity(
             uow.people,
             self._principal,
@@ -853,11 +866,13 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             ceiling=Sensitivity.SENSITIVE,
         )
         if match.status != "matched":
-            return False
+            return _UNKNOWN
         person = await uow.people.get(
             self._principal, match.person_ids[0], ceiling=Sensitivity.RESTRICTED
         )
-        return isinstance(person, Person) and person.state in {"active", "provisional"}
+        if not (isinstance(person, Person) and person.state in {"active", "provisional"}):
+            return _UNKNOWN
+        return _KNOWN if message.sender_check == "pass" else _UNVERIFIED
 
     async def _stored_thread(
         self, uow: RepositoryUnitOfWork, account_id: str, provider_thread_id: str, seen: _Rerating
@@ -1084,14 +1099,15 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             update: dict[str, object] = {}
             first_class = memory.derivation is MemoryDerivation.DIRECT
             # A promotion needs only what is visible. A demotion needs evidence:
-            # the sender is seen and no longer known, or a current, complete
-            # reading rates the thread lower. A reset rating or a message that
-            # left the stored window demotes nothing.
+            # the sender is seen and is not someone the owner knows, or a
+            # current, complete reading keeps the thread under a year. A reset
+            # rating, a message that left the stored window, or a sender check
+            # that merely reads `none` demotes nothing.
             restandable = (
                 origin
                 and standing.sender_seen
                 and standing.first_class != first_class
-                and (standing.first_class or not standing.known_sender or standing.may_lower)
+                and (standing.first_class or standing.may_demote)
             )
             if restandable:
                 statement = restated(

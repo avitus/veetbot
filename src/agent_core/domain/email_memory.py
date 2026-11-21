@@ -41,7 +41,9 @@ class EmailMemoryStanding:
     or the zero an abstaining assessment saved. A floor lengthens and never
     shortens. `complete` is false when the stored thread holds only part of its
     messages, so an owner reply may sit in the part not held. `sender_seen` is
-    false when this message is not among those held.
+    false when this message is not among those held. `sender_unverified` is
+    true when the address is one the owner knows but Gmail gave no verdict for
+    the message: the sender is not known, and nothing shows it is anyone else.
     """
 
     importance: float
@@ -51,6 +53,7 @@ class EmailMemoryStanding:
     rated: bool = True
     complete: bool = True
     sender_seen: bool = True
+    sender_unverified: bool = False
 
     @property
     def retention_days(self) -> int | None:
@@ -68,10 +71,14 @@ class EmailMemoryStanding:
         return retention_label(self.retention_days)
 
     @property
+    def kept_a_year(self) -> bool:
+        days = self.retention_days
+        return days is None or days >= _ONE_YEAR_DAYS
+
+    @property
     def first_class(self) -> bool:
         """A known sender, in a thread kept for a year or more; both are required."""
-        days = self.retention_days
-        return self.known_sender and (days is None or days >= _ONE_YEAR_DAYS)
+        return self.known_sender and self.kept_a_year
 
     @property
     def may_lower(self) -> bool:
@@ -82,6 +89,18 @@ class EmailMemoryStanding:
         not a gap.
         """
         return self.rated and self.complete
+
+    @property
+    def may_demote(self) -> bool:
+        """Whether this reading takes first-class standing away from a memory.
+
+        Either the sender is seen and is not someone the owner knows, or a
+        known, complete reading keeps the thread under a year. A sender Gmail
+        gave no verdict for takes nothing away: a stored message may have been
+        cached before the check existed, and that says nothing about who wrote.
+        """
+        unknown = self.sender_seen and not self.known_sender and not self.sender_unverified
+        return unknown or (self.may_lower and not self.kept_a_year)
 
     def expires_at(self, evidence_at: datetime) -> datetime | None:
         days = self.retention_days
