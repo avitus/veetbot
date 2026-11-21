@@ -58,9 +58,11 @@ being placed.
    notes), computed from the probe that ran. Recording refuses a result whose
    fingerprint is not the question's current one and counts it as stale, and an
    edit that changes what a question measures clears its recorded result; a
-   note or a status change leaves it. The owner may edit a question between
-   the clone and the recording, and the page must never show a pass beside
-   content that has not run.
+   note or a status change leaves it, including a result recorded while that
+   edit was open: recording moves no revision, so a save names the result only
+   to clear it. The owner may edit a question between the clone and the
+   recording, and the page must never show a pass beside content that has not
+   run.
 9. **A question is owner-written test content.** It may quote a memory's text.
    Forgetting or erasing that memory does not rewrite the question; the owner
    edits or retires it, and a pinned memory that no longer exists reports as

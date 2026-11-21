@@ -1,10 +1,12 @@
 """Shared recall-question store behavior, reused by the PostgreSQL adapter."""
 
+import asyncio
 from datetime import timedelta
 from uuid import uuid4
 
 import pytest
 
+from agent_core.adapters.memory.transactions import MemoryTransaction
 from agent_core.adapters.persistence.recall_questions import InMemoryRecallQuestionStore
 from agent_core.domain.agents import Principal
 from agent_core.domain.recall_questions import (
@@ -226,11 +228,43 @@ async def questions_save_carries_the_result_contract(store: RecallQuestionStore)
     assert after_status is not None and after_status.latest_result == make_result()
 
     cleared = after_status.model_copy(
-        update={"content": make_content(fact="New Town"), "revision": 3, "latest_result": None}
+        update={"content": make_content(fact="New Town"), "revision": 3}
     )
-    assert await store.save(cleared, expected_revision=2) is True
+    assert await store.save(cleared, expected_revision=2, clear_result=True) is True
     after_edit = await store.get(owner, question.id)
     assert after_edit is not None and after_edit.latest_result is None
+
+
+async def questions_save_keeps_a_result_recorded_meanwhile_contract(
+    store: RecallQuestionStore,
+) -> None:
+    """A run recorded between an editor's read and its save is not written over.
+
+    Recording moves no revision, so the save's revision check cannot see it.
+    A save that does not change what the question measures leaves the stored
+    result alone, whatever the copy it was handed holds.
+    """
+
+    owner = principal()
+    question = make_question(owner)
+    await store.create(question)
+    read_before = await store.get(owner, question.id)
+    assert read_before is not None and read_before.latest_result is None
+
+    assert await store.record_result(owner, "home-city", make_result(), expected_revision=1)
+    noted = read_before.model_copy(update={"status": QuestionStatus.RETIRED, "revision": 2})
+    assert await store.save(noted, expected_revision=1) is True
+    stored = await store.get(owner, question.id)
+    assert stored is not None and stored.latest_result == make_result()
+
+    # The same with an older result in the editor's copy.
+    read_again = stored
+    newer = make_result(delivered=0)
+    assert await store.record_result(owner, "home-city", newer, expected_revision=2)
+    restored = read_again.model_copy(update={"status": QuestionStatus.ACTIVE, "revision": 3})
+    assert await store.save(restored, expected_revision=2) is True
+    final = await store.get(owner, question.id)
+    assert final is not None and final.latest_result == newer
 
 
 async def questions_same_id_two_owners_contract(store: RecallQuestionStore) -> None:
@@ -276,6 +310,7 @@ CONTRACTS = [
     questions_list_filters_contract,
     questions_record_result_contract,
     questions_save_carries_the_result_contract,
+    questions_save_keeps_a_result_recorded_meanwhile_contract,
     questions_same_id_two_owners_contract,
     questions_erase_principal_contract,
 ]
@@ -284,3 +319,70 @@ CONTRACTS = [
 @pytest.mark.parametrize("contract", CONTRACTS, ids=lambda fn: fn.__name__)
 async def test_memory_recall_question_store_contract(contract) -> None:  # type: ignore[no-untyped-def]
     await contract(InMemoryRecallQuestionStore())
+
+
+async def test_a_failed_transaction_never_undoes_another_transactions_question() -> None:
+    """In memory, the owner's lock is held until the unit of work ends.
+
+    A journaled write that another transaction could read and build on would
+    take that transaction's committed work with it when it is undone.
+    """
+
+    transaction = MemoryTransaction()
+    store = InMemoryRecallQuestionStore(transaction)
+    owner = principal()
+    question = make_question(owner)
+    created = asyncio.Event()
+    release = asyncio.Event()
+
+    async def failing() -> None:
+        async with transaction.transaction():
+            await store.create(question)
+            created.set()
+            await release.wait()
+            raise RuntimeError("the unit of work failed")
+
+    async def other() -> RecallQuestion | None:
+        await created.wait()
+        async with transaction.transaction():
+            seen = await store.get(owner, question.id)
+            if seen is not None:
+                retired = seen.model_copy(update={"status": QuestionStatus.RETIRED, "revision": 2})
+                await store.save(retired, expected_revision=1)
+            return seen
+
+    first = asyncio.create_task(failing())
+    second = asyncio.create_task(other())
+    await created.wait()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert not second.done(), "a read must wait for the transaction that holds the owner"
+    release.set()
+    with pytest.raises(RuntimeError, match="unit of work failed"):
+        await first
+    assert await second is None
+    assert await store.get(owner, question.id) is None
+    assert await store.history(owner, question.id) == []
+
+
+async def test_a_failed_transaction_restores_an_erased_owners_questions() -> None:
+    transaction = MemoryTransaction()
+    store = InMemoryRecallQuestionStore(transaction)
+    owner = principal()
+    question = make_question(owner)
+    await store.create(question)
+    edited = question.model_copy(update={"content": make_content(fact="New Town"), "revision": 2})
+    assert await store.save(edited, expected_revision=1) is True
+    before = (await store.list_questions(owner), await store.history(owner, question.id))
+
+    with pytest.raises(RuntimeError, match="unit of work failed"):
+        async with transaction.transaction():
+            assert await store.erase_principal(owner) == 1
+            assert await store.list_questions(owner) == []
+            raise RuntimeError("the unit of work failed")
+    assert (await store.list_questions(owner), await store.history(owner, question.id)) == before
+
+    async with transaction.transaction():
+        assert await store.erase_principal(owner) == 1
+    assert await store.list_questions(owner) == []
+    assert await store.history(owner, question.id) == []

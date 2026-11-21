@@ -44,8 +44,11 @@ title: Changelog
 - `agent memory questions export` writes a new private file that takes the
   destination's place. An existing file with wider permissions used to keep
   them.
-- In the in-memory store a failed import now leaves every question as it was,
-  and two owners' questions with one identifier keep separate histories.
+- A run recorded while a note or status edit was open is no longer written
+  over by that edit.
+- In the in-memory store a failed import or a failed erasure now leaves every
+  question as it was, an owner's questions are locked until the unit of work
+  ends, and two owners' questions with one identifier keep separate histories.
 - On the page, a change refused because the question moved on stays explained
   after the list reloads.
 - A recall trace's candidate ranking lists a merged memory directly after the

@@ -40,11 +40,17 @@ class RecallQuestionStore(Protocol):
 
     async def count(self, principal: Principal) -> int: ...
 
-    async def save(self, question: RecallQuestion, *, expected_revision: int) -> bool:
-        """Replace content, status and latest result when the revision is the expected one.
+    async def save(
+        self, question: RecallQuestion, *, expected_revision: int, clear_result: bool = False
+    ) -> bool:
+        """Replace content and status when the stored revision is the expected one.
 
         Returns False, changing nothing, when the question is missing or was
-        changed since. The key and the split are never rewritten.
+        changed since. The key and the split are never rewritten. The stored
+        latest result is left as it is unless `clear_result` is set: a run may
+        be recorded between a caller's read and this save without moving the
+        revision, and a save that does not change what the question measures
+        must not write over it.
         """
         ...
 

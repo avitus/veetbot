@@ -2,6 +2,8 @@
 
 import asyncio
 from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
+from functools import partial
 from typing import Any
 from uuid import UUID
 
@@ -40,8 +42,10 @@ class InMemoryRecallQuestionStore:
     """Contract-backed recall question storage.
 
     A question is identified by its owner and its identifier together, as in
-    PostgreSQL. Given the memory transaction, every write is journaled, so a
-    unit of work that fails leaves the questions as they were.
+    PostgreSQL. Given the memory transaction, every write is journaled and the
+    owner's lock is held until the unit of work ends, as the memory store does:
+    a failed unit of work leaves the questions as they were, and no other unit
+    of work can read or build on a write that may still be undone.
     """
 
     def __init__(self, transaction: MemoryTransaction | None = None) -> None:
@@ -50,8 +54,10 @@ class InMemoryRecallQuestionStore:
         self._transaction = transaction
         self._lock = asyncio.Lock()
 
-    def _owned(self, principal: Principal) -> dict[UUID, RecallQuestion]:
-        return self._questions.get((principal.tenant_id, principal.principal_id), {})
+    def _guard(self, scope: tuple[str, str]) -> AbstractAsyncContextManager[None]:
+        if self._transaction is not None:
+            return self._transaction.owner(scope)
+        return self._lock
 
     def _undo(self, undo: Callable[[], object]) -> None:
         if self._transaction is not None:
@@ -66,8 +72,8 @@ class InMemoryRecallQuestionStore:
         owned[question.id] = question
 
     async def create(self, question: RecallQuestion) -> None:
-        async with self._lock:
-            scope = (question.tenant_id, question.principal_id)
+        scope = (question.tenant_id, question.principal_id)
+        async with self._guard(scope):
             owned = self._questions.setdefault(scope, {})
             if question.id in owned or any(item.key == question.key for item in owned.values()):
                 raise QuestionKeyExists(question.key)
@@ -77,10 +83,15 @@ class InMemoryRecallQuestionStore:
             self._history[history_key] = [_revision(question)]
 
     async def get(self, principal: Principal, question_id: UUID) -> RecallQuestion | None:
-        return self._owned(principal).get(question_id)
+        scope = (principal.tenant_id, principal.principal_id)
+        async with self._guard(scope):
+            return self._questions.get(scope, {}).get(question_id)
 
     async def get_by_key(self, principal: Principal, key: str) -> RecallQuestion | None:
-        return next((item for item in self._owned(principal).values() if item.key == key), None)
+        scope = (principal.tenant_id, principal.principal_id)
+        async with self._guard(scope):
+            owned = self._questions.get(scope, {})
+            return next((item for item in owned.values() if item.key == key), None)
 
     async def list_questions(
         self,
@@ -89,22 +100,28 @@ class InMemoryRecallQuestionStore:
         split: QuestionSplit | None = None,
         status: QuestionStatus | None = None,
     ) -> list[RecallQuestion]:
-        return sorted(
-            (
-                item
-                for item in self._owned(principal).values()
-                if (split is None or item.split is split)
-                and (status is None or item.status is status)
-            ),
-            key=lambda item: item.key,
-        )
+        scope = (principal.tenant_id, principal.principal_id)
+        async with self._guard(scope):
+            return sorted(
+                (
+                    item
+                    for item in self._questions.get(scope, {}).values()
+                    if (split is None or item.split is split)
+                    and (status is None or item.status is status)
+                ),
+                key=lambda item: item.key,
+            )
 
     async def count(self, principal: Principal) -> int:
-        return len(self._owned(principal))
+        scope = (principal.tenant_id, principal.principal_id)
+        async with self._guard(scope):
+            return len(self._questions.get(scope, {}))
 
-    async def save(self, question: RecallQuestion, *, expected_revision: int) -> bool:
-        async with self._lock:
-            scope = (question.tenant_id, question.principal_id)
+    async def save(
+        self, question: RecallQuestion, *, expected_revision: int, clear_result: bool = False
+    ) -> bool:
+        scope = (question.tenant_id, question.principal_id)
+        async with self._guard(scope):
             owned = self._questions.get(scope, {})
             stored = owned.get(question.id)
             if stored is None or stored.revision != expected_revision:
@@ -114,7 +131,7 @@ class InMemoryRecallQuestionStore:
                     "status": question.status,
                     "content": question.content,
                     "revision": question.revision,
-                    "latest_result": question.latest_result,
+                    "latest_result": None if clear_result else stored.latest_result,
                     "updated_at": question.updated_at,
                 }
             )
@@ -128,15 +145,18 @@ class InMemoryRecallQuestionStore:
     async def history(
         self, principal: Principal, question_id: UUID
     ) -> list[RecallQuestionRevision]:
-        if question_id not in self._owned(principal):
-            return []
-        return list(self._history[(principal.tenant_id, principal.principal_id, question_id)])
+        scope = (principal.tenant_id, principal.principal_id)
+        async with self._guard(scope):
+            if question_id not in self._questions.get(scope, {}):
+                return []
+            return list(self._history[(*scope, question_id)])
 
     async def record_result(
         self, principal: Principal, key: str, result: QuestionResult, *, expected_revision: int
     ) -> bool:
-        async with self._lock:
-            owned = self._questions.get((principal.tenant_id, principal.principal_id), {})
+        scope = (principal.tenant_id, principal.principal_id)
+        async with self._guard(scope):
+            owned = self._questions.get(scope, {})
             stored = next((item for item in owned.values() if item.key == key), None)
             if stored is None or stored.revision != expected_revision:
                 return False
@@ -144,11 +164,17 @@ class InMemoryRecallQuestionStore:
             return True
 
     async def erase_principal(self, principal: Principal) -> int:
-        async with self._lock:
-            scope = (principal.tenant_id, principal.principal_id)
-            owned = self._questions.pop(scope, {})
+        scope = (principal.tenant_id, principal.principal_id)
+        async with self._guard(scope):
+            owned = self._questions.pop(scope, None)
+            if owned is None:
+                return 0
+            self._undo(lambda: self._questions.__setitem__(scope, owned))
             for question_id in owned:
-                self._history.pop((*scope, question_id), None)
+                history_key = (*scope, question_id)
+                history = self._history.pop(history_key, None)
+                if history is not None:
+                    self._undo(partial(self._history.__setitem__, history_key, history))
             return len(owned)
 
 
@@ -273,8 +299,20 @@ class PostgresRecallQuestionStore:
             ).scalar_one()
         )
 
-    async def save(self, question: RecallQuestion, *, expected_revision: int) -> bool:
+    async def save(
+        self, question: RecallQuestion, *, expected_revision: int, clear_result: bool = False
+    ) -> bool:
         owner = Principal(tenant_id=question.tenant_id, principal_id=question.principal_id)
+        values: dict[str, Any] = {
+            "status": question.status.value,
+            "content": question.content.model_dump(mode="json"),
+            "revision": question.revision,
+            "updated_at": question.updated_at,
+        }
+        if clear_result:
+            # Otherwise the column is not named, so a run recorded since the
+            # caller's read is kept.
+            values["latest_result"] = None
         result = await self._session.execute(
             update(RecallQuestionRow)
             .where(
@@ -282,17 +320,7 @@ class PostgresRecallQuestionStore:
                 RecallQuestionRow.id == question.id,
                 RecallQuestionRow.revision == expected_revision,
             )
-            .values(
-                status=question.status.value,
-                content=question.content.model_dump(mode="json"),
-                revision=question.revision,
-                latest_result=(
-                    None
-                    if question.latest_result is None
-                    else question.latest_result.model_dump(mode="json")
-                ),
-                updated_at=question.updated_at,
-            )
+            .values(**values)
         )
         if not int(getattr(result, "rowcount", 0) or 0):
             return False

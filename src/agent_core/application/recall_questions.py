@@ -244,22 +244,22 @@ class PublicRecallQuestionService:
                 f"but it is at {stored.revision}"
             )
         changed = stored.content if content is None else content
+        # A result says how the question did as it was then measured. Once what
+        # it measures changes, that result is about another question; a note or
+        # a status change leaves it standing, including one recorded since this
+        # read, which the store keeps because it is not told to clear it.
+        remeasured = changed.criteria_sha256 != stored.content.criteria_sha256
         saved = stored.model_copy(
             update={
                 "content": changed,
                 "status": stored.status if status is None else status,
                 "revision": stored.revision + 1,
-                # A result says how the question did as it was then measured.
-                # Once what it measures changes, that result is about another
-                # question; a note or a status change leaves it standing.
-                "latest_result": (
-                    stored.latest_result
-                    if changed.criteria_sha256 == stored.content.criteria_sha256
-                    else None
-                ),
+                "latest_result": None if remeasured else stored.latest_result,
                 "updated_at": self._clock.now(),
             }
         )
-        if not await uow.recall_questions.save(saved, expected_revision=expected_revision):
+        if not await uow.recall_questions.save(
+            saved, expected_revision=expected_revision, clear_result=remeasured
+        ):
             raise ConflictError("recall question changed while it was being saved")
         return saved
