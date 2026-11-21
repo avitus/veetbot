@@ -1430,9 +1430,9 @@ import SwiftUI
     }
 
     /// The counts and a hidden conversation's status are two reads. When its need for a reply
-    /// ends between them, the counts still hold it where its status no longer puts it. The
-    /// counts are then read once more, so both describe the conversation after the change.
-    @Test func testCountsAreReadAgainWhenAHiddenConversationChangedBetweenTheTwoReads() async throws {
+    /// ends between them, the counts still hold it where its status no longer puts it. They are
+    /// not read again for that: Needs you is one too high until the next refresh puts it right.
+    @Test func testCountsAreRightAgainAtTheNextRefreshWhenAHiddenConversationChangedBetweenTwoReads() async throws {
         let requests = EmailRequestRecorder()
         let statusRead = EmailArchiveResponseGate()
         let armed = EmailTestFlag()
@@ -1468,96 +1468,13 @@ import SwiftUI
         armed.set()
         await model.reload(preserveOrder: true)
         #expect(model.collectionCounts == EmailCollectionCounts(
-            inbox: 22, needsYou: 8, handled: 0, priority: 6, suspectedSpam: 2),
-            "Needs you no longer holds the conversation, so nothing is taken from its 8")
-        #expect(listReads() == before + 2, "The counts are read once more, and only once")
+            inbox: 22, needsYou: 9, handled: 0, priority: 6, suspectedSpam: 2),
+            "The counts were read before the reply need ended and its status after, so Needs you is one high")
+        #expect(listReads() == before + 1, "The counts are not read again for it")
         await model.reload(preserveOrder: true)
-        #expect(listReads() == before + 3, "What that read found is what the next one is checked against")
-        statusRead.release()
-        await archiving.value
-    }
-
-    /// Loading another page is a read of the counts too, and is read again in the same case.
-    @Test func testAnotherPageIsReadAgainWhenAHiddenConversationChangedBetweenTheTwoReads() async throws {
-        let requests = EmailRequestRecorder()
-        let statusRead = EmailArchiveResponseGate()
-        let armed = EmailTestFlag()
-        let answered = EmailTestFlag()
-        let other = archiveThreadJSON(inInbox: true)
-            .replacingOccurrences(of: "\(threadID)", with: "00000000-0000-0000-0000-000000000899")
-        let model = try makeArchiveRaceModel { request in
-            requests.append(request)
-            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
-            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), nil) }
-            let requested = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
-            let needsYou = answered.isSet ? 8 : 9
-            let row = self.archiveThreadJSON(inInbox: true, status: requested ? "pending" : nil)
-                .replacingOccurrences(of: "\"needs_reply\":true", with: "\"needs_reply\":\(!answered.isSet)")
-            guard request.url!.path.hasSuffix("threads") else {
-                return (200, row, Self.statusReads(requests) == 1 ? statusRead : nil)
-            }
-            if armed.isSet { answered.set() }
-            // Page one holds the conversation; page two is one other row.
-            let second = request.url?.query?.contains("cursor=100") == true
-            return (200, "{\"items\":[\(second ? other : row)],\"next_cursor\":\(second ? "null" : "\"100\""),"
-                + "\"collection_counts\":{\"priority\":7,\"inbox\":101,\"needs_you\":\(needsYou),"
-                + "\"handled\":0,\"suspected_spam\":2},\"total_count\":101}", nil)
-        }
-        defer { statusRead.release(); model.resetConnection() }
-        model.setCollection(.inbox)
-        try await waitForEmailTestCondition { model.items.count == 1 && !model.isReadingList }
-        let row = try #require(model.items.first)
-        let archiving = Task { await model.setThreadArchived(row, archived: true) }
-        try await waitForEmailTestCondition { statusRead.isWaiting }
-        let listReads = { requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count }
-        let before = listReads()
-        armed.set()
-        await model.loadMore()
         #expect(model.collectionCounts == EmailCollectionCounts(
-            inbox: 100, needsYou: 8, handled: 0, priority: 6, suspectedSpam: 2))
-        #expect(listReads() == before + 2, "The page is read once more, and only once")
-        let pages = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.suffix(2)
-        #expect(pages.allSatisfy { $0.url?.query?.contains("cursor=100") == true },
-                "The repeat asks for page two again, not for the start of the list")
-        #expect(model.items.map(\.id) == [UUID(uuidString: "00000000-0000-0000-0000-000000000899")!],
-                "Page two's row is shown")
-        statusRead.release()
-        await archiving.value
-    }
-
-    /// A conversation that changes at every read cannot hold the counts back for ever: they are
-    /// read again twice, then shown with the status last read.
-    @Test func testCountsAreNotReadAgainWithoutEndForAConversationThatKeepsChanging() async throws {
-        let requests = EmailRequestRecorder()
-        let statusRead = EmailArchiveResponseGate()
-        let model = try makeArchiveRaceModel { request in
-            requests.append(request)
-            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
-            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), nil) }
-            let requested = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
-            guard request.url!.path.hasSuffix("threads") else {
-                // Every status read finds the reply need the other way round.
-                let reads = Self.statusReads(requests)
-                let row = self.archiveThreadJSON(inInbox: true, status: "pending")
-                    .replacingOccurrences(of: "\"needs_reply\":true", with: "\"needs_reply\":\(reads % 2 == 1)")
-                return (200, row, reads == 1 ? statusRead : nil)
-            }
-            let row = self.archiveThreadJSON(inInbox: true, status: requested ? "pending" : nil)
-            let listed = request.url?.query?.contains("view=handled") != true
-            return (200, "{\"items\":[\(listed ? row : "")],\"next_cursor\":null,"
-                + "\"collection_counts\":\(Self.archiveCountsJSON(counted: true)),"
-                + "\"total_count\":\(listed ? 7 : 0)}", nil)
-        }
-        defer { statusRead.release(); model.resetConnection() }
-        await model.reload()
-        let row = try #require(model.items.first)
-        let archiving = Task { await model.setThreadArchived(row, archived: true) }
-        try await waitForEmailTestCondition { statusRead.isWaiting }
-        model.setCollection(.handled)
-        try await waitForEmailTestCondition { model.collectionCounts != nil && !model.isReadingList }
-        let handledReads = requests.snapshot.filter { $0.url?.query?.contains("view=handled") == true }.count
-        #expect(handledReads == 1 + EmailViewModel.countRereads)
-        #expect(model.collectionCounts?.inbox == 22)
+            inbox: 22, needsYou: 8, handled: 0, priority: 6, suspectedSpam: 2),
+            "The next refresh puts it right")
         statusRead.release()
         await archiving.value
     }
@@ -1817,16 +1734,18 @@ import SwiftUI
         await archiving.value
     }
 
-    /// A list read can be the first to learn that Gmail confirmed an archive. The conversation
-    /// leaves the Inbox before its hide is lifted and stays off the counts, so nothing brings it
-    /// back when the list cannot be read again afterwards.
-    @Test func testArchiveConfirmedDuringAListReadStaysOutWhenTheNextReadFails() async throws {
+    /// A list read can be the first to learn that Gmail confirmed an archive. It shows its own
+    /// answer: the conversation leaves the Inbox before its hide is lifted, and the mail that
+    /// answer brought stays on screen when the list cannot be read afterwards.
+    @Test func testArchiveConfirmedDuringAListReadIsShownWithThatReadsAnswer() async throws {
         let requests = EmailRequestRecorder()
         let statusRead = EmailArchiveResponseGate()
         let confirmed = EmailTestFlag()
         let answeredOnce = EmailTestFlag()
-        let otherID = "00000000-0000-0000-0000-000000000899"
-        let other = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: otherID)
+        let otherID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let arrivalID = UUID(uuidString: "00000000-0000-0000-0000-000000000898")!
+        let other = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(otherID)")
+        let arrival = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(arrivalID)")
         let model = try makeArchiveRaceModel { request in
             requests.append(request)
             if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
@@ -1841,10 +1760,10 @@ import SwiftUI
                 return (200, "{\"items\":[\(row),\(other)],\"next_cursor\":\"100\",\"collection_counts\":"
                     + "\(Self.archiveCountsJSON(counted: true, inbox: 150)),\"total_count\":150}", nil)
             }
-            // The first list read after Gmail's confirmation answers; every later one fails.
+            // The first list read after Gmail's confirmation answers, with new mail. Every later one fails.
             if answeredOnce.isSet { return (503, Self.error("unavailable", "Try again."), nil) }
             answeredOnce.set()
-            return (200, "{\"items\":[\(other)],\"next_cursor\":\"100\",\"collection_counts\":"
+            return (200, "{\"items\":[\(arrival),\(other)],\"next_cursor\":\"100\",\"collection_counts\":"
                 + "\(Self.archiveCountsJSON(counted: false, inbox: 150)),\"total_count\":149}", nil)
         }
         defer { statusRead.release(); model.resetConnection() }
@@ -1855,13 +1774,55 @@ import SwiftUI
         try await waitForEmailTestCondition { statusRead.isWaiting }
         confirmed.set()
         await model.reload(preserveOrder: true)
-        #expect(model.items.map(\.id) == [UUID(uuidString: otherID)!],
-                "Gmail confirmed the archive, so the conversation stays out of the Inbox")
+        #expect(Set(model.items.map(\.id)) == [otherID, arrivalID],
+                "The read that learnt of the confirmation is shown, with the mail it brought")
         #expect(model.collectionCounts == Self.archiveCountsWithoutIt(inbox: 150))
+        #expect(model.listTotal == 149)
+        await model.reload(preserveOrder: true)
+        #expect(model.errorMessage != nil, "The list could not be read this time")
+        #expect(Set(model.items.map(\.id)) == [otherID, arrivalID], "A later failure takes nothing back")
+        statusRead.release()
+        await archiving.value
+        #expect(Set(model.items.map(\.id)) == [otherID, arrivalID])
+    }
+
+    /// The status check that learns of Gmail's confirmation reads the list afterwards. When that
+    /// read fails, the conversation is already out of the Inbox and stays off its counts.
+    @Test func testConfirmedArchiveStaysOutOfTheInboxWhenTheListCannotBeRead() async throws {
+        let requests = EmailRequestRecorder()
+        let statusRead = EmailArchiveResponseGate()
+        let confirmed = EmailTestFlag()
+        let otherID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let other = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(otherID)")
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), nil) }
+            let requested = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
+            let row = self.archiveThreadJSON(
+                inInbox: !confirmed.isSet, status: !requested ? nil : confirmed.isSet ? "completed" : "pending")
+            guard request.url!.path.hasSuffix("threads") else {
+                return (200, row, Self.statusReads(requests) == 1 ? statusRead : nil)
+            }
+            if confirmed.isSet { return (503, Self.error("unavailable", "Try again."), nil) }
+            return (200, "{\"items\":[\(row),\(other)],\"next_cursor\":\"100\",\"collection_counts\":"
+                + "\(Self.archiveCountsJSON(counted: true, inbox: 150)),\"total_count\":150}", nil)
+        }
+        defer { statusRead.release(); model.resetConnection() }
+        model.setCollection(.inbox)
+        try await waitForEmailTestCondition { model.items.count == 2 && !model.isReadingList }
+        let row = try #require(model.items.first { $0.id == threadID })
+        let archiving = Task { await model.setThreadArchived(row, archived: true) }
+        try await waitForEmailTestCondition { statusRead.isWaiting }
+        confirmed.set()
+        await model.checkArchiveStatus(threadID)
+        #expect(model.items.map(\.id) == [otherID], "Gmail confirmed the archive, so it stays out of the Inbox")
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt(inbox: 150),
+                "The counts on screen were read before the confirmation and stay lowered for it")
         #expect(model.listTotal == 149)
         statusRead.release()
         await archiving.value
-        #expect(model.items.map(\.id) == [UUID(uuidString: otherID)!])
+        #expect(model.items.map(\.id) == [otherID])
     }
 
     /// Other mail keeps archived conversations. One whose archive Gmail confirms comes back
@@ -2026,8 +1987,9 @@ import SwiftUI
     }
 
     /// Two conversations of a revoked account can be refused one after the other. Each refusal
-    /// asks the list again, and the later request replaces the earlier one. The later one
-    /// decides: the earlier refusal does not clear Email because its own request was replaced.
+    /// asks the list again, and the later request replaces the earlier one. The earlier answer
+    /// is never shown, and the earlier refusal does not clear Email because its request was
+    /// replaced: the later answer decides, and is the one shown.
     @Test func testLaterRefusalsListReadDecidesForAnEarlierOne() async throws {
         let requests = EmailRequestRecorder()
         let firstList = EmailArchiveResponseGate()
@@ -2036,7 +1998,11 @@ import SwiftUI
         let personalID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
         let secondWorkID = UUID(uuidString: "00000000-0000-0000-0000-000000000898")!
         let otherWorkID = UUID(uuidString: "00000000-0000-0000-0000-000000000897")!
-        let personal = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(personalID)")
+        let obsoleteID = UUID(uuidString: "00000000-0000-0000-0000-000000000896")!
+        let currentID = UUID(uuidString: "00000000-0000-0000-0000-000000000895")!
+        let personalRow = { (id: UUID) in
+            self.archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(self.threadID)", with: "\(id)")
+        }
         let otherWork = archiveThreadJSON(account: "work", inInbox: true)
             .replacingOccurrences(of: "\(threadID)", with: "\(otherWorkID)")
         let model = try makeArchiveRaceModel { request in
@@ -2049,11 +2015,14 @@ import SwiftUI
             guard revoked.isSet else {
                 let work = self.archiveThreadJSON(account: "work", inInbox: true, status: "pending")
                 let secondWork = work.replacingOccurrences(of: "\(self.threadID)", with: "\(secondWorkID)")
-                return (200, "{\"items\":[\(work),\(secondWork),\(otherWork),\(personal)],\"next_cursor\":null}", nil)
+                return (200, "{\"items\":[\(work),\(secondWork),\(otherWork),\(personalRow(personalID))],"
+                    + "\"next_cursor\":null}", nil)
             }
-            // Each refusal asks the list again. Both answers are held so that the test orders them.
-            let asked = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
-            return (200, "{\"items\":[\(personal)],\"next_cursor\":null}", asked == 2 ? firstList : secondList)
+            // Each refusal asks the list again. Both answers are held so that the test orders
+            // them, and each brings a row of its own so that they can be told apart.
+            let first = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count == 2
+            return (200, "{\"items\":[\(personalRow(first ? obsoleteID : currentID)),\(personalRow(personalID))],"
+                + "\"next_cursor\":null}", first ? firstList : secondList)
         }
         defer { firstList.release(); secondList.release(); model.resetConnection() }
         await model.reload()
@@ -2066,67 +2035,274 @@ import SwiftUI
         try await waitForEmailTestCondition { secondList.isWaiting }
         firstList.release()
         await first.value
-        #expect(model.items.map(\.id) == [personalID], "The later refusal's list read has not answered yet, and it decides")
+        #expect(model.items.map(\.id) == [personalID], "The replaced answer is not shown, and nothing is cleared for it")
         #expect(model.accounts.count == 2)
         secondList.release()
         await second.value
-        #expect(model.items.map(\.id) == [personalID])
+        #expect(Set(model.items.map(\.id)) == [personalID, currentID], "The later answer is the one shown")
+        #expect(!model.items.contains { $0.id == obsoleteID })
         #expect(model.accounts.count == 2)
     }
 
-    /// A conversation can be archived while a refresh is reading the statuses of the hidden
-    /// ones. Its row came with the counts then on screen, not with the answer about to replace
-    /// them, so that answer is read again and the new conversation checked like the others.
-    @Test func testConversationHiddenWhileStatusesAreReadIsCheckedToo() async throws {
+    /// A conversation can still be loading in the reader when its account is refused. Its
+    /// answer was asked for before the refusal and must not be shown after it. The reader is
+    /// cleared for a conversation of the refused account, and for one whose account nothing on
+    /// screen tells. A conversation known to be from another account stays.
+    @Test(arguments: ["work", "unlisted", "personal"])
+    func testRefusedAccountsConversationStillLoadingIsNotShown(opening: String) async throws {
+        let detail = EmailArchiveResponseGate()
+        let revoked = EmailTestFlag()
+        let personalID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let openWorkID = UUID(uuidString: "00000000-0000-0000-0000-000000000898")!
+        let unlistedID = UUID(uuidString: "00000000-0000-0000-0000-000000000897")!
+        let openID = opening == "work" ? openWorkID : opening == "unlisted" ? unlistedID : personalID
+        let personal = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(personalID)")
+        let openWork = archiveThreadJSON(account: "work", inInbox: true)
+            .replacingOccurrences(of: "\(threadID)", with: "\(openWorkID)")
+        let model = try makeArchiveRaceModel { request in
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            guard path.hasSuffix("threads") else {
+                // The hidden Work conversation's status is refused. The conversation being opened
+                // answers late, with what it held before the refusal.
+                guard path.contains("\(openID)") else {
+                    return (403, Self.error("permission_denied", "Work mail can no longer be read."), nil)
+                }
+                return (200, self.archiveThreadJSON(account: opening == "personal" ? "personal" : "work", inInbox: true)
+                    .replacingOccurrences(of: "\"draft_id\":\"\(self.draftID)\"", with: "\"draft_id\":null")
+                    .replacingOccurrences(of: "\(self.threadID)", with: "\(openID)"), detail)
+            }
+            let work = self.archiveThreadJSON(account: "work", inInbox: true, status: "pending")
+            return (200, "{\"items\":[\(revoked.isSet ? personal : "\(work),\(openWork),\(personal)")],\"next_cursor\":null}", nil)
+        }
+        defer { detail.release(); model.resetConnection() }
+        await model.reload()
+        let opened = Task { await model.openThread(openID) }
+        try await waitForEmailTestCondition { detail.isWaiting }
+        revoked.set()
+        await model.checkArchiveStatus(threadID)
+        #expect(model.items.map(\.id) == [personalID], "The list answered, so Personal mail stays")
+        detail.release()
+        await opened.value
+        let kept = opening == "personal"
+        #expect(model.thread?.id == (kept ? personalID : nil),
+                "What a refused account's conversation held is not shown after the refusal")
+        #expect(model.selectedThreadID == (kept ? personalID : nil))
+    }
+
+    /// The statuses a list read asks for belong to the connection it began on. When the
+    /// connection changes while one of them is out, the rest are not sent: they would name the
+    /// old connection's conversations to the new one.
+    @Test func testStatusReadsStopWhenTheConnectionChanges() async throws {
         let requests = EmailRequestRecorder()
-        let firstAdmission = EmailArchiveResponseGate()
-        let secondAdmission = EmailArchiveResponseGate()
-        let statusRead = EmailArchiveResponseGate()
-        let moved = EmailTestFlag()
+        let firstStatus = EmailArchiveResponseGate()
         let secondID = UUID(uuidString: "00000000-0000-0000-0000-000000000898")!
-        let second = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(secondID)")
-        let other = archiveThreadJSON(inInbox: true)
-            .replacingOccurrences(of: "\(threadID)", with: "00000000-0000-0000-0000-000000000899")
         let model = try makeArchiveRaceModel { request in
             requests.append(request)
             let path = request.url!.path
             if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
-            if path.hasSuffix("archive") {
-                return (202, self.operationJSON(status: "QUEUED"),
-                    path.contains("\(secondID)") ? secondAdmission : firstAdmission)
-            }
+            let first = self.archiveThreadJSON(inInbox: true, status: "pending")
+            let second = first.replacingOccurrences(of: "\(self.threadID)", with: "\(secondID)")
             guard path.hasSuffix("threads") else {
-                let reads = requests.snapshot.filter { $0.httpMethod == "GET" && $0.url!.path.contains("/threads/") }
-                return (200, path.contains("\(secondID)") ? second : self.archiveThreadJSON(inInbox: true),
-                    reads.count == 1 ? statusRead : nil)
+                let reads = requests.snapshot.filter { $0.url!.path.contains("/threads/") }.count
+                return (200, path.contains("\(secondID)") ? second : first, reads == 1 ? firstStatus : nil)
             }
-            // New mail pushes both conversations past the rows a refresh returns.
-            let items = moved.isSet ? other : "\(self.archiveThreadJSON(inInbox: true)),\(second)"
-            return (200, "{\"items\":[\(items)],\"next_cursor\":\(moved.isSet ? "\"100\"" : "null"),"
+            let listed = request.url?.query?.contains("view=handled") != true
+            return (200, "{\"items\":[\(listed ? "\(first),\(second)" : "")],\"next_cursor\":null}", nil)
+        }
+        defer { firstStatus.release(); model.resetConnection() }
+        await model.reload()
+        #expect(model.items.isEmpty, "Both archives are pending, so both rows are hidden")
+        // Handled lists neither, so its read asks for the status of both, one after the other.
+        model.setCollection(.handled)
+        try await waitForEmailTestCondition { firstStatus.isWaiting }
+        model.resetConnection()
+        firstStatus.release()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        #expect(requests.snapshot.filter { $0.url!.path.contains("/threads/") }.count == 1,
+                "The other conversation of the old connection is never asked for")
+    }
+
+    /// A failed archive can leave a count lowered for what the conversation has left since:
+    /// here its need for a reply. Archiving it again before the list is read hides it once
+    /// more, and each count is still lowered for it once only.
+    @Test func testRetriedArchiveIsTakenOffEachCountOnce() async throws {
+        let requests = EmailRequestRecorder()
+        let retry = EmailArchiveResponseGate()
+        let failed = EmailTestFlag()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") {
+                let first = requests.snapshot.filter { $0.url!.path.hasSuffix("archive") }.count == 1
+                return (202, self.operationJSON(status: "QUEUED"), first ? nil : retry)
+            }
+            let requested = requests.snapshot.contains { $0.url!.path.hasSuffix("archive") }
+            // The archive fails after feedback has ended the conversation's need for a reply.
+            let row = self.archiveThreadJSON(
+                inInbox: true, status: !requested ? nil : failed.isSet ? "failed" : "pending")
+                .replacingOccurrences(of: "\"needs_reply\":true", with: "\"needs_reply\":\(!failed.isSet)")
+            guard request.url!.path.hasSuffix("threads") else { return (200, row, nil) }
+            return (200, "{\"items\":[\(row)],\"next_cursor\":null,"
                 + "\"collection_counts\":\(Self.archiveCountsJSON(counted: true)),\"total_count\":7}", nil)
         }
-        defer {
-            firstAdmission.release(); secondAdmission.release(); statusRead.release(); model.resetConnection()
-        }
+        defer { retry.release(); model.resetConnection() }
         await model.reload()
-        let firstRow = try #require(model.items.first { $0.id == threadID })
-        let secondRow = try #require(model.items.first { $0.id == secondID })
-        let first = Task { await model.setThreadArchived(firstRow, archived: true) }
-        try await waitForEmailTestCondition { firstAdmission.isWaiting }
-        moved.set()
-        let refreshing = Task { await model.reload(preserveOrder: true) }
-        try await waitForEmailTestCondition { statusRead.isWaiting }
-        let later = Task { await model.setThreadArchived(secondRow, archived: true) }
-        try await waitForEmailTestCondition { secondAdmission.isWaiting }
-        statusRead.release()
-        await refreshing.value
+        let row = try #require(model.items.first)
+        await model.setThreadArchived(row, archived: true)
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt())
+        failed.set()
+        await model.checkArchiveStatus(threadID)
         #expect(model.collectionCounts == EmailCollectionCounts(
-            inbox: 21, needsYou: 7, handled: 0, priority: 5, suspectedSpam: 2),
-            "Both hidden conversations are still in the counts the refresh brought")
-        firstAdmission.release()
-        secondAdmission.release()
-        await first.value
-        await later.value
+            inbox: 23, needsYou: 8, handled: 0, priority: 7, suspectedSpam: 2),
+            "It is back in the Inbox and has left Needs you")
+        let shown = try #require(model.items.first)
+        let retrying = Task { await model.setThreadArchived(shown, archived: true) }
+        try await waitForEmailTestCondition { retry.isWaiting }
+        #expect(model.collectionCounts == Self.archiveCountsWithoutIt(), "Needs you is lowered for it once, not twice")
+        retry.release()
+        await retrying.value
+    }
+
+    /// The server counts mail by its Inbox flag alone, except in Suspected spam. A hidden
+    /// conversation that also has messages in Spam is still in the Inbox counts and comes off them.
+    @Test func testHiddenConversationAlsoInSpamComesOffTheInboxCounts() async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            let row = self.archiveThreadJSON(inInbox: true, status: "pending")
+                .replacingOccurrences(of: "\"in_inbox\":true", with: "\"in_inbox\":true,\"in_spam\":true")
+                .replacingOccurrences(of: "\"priority\":0.95", with: "\"priority\":0.4")
+            guard request.url!.path.hasSuffix("threads") else { return (200, row) }
+            return (200, "{\"items\":[\(row)],\"next_cursor\":null,"
+                + "\"collection_counts\":\(Self.archiveCountsJSON(counted: true)),\"total_count\":40}")
+        }
+        defer { model.resetConnection() }
+        model.setListView("other")
+        try await waitForEmailTestCondition { model.collectionCounts != nil && !model.isReadingList }
+        #expect(model.items.isEmpty, "Its archive is pending, so its row is hidden")
+        #expect(model.collectionCounts == EmailCollectionCounts(
+            inbox: 22, needsYou: 8, handled: 0, priority: 7, suspectedSpam: 2),
+            "It is in the Inbox awaiting a reply; that it is also in Spam changes neither count")
+        #expect(model.listTotal == 39)
+    }
+
+    /// A long list is read in pages, and Gmail can confirm an archive between them. The earlier
+    /// page still returns the conversation. It is not put back in the list.
+    @Test func testArchiveConfirmedBetweenPagesStaysOutOfTheList() async throws {
+        let admission = EmailArchiveResponseGate()
+        let armed = EmailTestFlag()
+        let confirmed = EmailTestFlag()
+        let fillers = (0..<100).map { index in
+            archiveThreadJSON(inInbox: true).replacingOccurrences(
+                of: "\(threadID)", with: String(format: "00000000-0000-0000-0000-%012d", 2000 + index))
+        }
+        let model = try makeArchiveRaceModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), admission) }
+            let wasConfirmed = confirmed.isSet
+            let row = self.archiveThreadJSON(inInbox: !wasConfirmed, status: wasConfirmed ? "completed" : nil)
+            guard request.url!.path.hasSuffix("threads") else { return (200, row, nil) }
+            let second = request.url?.query?.contains("cursor=100") == true
+            // Gmail confirms once page one of the armed read has answered.
+            if armed.isSet, !second { confirmed.set() }
+            let first = (wasConfirmed ? Array(fillers.prefix(99)) : [row] + fillers.prefix(99)).joined(separator: ",")
+            return (200, "{\"items\":[\(second ? fillers[99] : first)],\"next_cursor\":\(second ? "null" : "\"100\""),"
+                + "\"collection_counts\":\(Self.archiveCountsJSON(counted: !wasConfirmed, inbox: 101)),"
+                + "\"total_count\":\(wasConfirmed ? 100 : 101)}", nil)
+        }
+        defer { admission.release(); model.resetConnection() }
+        model.setCollection(.inbox)
+        try await waitForEmailTestCondition { model.items.count == 100 && !model.isReadingList }
+        await model.loadMore()
+        #expect(model.items.count == 101)
+        let row = try #require(model.items.first { $0.id == threadID })
+        armed.set()
+        // Archiving a row from an earlier page reads the list again: two pages for 101 rows.
+        let archiving = Task { await model.setThreadArchived(row, archived: true) }
+        try await waitForEmailTestCondition { admission.isWaiting && confirmed.isSet && !model.isReadingList }
+        #expect(!model.items.contains { $0.id == threadID }, "Gmail confirmed the archive; page one's copy is older")
+        admission.release()
+        await archiving.value
+        #expect(!model.items.contains { $0.id == threadID })
+    }
+
+    /// A refused save reads the draft again. If the connection changes while that read is out,
+    /// the old connection's error is not reported on the new one.
+    @Test func testRefusedSaveReportsNothingOnceTheConnectionHasChanged() async throws {
+        let requests = EmailRequestRecorder()
+        let draftRead = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.httpMethod == "PUT" { return (409, Self.error("invalid_state", "Draft changed on another device."), nil) }
+            if request.url!.path.contains("/drafts/") {
+                // Only the read that follows the refused save is held.
+                let refused = requests.snapshot.contains { $0.httpMethod == "PUT" }
+                return (200, self.draftJSON(revision: 2, body: "Other device edit"), refused ? draftRead : nil)
+            }
+            return (200, self.threadJSON(draft: self.draftJSON()), nil)
+        }
+        defer { draftRead.release(); model.resetConnection() }
+        await model.openThread(threadID)
+        model.changeEdit(\.body, to: "My unfinished edit")
+        let saving = Task { await model.saveDraft() }
+        try await waitForEmailTestCondition { draftRead.isWaiting }
+        model.resetConnection()
+        draftRead.release()
+        _ = await saving.value
+        #expect(model.draftError == nil)
+        #expect(model.errorMessage == nil)
+    }
+
+    /// A send approval that fails reads the approval again. If the connection changes while
+    /// that read is out, the old connection's error is not reported on the new one.
+    @Test func testFailedApprovalReportsNothingOnceTheConnectionHasChanged() async throws {
+        let requests = EmailRequestRecorder()
+        let approvalRead = EmailArchiveResponseGate()
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.url!.path.contains("/approvals/") {
+                if request.httpMethod == "POST" { return (500, Self.error("internal", "Try again."), nil) }
+                let resolving = requests.snapshot.contains { $0.httpMethod == "POST" }
+                return (200, self.approvalJSON(body: "Thanks, I will review the agenda."), resolving ? approvalRead : nil)
+            }
+            return (200, self.threadJSON(draft: self.draftJSON(status: "awaiting_approval")), nil)
+        }
+        defer { approvalRead.release(); model.resetConnection() }
+        await model.openThread(threadID)
+        await model.loadReview()
+        #expect(model.review?.id == approvalID)
+        let resolving = Task { await model.resolveSend(.approveOnce) }
+        try await waitForEmailTestCondition { approvalRead.isWaiting }
+        model.resetConnection()
+        approvalRead.release()
+        await resolving.value
+        #expect(model.draftError == nil)
+        #expect(model.errorMessage == nil)
+    }
+
+    /// A draft's attached file is read in two requests. If the connection changes after the
+    /// first, the second is not sent and nothing is handed back.
+    @Test func testDraftAttachmentIsNotReadAcrossAConnectionChange() async throws {
+        let requests = EmailRequestRecorder()
+        let metadata = EmailArchiveResponseGate()
+        let artifactID = UUID(uuidString: "00000000-0000-0000-0000-000000000890")!
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("content") { return (200, "notes", nil) }
+            return (200, "{\"id\":\"\(artifactID)\",\"session_id\":\"00000000-0000-0000-0000-00000000a001\","
+                + "\"run_id\":null,\"name\":\"notes.md\",\"media_type\":\"text/markdown\",\"sha256\":\"abc\","
+                + "\"size_bytes\":5,\"metadata\":{\"attachment\":{\"kind\":\"text\"}},"
+                + "\"created_at\":\"2026-09-23T00:00:00Z\"}", metadata)
+        }
+        defer { metadata.release(); model.resetConnection() }
+        let loading = Task { (try? await model.loadDraftAttachment(artifactID)) != nil }
+        try await waitForEmailTestCondition { metadata.isWaiting }
+        model.resetConnection()
+        metadata.release()
+        #expect(await loading.value == false, "Nothing is handed back")
+        #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("content") },
+                "The file itself is not asked for on a connection that has changed")
     }
 
     /// A hidden conversation whose status could not be read is shown again with its error and
