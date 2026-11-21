@@ -78,6 +78,89 @@ def test_text_that_is_not_the_senders_own_signature_gives_nothing(body: str) -> 
     assert sender_contact(body, RORY) is None
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Below the first entry of a list a colon introduces.
+        "Attendees:\n\nAlex Rivera\nRory O'Driscoll\nSam Example\n",
+        # Wherever in the list it stands, with blank lines between the entries.
+        "Attendees:\nAlex Rivera\n\nRory O'Driscoll\n\nSam Example\n",
+        "Attendees:\nAlex Rivera\nJamie Example\nRiley Example\nRory O'Driscoll\nSam Example\n",
+        # An entry that ends in a suffix, an initial or a doubt does not end the list.
+        "Attendees:\nSam Example Jr.\nRory O'Driscoll\nAlex Rivera\n",
+        "Attending:\nAcme Inc.\nRory O'Driscoll\nAlex Rivera\n",
+        "Attendees:\nAlex R.\nRory O'Driscoll\nSam E.\n",
+        "Attendees:\nSam Example?\nRory O'Driscoll\nAlex Rivera\n",
+        # A bold line or a heading introduces a list as a colon does.
+        "*Attendees*\n\nAlex Rivera\nRory O'Driscoll\nSam Example\n",
+        "## Attendees\n\nAlex Rivera\nRory O'Driscoll\nSam Example\n",
+        "*Alex Rivera*\n*Rory O'Driscoll*\n*Sam Example*\n",
+        # So does a label with the first name beside it, as in a recipient line.
+        "Cc: Alex Rivera\nRory O'Driscoll\nSam Example\n",
+        "cc:\nAlex Rivera\nRory O'Driscoll\nSam Example\n",
+        # A bulleted name is an entry, with or without anything above the list.
+        "Present\n* Alex Rivera\n* Rory O'Driscoll\n* Sam Example\n",
+        "* Rory O'Driscoll\n* Sam Example\n",
+    ],
+)
+def test_the_senders_name_inside_a_list_is_not_a_signature(body: str) -> None:
+    assert sender_contact(body, RORY) is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Present\n- Alex Rivera\n- Rory O'Driscoll\n- Sam Example\n",
+        "Present\n\u2022 Alex Rivera\n\u2022 Rory O'Driscoll\n\u2022 Sam Example\n",
+        "Present\n1. Alex Rivera\n2. Rory O'Driscoll\n3. Sam Example\n",
+        "To: Alex Rivera, Rory O'Driscoll, Sam Example\n",
+        "To: Alex Rivera,\nRory O'Driscoll,\nSam Example\n",
+    ],
+)
+def test_a_marked_or_inline_list_of_names_never_was_a_signature(body: str) -> None:
+    """These lines are not exactly the sender's name, so they were safe before the list rule."""
+    assert sender_contact(body, RORY) is None
+
+
+@pytest.mark.parametrize(
+    "above",
+    [
+        # A finished sentence ends the list a colon introduced.
+        "Thanks:\nI'll bring the deck.\n\n",
+        "Andy:\n\nYes.\n\n",
+        "Attendees:\nAlex Rivera\nSam Example\n\nSee you all there!\n\n",
+        "Attendees:\nAlex Rivera\nSam Example\n\nDoes Thursday still work?\n\n",
+        "Call details: Thursday at three, in the usual room.\n\n",
+        # So does the closing a writer signs under, and the signature delimiter.
+        "The files:\n- deck.pdf\n- model.xlsx\n\nBest,\n",
+        "The files:\n- deck.pdf\n- model.xlsx\n\nMany thanks\n",
+        "The files:\n- deck.pdf\n- model.xlsx\n\n-- \n",
+    ],
+)
+def test_a_signature_after_a_list_has_ended_is_still_read(above: str) -> None:
+    body = above + "Rory O'Driscoll\nPartner, Scale\n650.378.6038\n"
+    assert sender_contact(body, RORY) == SignatureContact(
+        title="Partner, Scale", phones=("650.378.6038",)
+    )
+
+
+def test_a_name_straight_under_an_open_list_is_left_alone() -> None:
+    """Nothing ends the list, so the block is not read: a wrong title is the worse error."""
+    body = "The files:\n- deck.pdf\n- model.xlsx\n\nRory O'Driscoll\nPartner, Scale\n"
+    assert sender_contact(body, RORY) is None
+
+
+def test_the_list_rule_stays_quick_on_hostile_lines() -> None:
+    import time
+
+    hostile = "](https://x" * 20_000
+    body = "\n".join(["Attendees:", hostile, "a: " * 60_000, "Rory O'Driscoll", "Partner, Scale"])
+    started = time.monotonic()
+    sender_contact(body, RORY)
+    sender_contact("\n".join(["Cc: Alex Rivera", "Rory O'Driscoll"] * 20_000), RORY)
+    assert time.monotonic() - started < 5
+
+
 def test_a_sender_without_a_two_word_display_name_gives_nothing() -> None:
     assert sender_contact(SIGNED, "rory@scalevp.test") is None
     assert sender_contact(SIGNED.replace("Rory O'Driscoll", "Rory"), "Rory <r@x.test>") is None

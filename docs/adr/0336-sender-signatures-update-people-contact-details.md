@@ -144,6 +144,15 @@ Four existing rules bound the design:
   contributes nothing, and neither does a signature below quoted text.
 - A body with no line structure, as when Gmail supplied only flattened HTML,
   contributes nothing.
+- The sender's name inside a list is an entry of that list, never a signature:
+  a bulleted line, or any line under one that introduces a list (a line ending
+  in a colon, a short label such as `Cc:` before the first entry, a bold line
+  or a heading), across blank lines, until a finished sentence, a closing such
+  as "Best,", a `--` rule or a quoted line ends the list. A signature written
+  straight under a list that nothing ends is therefore left in the reading text
+  and contributes nothing. That is chosen on purpose: reading the next entry as
+  the sender's title, or removing real names from an email, is the worse error.
+  A list with no line that introduces it is not recognised.
 - A motto under the name is stored as that person's line. It is shown as the
   sender's own words, and the owner can end it.
 - Someone who alternates between two signatures with different numbers will

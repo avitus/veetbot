@@ -131,7 +131,7 @@ def private_response(response: Response) -> None:
 
 # Part of the thread validator: raise it whenever the same retained source
 # would read differently, or a client keeps the text an older reader made.
-READER_VERSION = "email-reader@4"
+READER_VERSION = "email-reader@5"
 
 
 def prepare_reading_text(result: dict[str, object]) -> dict[str, object]:

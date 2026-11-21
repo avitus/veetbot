@@ -985,6 +985,7 @@ GMAIL_REPLY_PLAIN = "\r\n".join(
     ]
 )
 RILEY = '"Riley Example" <riley@example.com>'
+HTML_NAMES = "<div>Sam Example</div><div>Riley Example</div><div>Jamie Example</div>"
 
 
 def test_marked_html_signature_is_omitted_at_every_quote_level() -> None:
@@ -1113,6 +1114,14 @@ def test_block_under_the_writers_own_name_goes_when_it_ends_the_message() -> Non
         # The list is still a list when a blank line or a paragraph sets it apart.
         "Attending:\n\nRiley Example\nSam Example\nJamie Example",
         "<p><b>Attending:</b></p><div>Riley Example</div><div>Sam Example</div>",
+        # Wherever in the list the name stands, and whatever introduces the list.
+        "Attending:\n\nSam Example\nRiley Example\nJamie Example",
+        "<p><b>Attending:</b></p>" + HTML_NAMES,
+        "<p><b>Attending</b></p>" + HTML_NAMES,
+        "<h3>Attending</h3>" + HTML_NAMES,
+        "Cc: Sam Example\nRiley Example\nJamie Example",
+        "Present\n* Sam Example\n* Riley Example\n* Jamie Example",
+        "<ul><li>Sam Example</li><li>Riley Example</li><li>Jamie Example</li></ul>",
         "Riley Example\n" + "\n".join(f"Guest {index}" for index in range(13)),
     ],
 )
@@ -1123,6 +1132,18 @@ def test_the_writers_name_alone_does_not_make_a_signature(body: str) -> None:
     assert "Partner" in reading_body(signed, sender="Sam Example <sam@example.com>")
     assert "Partner" in reading_body(signed, sender="riley@example.com")
     assert reading_body(signed, sender=RILEY) == "See you there."
+
+
+def test_a_signature_under_a_list_that_has_ended_still_goes() -> None:
+    signature = "Riley Example\nPartner\n650.555.0100"
+    for above in (
+        "The files:\n- deck.pdf\n- model.xlsx\n\nBest,",
+        "Attending:\nSam Example\nJamie Example\n\nSee you all there!",
+    ):
+        assert reading_body(f"{above}\n{signature}", sender=RILEY) == reading_body(above)
+    # Nothing ends this list, so the block stays: removing real names is the worse error.
+    kept = "The files:\n- deck.pdf\n- model.xlsx\n\n" + signature
+    assert reading_body(kept, sender=RILEY) == reading_body(kept)
 
 
 def test_reply_alternatives_are_compared_line_by_line() -> None:

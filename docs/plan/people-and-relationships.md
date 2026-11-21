@@ -313,7 +313,10 @@ third sign ([email-experience.md](email-experience.md)): in the retained plain
 body, a line that is exactly the From display name of two or more words, with
 the short lines under it. For People that name line must also sit above the
 first quoted line, reply header or forward header, so a signature inside
-quoted history or a forward is never read. Two details are taken:
+quoted history or a forward is never read. The sender's name inside a list is
+an entry of that list and not that line, so a list of names gives no title;
+a signature straight under a list that nothing ends is left unread for the
+same reason. Two details are taken:
 
 - each phone number, written with a `+` or in the ten-digit North American
   shape, at most four, skipping one written after a fax label;

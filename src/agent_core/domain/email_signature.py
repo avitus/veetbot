@@ -34,6 +34,18 @@ _PHONE = re.compile(
     r"(?![\w-])"
 )
 _FAX_LABEL = re.compile(r"\b(?:fax|f)\s*[:.]?\s*$", re.I)
+# What a writer closes with before signing, with or without its comma.
+_CLOSING = re.compile(
+    r"(?:all the best|all best|best(?: regards| wishes)?|(?:kind|warm|warmest|many) regards|"
+    r"regards|sincerely|yours(?: sincerely| truly)?|cheers|warmly|cordially|respectfully|"
+    r"(?:many |with )?thanks(?: again| so much| very much)?|thank you(?: so much| very much)?|"
+    r"take care|talk soon|speak soon)",
+    re.I,
+)
+# A name or company suffix ends in a period without ending a sentence.
+_SUFFIXES = frozenset({"jr", "sr", "inc", "corp", "ltd", "co", "llc", "plc", "esq", "phd", "md"})
+_LIST_ITEM = re.compile(r"(?:[-*+\u2022]|\d{1,3}[.)])\s")
+_HEADING = re.compile(r"#{1,6}\s")
 _NOT_A_TITLE = re.compile(r"\d|@|://|\bwww\.|^sent from\b|^get outlook\b", re.I)
 _PHONES = 4
 
@@ -57,6 +69,51 @@ def starts_history(line: str) -> bool:
     return len(line) < 400 and bool(HISTORY.match(line)) and bool(line.strip("-_ "))
 
 
+def _list_continues(line: str, listed: bool) -> bool:
+    """Whether the lines under this one are entries of a list that a line above introduced.
+
+    A list is introduced by a line ending in a colon, a short label and a colon
+    before its first entry (`Cc: Alex Rivera`), a bold line or a heading. It runs
+    across blank lines until a finished sentence, the closing a writer signs
+    under, a rule or a quoted line. Every test here is linear in the line.
+    """
+    if not line or line.isspace():
+        return listed
+    if line.startswith(">") or len(line) > 2000 or not line.strip("-_* "):
+        # A quote, a paragraph, or the delimiter a signature is written under.
+        return False
+    text = line.rstrip("*_\\ ")
+    last = text[-1:]
+    if last == "!" or (last == "?" and len(text.split(None, 3)) >= 3):
+        # `Sam Example?` is an entry someone is unsure of, not a question.
+        return False
+    if last == ".":
+        # `Alex R.` and `Sam Example Jr.` are entries too: an initial or a suffix.
+        word = text.rsplit(None, 1)[-1].strip(".,").replace(".", "")
+        if len(word) > 1 and word.casefold() not in _SUFFIXES:
+            return False
+    if len(text) <= 40 and _CLOSING.fullmatch(text.lstrip("*_ ").rstrip(",")):
+        return False
+    colon = text.find(":")
+    return (
+        listed
+        or last == ":"
+        or bool(_HEADING.match(line))
+        # A whole line in emphasis, short enough to be a heading and not a bullet.
+        or (
+            len(line) <= SIGNATURE_LINE_WIDTH
+            and line[0] in "*_"
+            and line[-1] in "*_"
+            and not _LIST_ITEM.match(line)
+        )
+        or (
+            0 < colon <= 40
+            and text[colon + 1 : colon + 4].lstrip("*_")[:1].isspace()
+            and len(text[:colon].split()) <= 3
+        )
+    )
+
+
 def named_signature(
     lines: Sequence[str],
     name: str,
@@ -67,14 +124,18 @@ def named_signature(
     """The writer's own name line and the end of the short lines under it.
 
     The name alone is a sign-off. Prose, a postscript or a long block under it
-    is the message, and so is anything followed by more than history. With
+    is the message, and so is anything followed by more than history. A name
+    inside a list is an entry of it, wherever in the list it stands. With
     `own_text_only`, the name must come before any quoted line or reply or
     forward header, so a signature inside history is never found.
     """
     above = ""
+    below = False
     for index, line in enumerate(lines):
-        # The nearest line with text above this one, across any blank lines.
+        # The nearest line with text above this one, across any blank lines, and
+        # whether this line is an entry of a list that a line above introduced.
         heading, above = above, line or above
+        listed, below = below, _list_continues(line, below)
         if own_text_only and (line.startswith(">") or starts_history(line)):
             return None
         # A cheap bound first: the scan must stay linear on a hostile long line.
@@ -82,8 +143,12 @@ def named_signature(
             continue
         if visible(line).casefold() != name:
             continue
-        if len(heading) <= 2000 and visible(heading).rstrip("\\").endswith(":"):
-            # A line ending in a colon introduces a list the name belongs to.
+        if (
+            listed
+            or _LIST_ITEM.match(line)
+            or (len(heading) <= 2000 and visible(heading).rstrip("\\").endswith(":"))
+        ):
+            # A list's entry, bulleted or under the line that introduces the list.
             continue
         end = index + 1
         block = 0

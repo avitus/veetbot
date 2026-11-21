@@ -260,8 +260,8 @@ memory formation read. Three signs identify one, and nothing else does:
   two or more words, with the lines under it, when those lines run to the end of
   the text or to the reply or forward below. Each must be at most 100 characters,
   there are at most 12, and none is a postscript or a sentence of more than eight
-  words. The name alone is a sign-off and stays. So does a name whose nearest line of
-  text above ends in a colon, across any blank lines: that line introduces a list.
+  words. The name alone is a sign-off and stays. So does a name inside a list, wherever in it: a bulleted line, or a line under one that introduces a list
+  (ending in a colon, a short label such as `Cc:`, a bold line or a heading) until a finished sentence, a closing such as "Best,", a `--` rule or a quote ends it.
 
 The comparison of the two alternatives above uses the HTML with its signature, so
 the plain part's copy is never preserved as missing prose.
