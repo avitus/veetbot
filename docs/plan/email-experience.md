@@ -212,11 +212,16 @@ padding and recognizable promotional controls, collapses a forwarded envelope to
 its source attribution, embeds source URLs as labeled links, and restores article
 headings and paragraph flow. A retained HTML alternative supplies the reading
 structure when it represents source prose, with plain-text paragraphs absent
-from it preserved before it. A paragraph is absent when one of its lines has
+from it preserved where they stood: after the HTML paragraph holding the last
+plain paragraph before them that the HTML has, and before the HTML only when none
+comes first. So quoted history or a signature that the plain part words
+differently stays below the writer's note, and the note opens the message, as
+the brief's latest point needs. A paragraph is absent when one of its lines has
 words the HTML lacks, so a reply's quoted history is not judged missing for a
 repeat the plain reader showed once. A link the plain reader could label only by
-its host is present when the HTML links the same destination. An unrelated
-image/footer alternative leaves the text reader intact.
+its host is present when the HTML links the same destination, and a list number
+the HTML shows as a bullet is not a word. An unrelated image/footer alternative
+leaves the text reader intact.
 Rectangular tables with at least two rows and columns become inert Markdown
 tables; the first row is the heading. Column spans keep their text in the first
 column and reserve empty cells for the rest. Layout wrappers, row spans and
