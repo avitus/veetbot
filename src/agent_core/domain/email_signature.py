@@ -57,6 +57,11 @@ def starts_history(line: str) -> bool:
     return len(line) < 400 and bool(HISTORY.match(line)) and bool(line.strip("-_ "))
 
 
+def says_something(text: str) -> bool:
+    """A postscript or a sentence of more than eight words: the message, not a signature."""
+    return bool(POSTSCRIPT.match(text)) or (len(text.split()) > 8 and text[-1] in ".?!")
+
+
 def named_signature(
     lines: Sequence[str],
     name: str,
@@ -94,8 +99,7 @@ def named_signature(
                 if (
                     block > SIGNATURE_LINES
                     or not 0 < len(text) <= SIGNATURE_LINE_WIDTH
-                    or POSTSCRIPT.match(text)
-                    or (len(text.split()) > 8 and text[-1] in ".?!")
+                    or says_something(text)
                 ):
                     block = 0
                     break

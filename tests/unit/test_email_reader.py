@@ -1031,6 +1031,31 @@ def test_a_delimiter_that_does_not_end_its_text_is_not_a_signature() -> None:
     assert "Row 12" in reading_body(long_block)
 
 
+@pytest.mark.parametrize(
+    "said",
+    [
+        # A postscript is written under the signature, and is still the message.
+        "P.S. Bring the deck.",
+        "*PS:* the room moved.",
+        # So is a sentence of more than eight words.
+        "Please send the signed contract to Sam before Friday, not to me.",
+    ],
+)
+def test_a_delimited_block_holding_a_postscript_or_a_sentence_stays(said: str) -> None:
+    result = reading_body(f"Thanks.\n\n--\nJamie Example\n{said}")
+    assert said in result and "Jamie Example" in result
+    # At a quote level too, and above the reply it was written over.
+    quoted = reading_body(f"Agreed.\n\n> Thanks.\n>\n> --\n> Jamie Example\n> {said}\n")
+    assert said in quoted
+    replied = reading_body(
+        f"Thanks.\n\n--\nJamie Example\n{said}\n\n"
+        "On Fri, Nov 20, 2026 at 6:13 AM Sam Example <sam@example.com> wrote:\n\n> Coming?\n"
+    )
+    assert said in replied
+    # A short signature that holds neither still goes.
+    assert reading_body("Thanks.\n\n--\nJamie Example\nDirector, Example\n555 0100") == "Thanks."
+
+
 def test_block_under_the_writers_own_name_goes_when_it_ends_the_message() -> None:
     result = reading_body(GMAIL_REPLY_PLAIN, sender=RILEY)
     assert result.startswith(
