@@ -150,11 +150,15 @@ public final class EmailViewModel: ObservableObject {
         projectionGeneration = UUID()
     }
     @Published private var loadedCollectionCounts: EmailCollectionCounts?
-    /// Inbox conversations the loaded counts include although a pending archive may hide them,
-    /// each as the server held it when those counts were read: its row in that read, or its own
-    /// status read when the read did not return it. Where a count holds it is decided from that
-    /// copy alone, so a later change to the conversation waits for the counts that reflect it.
+    /// Conversations a pending archive may hide, each as the server held it when the loaded
+    /// counts were read: its row in that read, or its own status read when the read did not
+    /// return it. Which counts hold it is decided from that copy alone, so a later change to the
+    /// conversation waits for the counts that reflect it. None is kept for a hidden conversation
+    /// until something has been read about it for these counts.
     @Published private var countedPendingArchives: [UUID: EmailThreadView] = [:]
+    /// The rows that arrived in the same answer as the loaded counts. Hiding one of them needs
+    /// no further read, because its row and the counts already describe the same moment.
+    private var rowsReadWithCounts: Set<UUID> = []
     /// The last confirmed counts, less each conversation a pending archive has hidden,
     /// so the totals match the rows on screen instead of vanishing until Gmail confirms.
     public var collectionCounts: EmailCollectionCounts? {
@@ -171,16 +175,27 @@ public final class EmailViewModel: ObservableObject {
 
     private func withoutHiddenArchives(_ count: Int, in view: String) -> Int {
         let hidden = countedPendingArchives.values.filter {
-            archiveHiddenThreads.contains($0.id) && archiveErrors[$0.id] == nil && Self.isCounted($0, in: view)
+            archiveHiddenThreads.contains($0.id) && archiveErrors[$0.id] == nil && countsHolding($0).contains(view)
         }
         return max(0, count - hidden.count)
     }
 
-    /// Whether the counts as now filtered include a conversation at all: it is in the Inbox,
-    /// belongs to the chosen account and matches the search.
-    private func isInLoadedCounts(_ row: EmailThreadView) -> Bool {
-        !row.isArchived && !row.isInSpam
-            && (selectedAccountID == nil || row.accountID == selectedAccountID)
+    private static let countedViews = [
+        "priority", "suspected_spam", EmailCollection.inbox.rawValue, EmailCollection.needsYou.rawValue,
+        EmailCollection.handled.rawValue,
+    ]
+
+    /// The counts that hold a conversation as the lists are now filtered; none when it is out
+    /// of the Inbox, in another account or outside the search.
+    private func countsHolding(_ row: EmailThreadView?) -> [String] {
+        guard let row, !row.isArchived, !row.isInSpam, isInFilter(row) else { return [] }
+        return Self.countedViews.filter { Self.isCounted(row, in: $0) }
+    }
+
+    /// Whether the lists as now filtered take in a conversation: it belongs to the chosen
+    /// account and matches the search.
+    private func isInFilter(_ row: EmailThreadView) -> Bool {
+        (selectedAccountID == nil || row.accountID == selectedAccountID)
             && Self.matchesSearch(row, text: searchText)
     }
 
@@ -205,9 +220,9 @@ public final class EmailViewModel: ObservableObject {
         }
     }
 
-    /// Remembers the conversations a read's counts include: the rows it returned and `statuses`,
-    /// the hidden conversations it did not return, each read on its own. A read of the whole
-    /// list (`replacing`) leaves nothing remembered from an earlier one.
+    /// Remembers each hidden conversation as a read of the counts found it: the rows the read
+    /// returned and `statuses`, the hidden conversations it did not return, each read on its
+    /// own. A read of the whole list (`replacing`) leaves nothing remembered from an earlier one.
     private func recordCountedArchives(
         _ rows: [EmailThreadView], statuses: [EmailThreadView] = [], replacing: Bool
     ) {
@@ -218,8 +233,7 @@ public final class EmailViewModel: ObservableObject {
             countedPendingArchives[row.id] = counted ? row : nil
         }
         for value in statuses {
-            let counted = archiveHiddenThreads.contains(value.id) && isInLoadedCounts(value)
-            countedPendingArchives[value.id] = counted ? value : nil
+            countedPendingArchives[value.id] = archiveHiddenThreads.contains(value.id) ? value : nil
         }
     }
 
@@ -239,6 +253,47 @@ public final class EmailViewModel: ObservableObject {
             if let value = await readArchiveStatus(id) { statuses.append(value) }
         }
         return statuses
+    }
+
+    /// How many times a read of the counts is repeated for hidden conversations that changed
+    /// around it. A conversation still changing after that is shown as last read.
+    static let countRereads = 2
+
+    /// Pairs a read of the counts with the status of each hidden conversation its page left out.
+    /// They are two requests, so a conversation can change between them. `known` is what the
+    /// client held about each one before the counts were asked for: a status that agrees with it
+    /// about which counts hold the conversation means those counts hold it the same way. One
+    /// that disagrees leaves open which side of the change the counts were taken on, so they are
+    /// read again and compared with what the status just showed.
+    private func pairedWithHiddenStatuses(
+        _ first: EmailThreadPage, known: [UUID: EmailThreadView], isCurrent: () -> Bool,
+        again: () async throws -> EmailThreadPage
+    ) async throws -> (page: EmailThreadPage, statuses: [EmailThreadView])? {
+        var page = first
+        var known = known
+        var rereads = 0
+        while true {
+            let statuses = await hiddenArchiveStatuses(missingFrom: page.items)
+            guard isCurrent() else { return nil }
+            let moved = statuses.contains { countsHolding($0) != countsHolding(known[$0.id]) }
+            guard moved, rereads < Self.countRereads else { return (page, statuses) }
+            for value in statuses { known[value.id] = value }
+            page = try await again()
+            guard isCurrent() else { return nil }
+            rereads += 1
+        }
+    }
+
+    /// The counts on screen were read before this conversation was hidden, without its status
+    /// and perhaps before the copy of it in hand. Asking for them again reads the two together.
+    private func readCountsAgain() {
+        guard loadedCollectionCounts != nil else { return }
+        let foreground = active ? activation : nil
+        let query = listRequest
+        Task { [weak self] in
+            guard let self, self.listRequest == query else { return }
+            await self.reload(preserveOrder: true, activation: foreground)
+        }
     }
     @Published private(set) var pagingFailed = false
     /// The visible Mac row, independent of the conversation open in the reader.
@@ -663,6 +718,7 @@ public final class EmailViewModel: ObservableObject {
         isReadingList = false
         loadedCollectionCounts = nil
         loadedListTotal = nil
+        rowsReadWithCounts = []
         scrollAnchor = nil
         nextCursor = nil
         hasMore = false
@@ -700,6 +756,11 @@ public final class EmailViewModel: ObservableObject {
             loadedListTotal = nil
         }
         let visibleCount = preserveOrder ? max(pageSize, inboxItems.count) : pageSize
+        // What is held about each hidden conversation before the counts are asked for.
+        let known = countedPendingArchives
+        // An unchanged page says nothing new about a hidden conversation it does not hold.
+        let listed = Set(inboxItems.map(\.id))
+        let reusable = preserveOrder && archiveHiddenThreads.isSubset(of: listed)
         isLoading = !preserveOrder
         isReadingList = true
         if !preserveOrder {
@@ -718,18 +779,27 @@ public final class EmailViewModel: ObservableObject {
                 accountID: selectedAccountID, view: queryListView,
                 text: searchText, count: visibleCount, requestID: requestID, anchor: preserveOrder ? eligibleScrollAnchor : nil,
                 connection: connection, activation: foreground,
-                knownVersion: preserveOrder ? loadedListVersion : nil
+                knownVersion: reusable ? loadedListVersion : nil
             )
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             unavailable = false
-            if let page {
+            if let read = page {
                 // The counts are shown together with the status of each hidden conversation
                 // their page left out, never ahead of it.
-                let statuses = await hiddenArchiveStatuses(missingFrom: page.items)
-                guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
+                let paired = try await pairedWithHiddenStatuses(read, known: known, isCurrent: {
+                    self.acceptsRead(connection: connection, activation: foreground) && self.listRequest == requestID
+                }, again: {
+                    try await self.readInbox(api: api,
+                        accountID: self.selectedAccountID, view: self.queryListView, text: self.searchText,
+                        count: visibleCount, requestID: requestID,
+                        anchor: preserveOrder ? self.eligibleScrollAnchor : nil,
+                        connection: connection, activation: foreground, knownVersion: nil) ?? read
+                })
+                guard let (page, statuses) = paired else { return }
                 let loadedThreads = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
                 loadedCollectionCounts = page.collectionCounts
                 loadedListTotal = page.totalCount
+                rowsReadWithCounts = Set(page.items.map(\.id))
                 recordCountedArchives(page.items, statuses: statuses, replacing: true)
                 pagingFailed = false
                 seenCursors = []
@@ -831,18 +901,26 @@ public final class EmailViewModel: ObservableObject {
               let cursor = nextCursor, let api = makeAPIClient() else { return }
         isLoading = true
         let requestID = listRequest
+        let known = countedPendingArchives
         defer { if listRequest == requestID { isLoading = false } }
         do {
-            let page = try await api.emailThreads(
+            let read = try await api.emailThreads(
                 accountID: selectedAccountID, view: queryListView,
                 text: searchText, limit: pageSize, cursor: cursor
             )
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
-            let statuses = await hiddenArchiveStatuses(missingFrom: page.items)
-            guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
+            let paired = try await pairedWithHiddenStatuses(read, known: known, isCurrent: {
+                self.acceptsRead(connection: connection, activation: foreground) && self.listRequest == requestID
+            }, again: {
+                try await api.emailThreads(
+                    accountID: self.selectedAccountID, view: self.queryListView,
+                    text: self.searchText, limit: self.pageSize, cursor: cursor)
+            })
+            guard let (page, statuses) = paired else { return }
             if loadedListVersion != page.snapshotVersion { loadedListVersion = nil }
             loadedCollectionCounts = page.collectionCounts
             loadedListTotal = page.totalCount
+            rowsReadWithCounts = Set(page.items.map(\.id))
             recordCountedArchives(page.items, statuses: statuses, replacing: false)
             var ids = Set(inboxItems.map(\.id))
             let loaded = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
@@ -1875,11 +1953,11 @@ public final class EmailViewModel: ObservableObject {
         let detail = self.thread?.id == thread.id ? self.thread : nil
         if request.archived {
             archiveHiddenThreads.insert(thread.id)
-            // The counts came with the list's own row. Archived from the reader while the list
-            // shows a collection without that row, the conversation as last read stands in
-            // until the next read of the counts brings its status with it.
-            let known = inboxItems.first(where: { $0.id == thread.id }) ?? detail ?? thread
-            countedPendingArchives[thread.id] = isInLoadedCounts(known) ? known : nil
+            // A row that came with the counts describes the same moment as they do. Any other
+            // copy (a row from an earlier page, the reader's) stands in only until the counts
+            // have been read again with this conversation's status.
+            countedPendingArchives[thread.id] = inboxItems.first(where: { $0.id == thread.id }) ?? detail ?? thread
+            if !rowsReadWithCounts.contains(thread.id) { readCountsAgain() }
         }
         if request.archived, selectedThreadID == thread.id {
             let next: EmailThreadView?
@@ -1989,6 +2067,7 @@ public final class EmailViewModel: ObservableObject {
             dismissedRevision: value.dismissedRevision, revision: value.revision, inSpam: value.inSpam)
         if let index = inboxItems.firstIndex(where: { $0.id == value.id }), value.revision >= inboxItems[index].revision {
             inboxItems[index] = value
+            rowsReadWithCounts.remove(value.id)
         }
         if thread?.id == value.id, let revision = thread?.revision, value.revision >= revision {
             thread = value
@@ -2042,10 +2121,12 @@ public final class EmailViewModel: ObservableObject {
             if operation.targetArchived {
                 // A kept list's counts were adjusted for the conversations hidden when it was read.
                 if archiveHiddenThreads.insert(value.id).inserted { cachedMailLists = [:] }
-                // Hidden between two reads of the counts (an archive begun on another device,
-                // first seen in the reader): they hold it as it has just been read.
-                if countedPendingArchives[value.id] == nil, isInLoadedCounts(value) {
+                // Hidden with nothing held about it for the counts on screen (an archive begun on
+                // another device and first seen in the reader, or one whose status could not be
+                // read with them): it stands as just read until they are read again with it.
+                if countedPendingArchives[value.id] == nil {
                     countedPendingArchives[value.id] = value
+                    if !rowsReadWithCounts.contains(value.id) { readCountsAgain() }
                 }
             }
             guard active, archiveTasks[value.id] == nil else { return }
