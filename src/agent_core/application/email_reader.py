@@ -617,6 +617,9 @@ def _placed(plan: list[tuple[bool, str]], rich: str, words: Callable[[str], str]
         if found != -1:
             position = found + len(value) + 1
             slot = max(slot, bisect_left(ends, position + 1))
+    if fence and after.get(len(blocks) - 1):
+        # The HTML text ends inside a fence; close it so placed prose is not code.
+        blocks[-1] += "\n" + fence[0] * fence[1]
     result = list(after.get(-1, []))
     for index, block in enumerate(blocks):
         result.append(block)

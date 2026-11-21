@@ -1051,3 +1051,9 @@ def test_placement_survives_literal_lists_nested_fences_and_inline_images() -> N
     assert merge_image_body("Hello world.\n\nOnly in plain.", rich, "Hello world.") == (
         rich + "\n\nOnly in plain."
     )
+    # A fence the HTML text never closes is closed before anything placed after it.
+    unclosed = "Intro.\n\n```\nalpha"
+    assert merge_image_body("alpha\n\nOnly in plain.", unclosed, unclosed) == (
+        "Intro.\n\n```\nalpha\n```\n\nOnly in plain."
+    )
+    assert merge_image_body("Intro.", unclosed, unclosed) == unclosed
