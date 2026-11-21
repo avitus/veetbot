@@ -196,6 +196,63 @@ async def test_empty_check_query_finds_only_old_settled_free_checks() -> None:
     await assert_empty_check_query_finds_only_old_settled_free_checks(InMemoryEmailStore())
 
 
+async def assert_pending_rerating_query_returns_only_marked_assessments(store: EmailStore) -> None:
+    """Only one owner's saved assessments that carry the pending mark, whole and in key
+    order, a page at a time. A put-off one is still marked: its time is the caller's to read."""
+    owner = principal()
+    foreign = owner.model_copy(update={"principal_id": "foreign"})
+    put_off = {
+        "priority": 0.2,
+        "rerating_pending": True,
+        "rerating_attempts": 3,
+        "rerating_retry_at": (NOW + timedelta(hours=1)).isoformat(),
+    }
+    rows: list[tuple[str, str, str, dict[str, object]]] = [
+        (owner.principal_id, "assessment", "a-unmarked", {"priority": 0.9, "summary": "Read"}),
+        (owner.principal_id, "assessment", "b-marked", {"priority": 0.5, "rerating_pending": True}),
+        (owner.principal_id, "assessment", "c-settled", {"rerating_pending": False}),
+        (owner.principal_id, "assessment", "d-put-off", put_off),
+        # The mark is the value true: not the word in another field, and not a string.
+        (owner.principal_id, "assessment", "e-worded", {"summary": "rerating_pending true"}),
+        (owner.principal_id, "assessment", "e-string", {"rerating_pending": "true"}),
+        (owner.principal_id, "assessment", "f-marked", {"rerating_pending": True}),
+        # Another kind of record that happens to hold the same field.
+        (owner.principal_id, "draft", "b-marked", {"rerating_pending": True}),
+        (foreign.principal_id, "assessment", "g-foreign", {"rerating_pending": True}),
+    ]
+    for principal_id, kind, key, payload in rows:
+        await store.put(
+            record(key).model_copy(
+                update={"principal_id": principal_id, "kind": kind, "payload": payload}
+            ),
+            expected_revision=0,
+        )
+
+    marked = await store.list_pending_reratings(owner)
+    assert [row.key for row in marked] == ["b-marked", "d-put-off", "f-marked"]
+    assert {row.kind for row in marked} == {"assessment"}
+    assert marked[1].payload == put_off
+    first = await store.list_pending_reratings(owner, limit=2)
+    assert [row.key for row in first] == ["b-marked", "d-put-off"]
+    rest = await store.list_pending_reratings(owner, after=first[-1].key, limit=2)
+    assert [row.key for row in rest] == ["f-marked"]
+    assert await store.list_pending_reratings(owner, after="f-marked") == []
+    assert [row.key for row in await store.list_pending_reratings(foreign)] == ["g-foreign"]
+    other_tenant = owner.model_copy(update={"tenant_id": "other"})
+    assert await store.list_pending_reratings(other_tenant) == []
+    # A returned record is the caller's own copy.
+    marked[0].payload["rerating_pending"] = False
+    assert [row.key for row in await store.list_pending_reratings(owner, limit=1)] == ["b-marked"]
+    with pytest.raises(ValueError, match="limit"):
+        await store.list_pending_reratings(owner, limit=0)
+
+
+async def test_pending_rerating_query_returns_only_marked_assessments() -> None:
+    from agent_core.adapters.persistence.email import InMemoryEmailStore
+
+    await assert_pending_rerating_query_returns_only_marked_assessments(InMemoryEmailStore())
+
+
 async def email_import_window_contract(store: EmailStore) -> None:
     for key, days, account in [
         ("late", 2, "work"),

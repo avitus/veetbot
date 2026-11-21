@@ -894,11 +894,16 @@ async def test_a_new_mail_slice_follows_up_a_rerating_owed_by_an_archived_conver
 ) -> None:
     """A new-mail slice assesses only what recently arrived in the Inbox. A conversation
     archived after its assessment was saved is in no such shortlist, and above the
-    learning share no full slice runs; its mark is found all the same."""
+    learning share no full slice runs; its mark is found all the same.
+
+    The slice finds it by asking the store for marked assessments only. A mailbox holds
+    thousands of saved assessments and a handful of marks, and these slices run many
+    times an hour: none of the unmarked ones is read to find the marked."""
     from decimal import Decimal
 
     from agent_core.adapters.determinism import FixedClock
-    from agent_core.domain.email import EmailBudgetLimits
+    from agent_core.adapters.persistence.email import InMemoryEmailStore
+    from agent_core.domain.email import EmailBudgetLimits, EmailRecord
     from tests.gates.test_email_arrival_checks_m26 import _seed_spend
 
     stopped = True
@@ -944,20 +949,50 @@ async def test_a_new_mail_slice_follows_up_a_rerating_owed_by_an_archived_conver
                 expected_revision=row.revision,
             )
         stopped = False
+        # The rest of the mailbox: three thousand saved assessments that owe nothing.
+        async with app.uow_factory() as uow, uow.email.lock(app.principal):
+            for number in range(3_000):
+                await uow.email.put(
+                    EmailRecord(
+                        tenant_id=app.principal.tenant_id,
+                        principal_id=app.principal.principal_id,
+                        kind="assessment",
+                        key=str(UUID(int=20_000 + number)),
+                        revision=1,
+                        payload={"priority": 0.4, "summary": "Read and settled"},
+                        created_at=NOW,
+                        updated_at=NOW,
+                    ),
+                    expected_revision=0,
+                )
+        listed: list[tuple[str, int]] = []
+        general_listing = InMemoryEmailStore.list
+
+        async def counting(self: Any, principal: Any, kind: str, **kwargs: Any) -> Any:
+            page = await general_listing(self, principal, kind, **kwargs)
+            listed.append((kind, len(page)))
+            return page
 
         service.budget_limits = EmailBudgetLimits(
             daily_cost=Decimal("40"), monthly_cost=Decimal("600")
         )
         await _seed_spend(app, "460", NOW - timedelta(days=10))
         clock.advance(timedelta(minutes=1))
+        monkeypatch.setattr(InMemoryEmailStore, "list", counting)
         operation = await service.submit_task(app.principal, kind="refresh")
+        monkeypatch.setattr(InMemoryEmailStore, "list", general_listing)
         run = await app.runs.get(operation.run_id)
         assert run.status is RunStatus.COMPLETED, run.failure
         task = await service.get_task(app.principal, run.id)
         assert task is not None and task.scope == "new_mail" and run.usage.model_calls == 0
         [kept] = await _memories(app)
         assert kept.id == memory.id and kept.expires_at is None
-        assert await _owed(app) is None and task.empty_check is False
+        async with app.uow_factory() as uow:
+            followed = await uow.email.get(app.principal, "assessment", str(thread.payload["id"]))
+        assert followed is not None and "rerating_pending" not in followed.payload
+        assert task.empty_check is False
+        # The slice listed other kinds of record; it never listed the assessments.
+        assert listed and [entry for entry in listed if entry[0] == "assessment"] == []
 
 
 def test_a_put_off_rerating_waits_longer_each_time_and_a_new_save_starts_afresh() -> None:

@@ -121,6 +121,8 @@ EMAIL_CHANGE_EVENT_LIMIT = 1000
 EMAIL_CHANGE_PAGE_LIMIT = 10
 # Saved assessments one slice follows up when their memories never followed them.
 RERATING_RESUME_LIMIT = 20
+# Marked assessments one store read returns; a mailbox rarely holds more than a few.
+RERATING_MARK_PAGE = 1000
 EMAIL_HISTORY_POLICY = "email-history@2:90d"
 # Assessments once embedded the whole provider-registry revision, so any edit to
 # any model profile re-paid for ninety days of mail. Those rows remain current.
@@ -2089,9 +2091,15 @@ class _TaskIO:
         The marks are looked for among every saved assessment, whatever its
         freshness and wherever its conversation now is: one archived since
         the save is in no shortlist of arriving mail, and above the learning
-        share no full slice comes to find it. `saved` is the caller's reading
-        of the saved assessments when it has one. A bounded number of this
+        share no full slice comes to find it. A bounded number of this
         task's accounts' marks are followed up in one slice.
+
+        A mailbox holds thousands of saved assessments and a handful of
+        marks, and new-mail slices run many times an hour. So without a
+        reading of its own this asks the store for the marked assessments
+        only, which the store selects before anything is transferred.
+        `saved` is the caller's reading of all saved assessments when it has
+        already made one, as a full slice has.
 
         A follow-up can leave the mark standing: the re-rating was refused,
         or the thread has changed since the assessment read it. That debt is
@@ -2111,11 +2119,21 @@ class _TaskIO:
         c = self.context
         now = c.clock.now()
         async with c.uow_factory() as uow:
-            rows = (
-                [row async for row in records(uow.email, c.principal, "assessment")]
-                if saved is None
-                else saved
-            )
+            rows: Iterable[EmailRecord]
+            if saved is None:
+                marked: list[EmailRecord] = []
+                after: str | None = None
+                while True:
+                    page = await uow.email.list_pending_reratings(
+                        c.principal, after=after, limit=RERATING_MARK_PAGE
+                    )
+                    marked += page
+                    if len(page) < RERATING_MARK_PAGE:
+                        break
+                    after = page[-1].key
+                rows = marked
+            else:
+                rows = saved
             due = sorted(
                 (rerating_attempts(row.payload), row.key)
                 for row in rows

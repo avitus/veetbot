@@ -112,6 +112,19 @@ class EmailStore(Protocol):
         """Settled server checks that found nothing and cost nothing, created before the cutoff."""
         ...
 
+    async def list_pending_reratings(
+        self, principal: Principal, *, after: str | None = None, limit: int = 1000
+    ) -> builtins.list[EmailRecord]:
+        """Key-ordered `assessment` records that carry the pending re-rating mark (ADR-0340).
+
+        A mailbox holds thousands of saved assessments and a handful of marks,
+        and a refresh looks for them many times an hour. A backend selects on
+        the stored document, so an unmarked record is neither transferred nor
+        decoded. A put-off record is still marked: whether its time has come
+        is for the caller to read.
+        """
+        ...
+
     async def put(self, record: EmailRecord, *, expected_revision: int) -> EmailRecord: ...
 
     async def delete(

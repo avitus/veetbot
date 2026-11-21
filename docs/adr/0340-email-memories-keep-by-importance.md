@@ -166,12 +166,24 @@ No ranking code changes, so the `retrieval@7` label stays.
   assessment's freshness, and follows up at most twenty threads a slice. A
   pause in learning holds the memories still and leaves the marks, and the
   first refresh after it follows them up.
-  - *The marks are looked for among all saved assessments.* A full slice and
-    a new-mail slice both read every saved assessment for the mark, and
-    follow up those of the task's own accounts. They are not taken from the
-    list of conversations a slice is about to assess: a conversation
-    archived after its assessment was saved is in no list of arriving mail,
-    and above the learning share no full slice comes to find it.
+  - *The marks are looked for among all saved assessments.* They are not
+    taken from the list of conversations a slice is about to assess: a
+    conversation archived after its assessment was saved is in no list of
+    arriving mail, and above the learning share no full slice comes to find
+    it. A slice follows up the marks of the task's own accounts.
+  - *Only the marked assessments are read to find them.* A mailbox holds
+    thousands of saved assessments and a handful of marks, and new-mail and
+    arrival slices run many times an hour. They ask the email store for the
+    marked assessments only (`list_pending_reratings`). PostgreSQL selects
+    them in the query, so an unmarked record is neither transferred nor
+    decoded, and it looks into the stored document only for assessment rows,
+    never into a thread's. The in-memory store selects the same way and both
+    run one shared contract. With 8,000 assessments of production size and
+    five marked, the read took 2 ms where listing them all took 340 ms. A
+    full slice has already read every assessment for its own work and uses
+    that reading. No index is added: a partial index on marked assessments
+    would be cheap and exact, and is worth adding, with the plain form of
+    the condition, only if this read ever shows up in refresh latency.
   - *A follow-up that leaves the mark standing is put off.* The re-rating may
     be refused, or the thread may have changed since the assessment read it.
     The record then counts the failure and the next follow-up waits: two
