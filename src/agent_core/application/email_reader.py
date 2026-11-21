@@ -5,6 +5,8 @@ survives; the client always offers the unchanged retained source alongside this 
 """
 
 import re
+from bisect import bisect_left
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from html import unescape
 from html.parser import HTMLParser
@@ -36,6 +38,8 @@ _BLOCK_START = re.compile(r" {4}|\t|#{1,6}(?:\s|$)|[-*+]\s|\d+[.)]\s")
 _RULE = re.compile(r"(?:[-*_]\s*){3,}")
 _UNDERLINE = re.compile(r"-+|=+")
 _TABLE_RULE = re.compile(r"[\s|:-]+")
+_ORDERED_MARKER = re.compile(r"^\d{1,3}[.)]\s+")
+_FENCE = re.compile(r"(?m)^(?:```|~~~)")
 # Fewer lines than this can repeat by chance; a sign-off is not a signature.
 _REPEATED_BLOCK_LINES = 3
 
@@ -511,9 +515,12 @@ def merge_image_body(
 ) -> str:
     """Retain plain MIME paragraphs absent from the image-bearing HTML alternative.
 
-    Compare visible words rather than Markdown formatting, wrapping, punctuation or
-    link destinations. Unmatched paragraphs precede the HTML because MIME parts do
-    not provide a reliable position for prose omitted from one alternative.
+    Compare visible words rather than Markdown formatting, wrapping, punctuation,
+    link destinations or list numbering. An unmatched paragraph keeps its place:
+    it follows the HTML paragraph holding the last matched plain paragraph before
+    it, and precedes the HTML only when no matched paragraph comes first. So a
+    reply's history or signature the plain part words differently stays below the
+    writer's note, while a note the HTML omits entirely still leads.
     A text-only alternative can require shared prose before replacing the reader.
     """
 
@@ -533,14 +540,66 @@ def merge_image_body(
         return " ".join(re.findall(r"\w+", "".join(labels).casefold()))
 
     represented = " " + words(html_text) + " "
-    missing: list[str] = []
+    # The plain part in order: each matched paragraph's words, or a missing paragraph.
+    plan: list[tuple[bool, str]] = []
     overlaps = False
     for paragraph in re.split(r"\n\s*\n", plain):
-        normalized = words(paragraph)
+        # The HTML may show an ordered list as bullets; its numbers are not prose.
+        normalized = words(
+            "\n".join(
+                _ORDERED_MARKER.sub("", _quoted(line.strip())[1], count=1)
+                for line in paragraph.splitlines()
+            )
+        )
         if normalized and " " + normalized + " " not in represented:
-            missing.append(paragraph)
+            plan.append((True, paragraph))
         elif normalized:
             overlaps = True
+            plan.append((False, normalized))
     if require_overlap and plain and not overlaps:
         return plain
-    return "\n\n".join([*missing, rich])
+    if not any(is_missing for is_missing, _ in plan):
+        return rich
+    return _placed(plan, rich, words)
+
+
+def _placed(plan: list[tuple[bool, str]], rich: str, words: Callable[[str], str]) -> str:
+    """Insert each missing paragraph after the rich paragraph holding the match before it.
+
+    Matched lines are found left to right, each after the last, so a repeated
+    short line such as a sign-off resolves to its own occurrence and a paragraph
+    never moves above one placed earlier. A fenced block is one unit nothing is
+    placed inside. A line the rich text does not hold there moves nothing.
+    """
+    blocks: list[str] = []
+    open_fence = False
+    for paragraph in rich.split("\n\n"):
+        if open_fence:
+            blocks[-1] += "\n\n" + paragraph
+        else:
+            blocks.append(paragraph)
+        open_fence ^= len(_FENCE.findall(paragraph)) % 2 == 1
+    # The word sequence of the rich text, and where each block's words end in it.
+    sequence = " "
+    ends: list[int] = []
+    for block in blocks:
+        normalized = words(block)
+        if normalized:
+            sequence += normalized + " "
+        ends.append(len(sequence))
+    after: dict[int, list[str]] = {}
+    slot = -1
+    position = 0
+    for is_missing, value in plan:
+        if is_missing:
+            after.setdefault(slot, []).append(value)
+            continue
+        found = sequence.find(" " + value + " ", position)
+        if found != -1:
+            position = found + len(value) + 1
+            slot = max(slot, bisect_left(ends, position + 1))
+    result = list(after.get(-1, []))
+    for index, block in enumerate(blocks):
+        result.append(block)
+        result.extend(after.get(index, []))
+    return "\n\n".join(result)
