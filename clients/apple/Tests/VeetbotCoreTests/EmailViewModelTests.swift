@@ -1514,6 +1514,11 @@ import SwiftUI
         #expect(model.collectionCounts == EmailCollectionCounts(
             inbox: 100, needsYou: 8, handled: 0, priority: 6, suspectedSpam: 2))
         #expect(listReads() == before + 2, "The page is read once more, and only once")
+        let pages = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.suffix(2)
+        #expect(pages.allSatisfy { $0.url?.query?.contains("cursor=100") == true },
+                "The repeat asks for page two again, not for the start of the list")
+        #expect(model.items.map(\.id) == [UUID(uuidString: "00000000-0000-0000-0000-000000000899")!],
+                "Page two's row is shown")
         statusRead.release()
         await archiving.value
     }
