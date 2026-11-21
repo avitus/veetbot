@@ -14,8 +14,7 @@
   },
   "calls": [
     "feed.publish",
-    "mcp.read",
-    "model.complete"
+    "mcp.read"
   ],
   "feeds": [
     "agent.emerging-market-radar"
