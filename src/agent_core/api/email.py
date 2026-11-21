@@ -209,7 +209,7 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
         digest = hashlib.sha256(
             json.dumps(
                 [
-                    "email-reader@1",
+                    "email-reader@2",
                     authenticated.tenant_id,
                     authenticated.principal_id,
                     sorted(authenticated.scopes),

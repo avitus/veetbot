@@ -754,7 +754,11 @@ def test_image_projection_merges_only_plain_paragraphs_missing_from_html() -> No
     )
     html_text = "**Already here** with [a link](https://html.example)."
     result = merge_image_body(plain, rich, html_text)
-    assert result == "Missing detail.\n\n" + rich
+    # It follows the paragraph it followed in the plain part.
+    assert result == (
+        "**Already here** with [a link](https://html.example).\n\nMissing detail.\n\n"
+        "![Photo](veetbot-email-image:0)"
+    )
     assert merge_image_body("Already here\nwith a link.", rich, html_text) == rich
     assert merge_image_body("", rich, html_text) == rich
 
@@ -925,3 +929,131 @@ def test_html_column_spans_preserve_financial_table_grid() -> None:
     assert "| Metric | Quarter |  |\n| --- | --- | --- |" in result
     assert "| Revenue | Actual | Plan |" in result
     assert "| Total | $42 |  |" in result
+
+
+def test_plain_paragraphs_missing_from_html_keep_their_place_after_the_note() -> None:
+    """Quoted headers and signatures the HTML words differently follow the writer's note."""
+    from agent_core.application.email_reader import merge_image_body
+
+    plain = (
+        "Also fine with the cashless exercise.\n\n"
+        "From: Sam Example <sam@example.com<mailto:sam@example.com>>\n"
+        "Sent: Tuesday, November 17, 2026 7:42 PM\n"
+        "To: Riley Example <riley@example.com<mailto:riley@example.com>>\n"
+        "Subject: Written consent\n\n"
+        "The board needs to approve the exercise."
+    )
+    html_text = (
+        "Also fine with the cashless exercise.\n\n"
+        "**From:** Sam Example \\<sam@example.com>\\\n"
+        "**Sent:** Tuesday, November 17, 2026 7:42 PM\\\n"
+        "**To:** Riley Example \\<riley@example.com>\\\n"
+        "**Subject:** Written consent\n\n"
+        "The board needs to approve the exercise."
+    )
+    merged = merge_image_body(plain, html_text, html_text, require_overlap=True)
+    paragraphs = merged.split("\n\n")
+    assert paragraphs[0] == "Also fine with the cashless exercise."
+    assert paragraphs[1].startswith("From: Sam Example")
+    assert paragraphs[2].startswith("**From:** Sam Example")
+
+    # A signature the HTML lacks stays under the sign-off it followed.
+    signed = (
+        "Agreed, but we never cover the tax.\n\nDave\n\nDave Example\\\nPartner\\\n0123 456 789"
+    )
+    html_note = "Agreed, but we never cover the tax.\n\nDave\n\nSent from my phone"
+    assert merge_image_body(signed, html_note, html_note, require_overlap=True) == (
+        "Agreed, but we never cover the tax.\n\nDave\n\n"
+        "Dave Example\\\nPartner\\\n0123 456 789\n\nSent from my phone"
+    )
+
+    # A repeated sign-off anchors at its own occurrence, not a later one.
+    repeated = "Thanks,\n\nSam\n\nOnly in plain.\n\nOn Monday Sam wrote:\n\nThanks,\n\nSam"
+    html_repeat = "Thanks,\n\nSam\n\nOn Monday Sam wrote:\n\nThanks,\n\nSam"
+    assert merge_image_body(repeated, html_repeat, html_repeat) == repeated
+
+    # A numbered list the HTML shows as bullets is the same prose, not missing.
+    listed = "Could you share:\n\n1.  The new options needed.\n2.  Any accounting impact."
+    bulleted = "Could you share:\n\n- The new options needed.\n- Any accounting impact."
+    assert merge_image_body(listed, bulleted, bulleted, require_overlap=True) == bulleted
+
+    # A paragraph is never placed inside a fenced block of the HTML text.
+    fenced = "Run this:\n\n```\nmake check\n\nmake docs-check\n```\n\nThanks."
+    assert merge_image_body("make check\n\nOnly in plain.", fenced, fenced) == (
+        "Run this:\n\n```\nmake check\n\nmake docs-check\n```\n\nOnly in plain.\n\nThanks."
+    )
+
+
+def test_outlook_reply_reads_its_note_first() -> None:
+    """The reading text opens on the reply, not on history its plain part words differently."""
+    from agent_core.api.email import prepare_reading_text
+
+    body = (
+        "Makes sense to me\n\n"
+        "From: Sam Example <sam@example.com>\n"
+        "Sent: Thursday, November 19, 2026 11:04 AM\n"
+        "To: Riley Example <riley@example.com>\n"
+        "Subject: Re: Written consent\n\n"
+        "Everyone has signed, so this has passed.\n\n"
+        "On Thu, 19 Nov 2026 at 02:53, Riley Example "
+        "<riley@example.com<mailto:riley@example.com>> wrote:\n\n"
+        "From: Sam Example <sam@example.com<mailto:sam@example.com>>\n"
+        "Sent: 19 November 2026 03:31\n"
+        "To: Dana Example <dana@example.com<mailto:dana@example.com>>\n"
+        "Subject: Re: Written consent\n\n"
+        "The board will decline the payment request."
+    )
+    html = (
+        "<div><p>Makes sense to me</p>"
+        "<div><p><b>From:</b> Sam Example &lt;sam@example.com&gt;<br>"
+        "<b>Sent:</b> Thursday, November 19, 2026 11:04 AM<br>"
+        "<b>To:</b> Riley Example &lt;riley@example.com&gt;<br>"
+        "<b>Subject:</b> Re: Written consent</p></div>"
+        "<p>Everyone has signed, so this has passed.</p>"
+        "<p>On Thu, 19 Nov 2026 at 02:53, Riley Example &lt;riley@example.com&gt; wrote:</p>"
+        "<blockquote><p><b>From:</b> Sam Example &lt;sam@example.com&gt;<br>"
+        "<b>Sent:</b> 19 November 2026 03:31<br>"
+        "<b>To:</b> Dana Example &lt;dana@example.com&gt;</p>"
+        "<p>The board will decline the payment request.</p></blockquote></div>"
+    )
+    result = prepare_reading_text(
+        {
+            "subject": "Re: Written consent",
+            "messages": [
+                {
+                    "subject": "Re: Written consent",
+                    "sender": "Dana Example <dana@example.com>",
+                    "body": body,
+                    "reader_html": html,
+                }
+            ],
+        }
+    )
+    reader = cast(list[dict[str, str]], result["messages"])[0]["reader_body"]
+    assert reader.startswith("Makes sense to me\n\n")
+    # The plain part's wording of the history is kept, below the note.
+    assert "mailto:riley@example.com" in reader
+
+
+def test_placement_survives_literal_lists_nested_fences_and_inline_images() -> None:
+    """Exact list numbers match, a fence closes only on its own marker, images hold no words."""
+    from agent_core.application.email_reader import merge_image_body
+
+    numbered = "Intro.\n\n1. Alpha.\n2. Beta."
+    assert merge_image_body(numbered, numbered, numbered) == numbered
+
+    fenced = "Intro.\n\n````\nalpha\n~~~\n\nbeta\n````\n\nAfter."
+    assert merge_image_body("alpha\n\nOnly in plain.", fenced, fenced) == (
+        "Intro.\n\n````\nalpha\n~~~\n\nbeta\n````\n\nOnly in plain.\n\nAfter."
+    )
+
+    rich = "Hello\n\n![Photo](veetbot-email-image:0)\n\nworld."
+    assert merge_image_body("Hello world.\n\nOnly in plain.", rich, "Hello world.") == (
+        rich + "\n\nOnly in plain."
+    )
+    # A fence the HTML text never closes is closed before anything placed after it.
+    unclosed = "Intro.\n\n```\nalpha"
+    assert merge_image_body("alpha\n\nOnly in plain.", unclosed, unclosed) == (
+        "Intro.\n\n```\nalpha\n```\n\nOnly in plain."
+    )
+    assert merge_image_body("Intro.", unclosed, unclosed) == unclosed
