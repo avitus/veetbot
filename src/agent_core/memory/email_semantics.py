@@ -20,6 +20,7 @@ from agent_core.domain.correspondence import (
     RetainedEmailMessage,
 )
 from agent_core.domain.email import EmailRecord
+from agent_core.domain.email_memory import EmailRerateReport
 from agent_core.domain.email_semantics import (
     EmailSemanticFact as EmailSemanticFact,
 )
@@ -547,6 +548,19 @@ class EmailSemanticFormationService:
             raise ToolTrustRejectedError(
                 "email passage differs from the original normalized result"
             )
+
+    async def rerate_thread(
+        self,
+        account_id: str,
+        provider_thread_id: str,
+        *,
+        apply: bool = True,
+        cause: str = "assessment",
+        run: Run | None = None,
+        lease: WorkerLease | None = None,
+    ) -> EmailRerateReport:
+        """Retention by importance belongs to the People policy (ADR-0340)."""
+        return EmailRerateReport(applied=apply)
 
     async def next_correspondence_summaries(
         self, account_ids: Sequence[str], *, limit: int

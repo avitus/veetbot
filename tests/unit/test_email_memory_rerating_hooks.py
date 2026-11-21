@@ -1,0 +1,211 @@
+"""ADR-0340: where an email memory's retention and standing are recomputed."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from typing import Any
+from uuid import UUID
+
+import pytest
+
+from agent_core.bootstrap import build
+from agent_core.domain.email_memory import EMAIL_RETENTION_POLICY, EmailRerateReport
+from agent_core.domain.errors import AuthorizationError, ConflictError, NotFoundError
+from agent_core.domain.memory import MemoryDerivation, MemoryRecord
+from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+from agent_core.domain.runs import RunStatus
+from agent_core.memory.email_people import EmailPeopleFormationService
+from tests.contract.memory_fixtures import browse_query
+from tests.gates.test_email_m18 import _email_settings
+from tests.unit.test_email_refresh_bulk_formation import EVIDENCE, _mail
+
+
+def _assessment(importance: float) -> ScriptedTurn:
+    return ScriptedTurn(
+        text=json.dumps(
+            {
+                "summary": "Board request",
+                "reason": "Direct request",
+                "topics": ["board"],
+                "content_importance": importance,
+                "relationship_importance": 0,
+                "urgency": 0,
+                "needs_reply": False,
+                "bulk": False,
+                "attention_expires_at": None,
+                "reply_blocked_reason": None,
+                "supported_evidence": [EVIDENCE],
+                "relationship_memory_ids": [],
+                "semantic_facts": [],
+                "people_facts": [
+                    {
+                        "message_id": "m1",
+                        "quote": EVIDENCE,
+                        "belief_type": "fact",
+                        "subject": "Board materials",
+                        "predicate": "requested_action",
+                        "value": "approve the board materials",
+                        "confidence": 0.4,
+                        "people": None,
+                    }
+                ],
+            }
+        )
+    )
+
+
+# Three days after the fixture's message, so no test here depends on today's date.
+NOW = datetime(2026, 9, 14, 12, tzinfo=UTC)
+
+
+async def _memories(app: Any) -> list[MemoryRecord]:
+    async with app.uow_factory() as uow:
+        return list(
+            await uow.memories.browse(
+                browse_query(
+                    tenant_id=app.principal.tenant_id, principal_id=app.principal.principal_id
+                )
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("content_importance", "days"),
+    # The saved rating is 0.9 times the content importance here.
+    [(0.2, 30), (0.6, 90), (0.8, 365), (1.0, None)],
+)
+async def test_a_refresh_keeps_a_new_memory_by_its_threads_saved_importance(
+    content_importance: float, days: int | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rerated: list[tuple[str, str, bool]] = []
+    original = EmailPeopleFormationService.rerate_thread
+
+    async def recording(self: Any, account_id: str, thread_id: str, **kwargs: Any) -> Any:
+        rerated.append((account_id, thread_id, kwargs.get("run") is not None))
+        return await original(self, account_id, thread_id, **kwargs)
+
+    monkeypatch.setattr(EmailPeopleFormationService, "rerate_thread", recording)
+    settings = replace(_email_settings(), email_mode_enabled=True, people_enabled=True)
+    async with build(
+        settings=settings,
+        script=FakeModelScript(turns=[_assessment(content_importance)]),
+        mcp_client_factory=await _mail(census=False),
+        fixed_clock_at=NOW,
+    ) as app:
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure
+        [memory] = await _memories(app)
+        assert memory.lifecycle_policy_version == EMAIL_RETENTION_POLICY
+        assert memory.expires_at == (
+            None if days is None else memory.last_evidence_at + timedelta(days=days)
+        )
+        # An unknown sender stays a guess whatever the thread is rated.
+        assert memory.derivation is MemoryDerivation.HYPOTHESIS
+        # Each saved assessment re-rates the thread's memories under the run's lease.
+        [(account_id, thread_id, under_run)] = rerated
+        assert thread_id == "thread-1" and under_run
+
+        # The owner marks the thread Important: its memory follows at once.
+        async with app.uow_factory() as uow:
+            [thread] = await uow.email.list(app.principal, "thread")
+        marked = await app.services.email.feedback(
+            app.principal,
+            thread_id=UUID(str(thread.payload["id"])),
+            target="thread",
+            judgment="important",
+        )
+        assert rerated[-1] == (account_id, "thread-1", False)
+        [kept] = await _memories(app)
+        assert kept.id == memory.id and kept.expires_at is None
+
+        # Undoing the mark returns the memory to its thread's own rating.
+        await app.services.email.undo_feedback(app.principal, UUID(str(marked["feedback_id"])))
+        [returned] = await _memories(app)
+        assert returned.expires_at == memory.expires_at
+
+
+async def test_feedback_succeeds_when_the_memory_rerating_cannot_run() -> None:
+    settings = replace(_email_settings(), email_mode_enabled=True, people_enabled=True)
+    async with build(
+        settings=settings,
+        script=FakeModelScript(turns=[_assessment(0.6)]),
+        mcp_client_factory=await _mail(census=False),
+        fixed_clock_at=NOW,
+    ) as app:
+        await app.services.email.submit_task(app.principal, kind="refresh")
+        async with app.uow_factory() as uow:
+            [thread] = await uow.email.list(app.principal, "thread")
+
+        async def refused(*_: object) -> None:
+            raise ConflictError("People email source was erased")
+
+        app.services.email.rerate_memories = refused
+        marked = await app.services.email.feedback(
+            app.principal,
+            thread_id=UUID(str(thread.payload["id"])),
+            target="thread",
+            judgment="important",
+        )
+        thread_view = marked["thread"]
+        assert isinstance(thread_view, dict) and thread_view["priority"] == 1.0
+
+
+async def test_the_refresh_continues_when_a_memory_rerating_is_refused() -> None:
+    from unittest.mock import AsyncMock
+
+    from agent_core.runtime.email_tasks import _TaskIO
+
+    semantics = SimpleNamespace(rerate_thread=AsyncMock(side_effect=ConflictError("erased")))
+    run, lease = SimpleNamespace(session_id=UUID(int=1)), object()
+    io = _TaskIO.__new__(_TaskIO)
+    vars(io).update(context=SimpleNamespace(run=run, lease=lease), semantics=semantics)
+    thread = SimpleNamespace(account_id="work", provider_thread_id="t1")
+    await _TaskIO._rerate_memories(io, thread)  # type: ignore[arg-type]
+    semantics.rerate_thread.assert_awaited_once_with("work", "t1", run=run, lease=lease)
+
+
+async def test_the_owner_command_previews_unless_confirmed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_core.cli import main
+    from tests.contract.support import principal
+
+    owner = principal()
+    calls: list[tuple[object, bool]] = []
+
+    async def rerating(who: object, confirm: bool) -> EmailRerateReport:
+        calls.append((who, confirm))
+        return EmailRerateReport(applied=confirm, examined=3, changed=2)
+
+    available: Any = rerating
+
+    @asynccontextmanager
+    async def fake_build(**kwargs: Any) -> AsyncIterator[SimpleNamespace]:
+        assert kwargs == {"storage": "postgres"}
+        yield SimpleNamespace(principal=owner, email_memory_rerating=available)
+
+    monkeypatch.setattr(main, "build", fake_build)
+    identity = f"{owner.tenant_id}/{owner.principal_id}"
+    with pytest.raises(AuthorizationError):
+        await main._memory_rerate_email("other/owner", True)
+    preview = await main._memory_rerate_email(identity, False)
+    assert preview["applied"] is False and preview["changed"] == 2
+    applied = await main._memory_rerate_email(identity, True)
+    assert applied["applied"] is True and calls == [(owner, False), (owner, True)]
+    available = None
+    with pytest.raises(NotFoundError, match="disabled"):
+        await main._memory_rerate_email(identity, False)
+
+
+def test_the_owner_command_is_registered_under_memory() -> None:
+    from typer.testing import CliRunner
+
+    from agent_core.cli.main import app
+
+    result = CliRunner().invoke(app, ["memory", "rerate-email", "--help"])
+    assert result.exit_code == 0
+    assert "--confirm" in result.output and "--owner" in result.output

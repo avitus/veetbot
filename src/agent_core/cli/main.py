@@ -55,6 +55,7 @@ from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.dreaming_recovery import LegacyAttributionManifest
 from agent_core.domain.errors import (
     AgentCoreError,
+    AuthorizationError,
     ConflictError,
     EvalExpectationError,
     ExportConsentError,
@@ -1234,6 +1235,41 @@ def reconsolidations_undo(
             operation_id, ceiling, expected_revision=expected_revision, key=idempotency_key
         )
     )
+
+
+async def _memory_rerate_email(owner: str, confirm: bool) -> dict[str, Any]:
+    async with build(storage="postgres") as composition:
+        principal = composition.principal
+        if owner != f"{principal.tenant_id}/{principal.principal_id}":
+            raise AuthorizationError("--owner must match the configured tenant/principal")
+        rerating = composition.email_memory_rerating
+        if rerating is None:
+            raise NotFoundError("People is disabled")
+        return (await rerating(principal, confirm)).model_dump(mode="json")
+
+
+@memory_app.command("rerate-email")
+def memory_rerate_email(
+    owner: Annotated[
+        str, typer.Option("--owner", help="Exact configured tenant/principal identity.")
+    ],
+    confirm: Annotated[
+        bool, typer.Option("--confirm", help="Apply the re-rating. Without it, only preview.")
+    ] = False,
+) -> None:
+    """Keep live email memories by their thread's importance (ADR-0340); previews unless --confirm.
+
+    Each live memory formed from email takes the expiry its thread's current
+    importance gives, and the standing its sender and thread give. The report
+    holds counts only. Expired memories are not revived.
+    """
+
+    try:
+        report = asyncio.run(_memory_rerate_email(owner, confirm))
+    except (ConfigurationError, AuthorizationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(report))
 
 
 @memory_app.command("get")

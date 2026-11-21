@@ -114,6 +114,16 @@
 # saved jobs. Each schedule names its servers, the approval lists them, and a
 # job's grant names what it may read. Implemented, not yet delivered: the schedule
 # environment must mirror AGENT_SVP_ENABLED first. No milestone or gate moves.
+# ADR-0340 (Accepted, 2026-11-20): the owner asked that email memories be kept
+# longer the more important the email is, and that email still form first-class
+# memories. Retention now follows the thread's importance (30 days, 90 days,
+# 1 year, no expiry); mail from a known sender in a thread kept a year or more
+# forms a plain, direct, unflagged memory. A correspondent's claim still never
+# replaces an owner belief. Existing memories change only when the owner runs
+# `agent memory rerate-email`. Asked the same day, the owner chose retention by
+# importance for every sender, entry to the session-start summary only once a
+# memory is active, and no email memories sent to the dreaming provider.
+# Sandbox tests only; no real mailbox run. No milestone or gate moves.
 # ADR-0339 (Proposed, 2026-11-20): the owner asked for a page on the server to
 # keep the recall question set current. The set moves from two files to the
 # database with full history; a default-off signed-in page and routes maintain

@@ -92,6 +92,7 @@ from agent_core.domain.knowledge import (
     fuse_passage_arms,
 )
 from agent_core.domain.memory import (
+    EMAIL_RETENTION_POLICY,
     HOME_LOCATION_PATTERN,
     LIFECYCLE_POLICY_VERSION,
     OWNED_RESOURCE_PATTERN,
@@ -1209,7 +1210,12 @@ class PostgresMemoryStore:
             MemoryRow.last_evidence_at <= evidence_before,
         ]
         if decay_confidence_ceiling is not None:
-            predicates.append(MemoryRow.lifecycle_policy_version != "people-lifecycle@1")
+            # ADR-0340: an email memory kept by importance ends by its expiry alone.
+            predicates.append(
+                MemoryRow.lifecycle_policy_version.notin_(
+                    ("people-lifecycle@1", EMAIL_RETENTION_POLICY)
+                )
+            )
             predicates.append(
                 or_(
                     MemoryRow.status == MemoryStatus.PROVISIONAL.value,

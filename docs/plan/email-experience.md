@@ -996,10 +996,71 @@ summary (ADR-0126).
 The assessment prompt and revision are unchanged.
 
 Correspondent and historical Sent evidence remain attributed, inferred,
-sensitivity-governed, and unable to supersede an owner assertion. Current
-tentative communication facts retain the existing thirty-day evidence horizon.
+sensitivity-governed, and unable to supersede an owner assertion. A claim from
+email that contradicts a belief formed from anything else is stored beside it
+and both are flagged; it never replaces that belief.
+
+Under the People policy an email memory is kept by its thread's importance and
+may be first-class (ADR-0340). The older evaluated policy keeps the thirty-day
+horizon and the tentative construction.
+
+- **Importance** is the rating the assessment saves on the thread, after the
+  owner's surviving importance feedback. Important sets 1.0 and Less important
+  sets 0.0. A thread with no stored rating counts as 0, and the dated-attention
+  rule does not lower it.
+- **Retention**, measured from the memory's last evidence date:
+
+  | Thread | Kept for |
+  | --- | --- |
+  | importance below 0.3 | 30 days |
+  | 0.3 up to 0.6 | 90 days |
+  | 0.6 up to 0.85 | 1 year |
+  | 0.85 and above, or marked Important, or the owner replied | no expiry |
+
+  The owner replied when the thread holds a message the owner sent. These
+  memories carry the lifecycle label `email-retention@1` and are outside the
+  decay sweep; the expiry alone ends them.
+- **A known sender** is the owner on a message the owner sent, or an address
+  that resolves to exactly one active or provisional person in People through
+  an owner-confirmed, channel-observed or owner-stated identifier. A failed
+  sender check, an unresolved or ambiguous address, and the owner's own address
+  on received mail are unknown.
+- **First-class standing** needs a known sender and a thread kept for a year or
+  more. The statement reads `<sender> said by email on <date> that <subject>
+  <predicate>: "<value>".` Confidence is the extraction's, up to the 0.65
+  ceiling of automatic chat captures. The memory is direct and durable, carries
+  no review flag for coming from email, and stays inferred, sensitive,
+  contextual and provisional. Every other email memory keeps the record-line
+  statement, the 0.4 cap, the hypothesis derivation, the tentative longevity
+  and the review flag.
+- **Re-rating.** Retention and standing are recomputed after every saved
+  assessment of the thread, and at once when the owner gives or undoes feedback
+  on it. These two hooks follow only a memory that already carries
+  `email-retention@1`; a memory formed earlier is brought under the table by
+  the command below. Only a live memory that is still inferred, still under this policy,
+  still worded as an email statement and not yet past its expiry is touched. A
+  memory the owner's own words took over is the owner's, and an expired memory
+  is never revived. A
+  change of standing rewords the statement in place and moves the derivation,
+  longevity and review flag with it. A promoted guess keeps its stored
+  confidence. Each applied change appends one content-free
+  `email.memory.rerated` event. `agent memory rerate-email --owner
+  TENANT/PRINCIPAL` re-rates every live email memory; it previews unless
+  `--confirm` is given, and its report holds counts only.
+- **Renewal.** A later message with a strictly later date that states the same
+  subject, predicate and value renews the existing memory: the evidence date
+  moves and the expiry is recomputed and never shortened. A first-class memory
+  becomes active when the later message is from a known sender too; a guess
+  stays provisional. The message that formed a memory sets its standing; the
+  message that supplied its last evidence sets its retention. The owner's own
+  statement about the same subject takes the memory over under the ordinary
+  rules, and "Still true" replaces it at owner authority.
+- **Not included.** A first-class memory enters the session-start summary only
+  once it is active, as a chat memory does. Email memories are not sent to the
+  dreaming provider.
+
 Historical import measures validity from the original evidence date, not from
-import time. Preserve dated historical records for deliberate historical/as-of
+import time. It keeps the thirty-day horizon whatever the thread is rated. Preserve dated historical records for deliberate historical/as-of
 recall through the existing memory model: an old board appointment can answer
 who served then without becoming a claim that the person serves now. Extend
 the import/source contract and tests to preserve historical validity even when

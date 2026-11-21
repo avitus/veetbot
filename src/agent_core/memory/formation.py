@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from agent_core.application.people_belief_erasure import erase_belief_copies
 from agent_core.domain.agents import Principal
 from agent_core.domain.context import WorkingState
+from agent_core.domain.email_memory import EMAIL_STANDING_POLICY, attributed_email_statement
 from agent_core.domain.errors import (
     ConflictError,
     NotFoundError,
@@ -2621,8 +2622,25 @@ class GovernedMemoryService:
                 )
             )
         )
+        # ADR-0340: mail from a known sender in an important thread states its
+        # claim directly and durably. Authority, sensitivity and portability keep
+        # the attributed ceiling, and only the People email policy may use it.
+        first_class_email = (
+            attributed_external
+            and semantic_external
+            and self._policy_version == EMAIL_STANDING_POLICY
+            and trigger == self._policy_version
+            and origin_trust is TrustLevel.EXTERNAL_UNTRUSTED
+            and not explicit
+            and authority is MemoryAuthority.INFERRED
+            and polarity is Polarity.ASSERT
+            and derivation is MemoryDerivation.DIRECT
+            and longevity is MemoryLongevity.DURABLE
+            and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
+            and portability is Portability.CONTEXTUAL
+        )
         if attributed_external:
-            if not attributed_shape:
+            if not (attributed_shape or first_class_email):
                 raise ToolTrustRejectedError(
                     "attributed communication memory exceeds its authority ceiling"
                 )
@@ -2764,11 +2782,15 @@ class GovernedMemoryService:
                 # supersede or cast doubt on a newer source merely because its
                 # operational event was appended later. One message can also
                 # contain several independent facts about the same subject.
+                # ADR-0340: a correspondent's claim never replaces a belief formed
+                # from anything else. It is stored beside it and both are flagged.
                 classified = [
                     (
                         current,
                         "independent"
                         if relation == "same_source" and current.statement != clean_statement
+                        else "conflict"
+                        if relation == "contradiction" and not _email_claim(current)
                         else relation,
                     )
                     for current, relation in classified
@@ -2794,6 +2816,8 @@ class GovernedMemoryService:
                     )
                     if current.derivation is MemoryDerivation.HYPOTHESIS
                     and derivation is MemoryDerivation.DIRECT
+                    # ADR-0340: only the owner's own statement promotes a guess.
+                    and not attributed_external
                     and current.polarity is Polarity.ASSERT
                     and polarity is Polarity.ASSERT
                     and _AUTHORITY_RANK[authority] >= _AUTHORITY_RANK[current.authority]
@@ -3006,6 +3030,7 @@ class GovernedMemoryService:
                         longevity,
                         evidence_at,
                         attribution_host=attribution_host,
+                        flag_sensitive=not first_class_email,
                     )
                     replacement = proposed.model_copy(
                         update={"flagged_for_review": True, "conflicts_with": [current.id]},
@@ -3062,6 +3087,7 @@ class GovernedMemoryService:
                         longevity,
                         evidence_at,
                         attribution_host=attribution_host,
+                        flag_sensitive=not first_class_email,
                     )
                     position = await uow.memories.next_position()
                     superseded = current.model_copy(
@@ -3109,6 +3135,7 @@ class GovernedMemoryService:
                 longevity,
                 evidence_at,
                 attribution_host=attribution_host,
+                flag_sensitive=not first_class_email,
             )
             if source_learning:
                 record = record.model_copy(update={"consolidation_policy_version": trigger})
@@ -5371,6 +5398,7 @@ class GovernedMemoryService:
         longevity: MemoryLongevity,
         evidence_at: datetime | None,
         attribution_host: str | None = None,
+        flag_sensitive: bool = True,
     ) -> MemoryRecord:
         now = self._clock.now()
         effective_confidence = confidence if confidence is not None else 0.9
@@ -5381,6 +5409,8 @@ class GovernedMemoryService:
                 else (
                     0.65
                     if self._policy_version in DISTILLATION_FORMATION_POLICIES
+                    # ADR-0340: a first-class email memory ranks as a chat capture does.
+                    or self._policy_version == EMAIL_STANDING_POLICY
                     else MAX_INFERRED_CONFIDENCE
                 )
             )
@@ -5418,7 +5448,9 @@ class GovernedMemoryService:
             lifecycle_policy_version=LIFECYCLE_POLICY_VERSION,
             last_reinforced_at=now,
             flagged_for_review=(
-                not explicit and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
+                flag_sensitive
+                and not explicit
+                and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
             ),
             predicate_key=predicate_key(statement, belief_type),
             attribution_host=attribution_host,
@@ -5483,6 +5515,19 @@ class GovernedMemoryService:
                 derivation_key=derivation_key,
             )
         )
+
+
+def _email_claim(record: MemoryRecord) -> bool:
+    """A belief that is still a correspondent's attributed claim (ADR-0340).
+
+    Only such a belief may be superseded by a later email. One the owner's own
+    words took over keeps its email policy label and is the owner's from then on.
+    """
+    return (
+        record.consolidation_policy_version.startswith("email-semantic@")
+        and record.authority is MemoryAuthority.INFERRED
+        and attributed_email_statement(record.statement)
+    )
 
 
 def _corroboration_receipt(belief_id: UUID, session_id: UUID, sources: Sequence[int]) -> str:

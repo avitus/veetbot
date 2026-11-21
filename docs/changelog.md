@@ -4,6 +4,30 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-20 — Email memories are kept by importance (ADR-0340)
+
+- A memory formed from an email used to expire thirty days after the email,
+  whatever the email was. It is now kept by the thread's importance, the same
+  rating that orders the Inbox: thirty days below 0.3, ninety days up to 0.6,
+  a year up to 0.85, and with no expiry at 0.85 and above, or when you marked
+  the thread Important, or when you replied.
+- Mail from someone you know, in a thread kept a year or more, now forms a
+  plain memory: "Alex said by email on 2026-11-18 that ...". It is no longer
+  capped at low confidence or flagged for review merely for coming from email.
+  Mail from anyone else still forms the short record-line guess.
+- A memory follows its thread. Marking a thread Important, replying, or a new
+  rating changes how long its memories are kept and how they read. A later
+  email that repeats a fact renews the memory.
+- A correspondent's claim still never replaces something you said. It is kept
+  beside your statement and both are flagged for you. An email claim could
+  replace an automatically captured statement of yours before; it no longer
+  can.
+- Memories that already exist change only when you run
+  `agent memory rerate-email`, which previews first.
+- By your choice: an email memory enters the session-start summary only once
+  something repeats or confirms it, and email memories are not sent to the
+  dreaming provider.
+
 ## 2026-11-20 — A page for the recall test questions (ADR-0339)
 
 - The questions Veetbot's memory is tested on now live in the database, and you

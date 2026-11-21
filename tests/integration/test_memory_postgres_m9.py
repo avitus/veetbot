@@ -1640,3 +1640,19 @@ async def test_postgres_lifecycle_exemptions_apply_in_the_idle_window(tmp_path: 
             await uow.sessions.create(session())
         async with composition.uow_factory() as uow:
             await lifecycle_exempt_decay_page_contract(uow.memories)
+
+
+async def test_postgres_keeps_email_retention_memories_out_of_the_decay_page(
+    tmp_path: Path,
+) -> None:
+    """ADR-0340: the email retention exemption runs in SQL (shared store contract)."""
+    from tests.contract.support import principal, session
+    from tests.contract.test_memory_store_contract import email_retention_decay_page_contract
+
+    async with build(
+        settings=_settings(tmp_path), storage="postgres", principal=principal()
+    ) as composition:
+        async with composition.uow_factory() as uow:
+            await uow.sessions.create(session())
+        async with composition.uow_factory() as uow:
+            await email_retention_decay_page_contract(uow.memories)

@@ -781,6 +781,13 @@ it inside the idle window when the sweep passes `min_unused_deliveries`, so a
 bounded page is not filled with rows the sweep would skip. Lifecycle decisions
 read the counters, never legacy utility, which stays a ranking input only.
 
+**Email memories kept by importance (ADR-0340).** A belief labelled
+`email-retention@1` is outside automatic decay in any status, as a kinship
+belief labelled `people-lifecycle@1` is. Its expiry is set from its thread's
+importance ([email-experience.md](email-experience.md), Section 6) and is the
+only thing that ends it. Both store adapters leave these rows out of the idle
+window.
+
 `MemoryStore` gains `list_idle(principal, evidence_before, limit)` — live
 beliefs last evidenced at or before an instant, least recently evidenced
 first — and the sweep reads its window through it, cut at the shortest time

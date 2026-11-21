@@ -30,6 +30,7 @@ from agent_core.domain.knowledge import (
     fuse_passage_arms,
 )
 from agent_core.domain.memory import (
+    EMAIL_RETENTION_POLICY,
     LIFECYCLE_POLICY_VERSION,
     SENSITIVITY_ORDER,
     BeliefRejection,
@@ -590,7 +591,8 @@ class InMemoryMemoryStore:
                 and record.last_evidence_at <= evidence_before
                 and (
                     decay_confidence_ceiling is None
-                    or record.lifecycle_policy_version != "people-lifecycle@1"
+                    or record.lifecycle_policy_version
+                    not in {"people-lifecycle@1", EMAIL_RETENTION_POLICY}
                 )
                 and (
                     decay_confidence_ceiling is None

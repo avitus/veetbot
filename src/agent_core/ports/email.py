@@ -22,6 +22,7 @@ from agent_core.domain.email import (
 )
 from agent_core.domain.email_drafting import DraftAttachment
 from agent_core.domain.email_junk import JunkAuthorization
+from agent_core.domain.email_memory import EmailRerateReport
 from agent_core.domain.email_semantics import EmailSemanticFact, EmailSemanticSource
 from agent_core.domain.memory import MemoryRecord
 from agent_core.domain.messages import ConversationItem
@@ -359,6 +360,19 @@ class EmailSemanticPort(Protocol):
         run: Run | None = None,
         lease: WorkerLease | None = None,
     ) -> list[MemoryRecord]: ...
+
+    async def rerate_thread(
+        self,
+        account_id: str,
+        provider_thread_id: str,
+        *,
+        apply: bool = True,
+        cause: str = "assessment",
+        run: Run | None = None,
+        lease: WorkerLease | None = None,
+    ) -> EmailRerateReport:
+        """Make one thread's live email memories follow its importance and sender (ADR-0340)."""
+        ...
 
     async def next_correspondence_summaries(
         self, account_ids: Sequence[str], *, limit: int

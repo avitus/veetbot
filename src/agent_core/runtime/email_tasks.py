@@ -2019,6 +2019,22 @@ class _TaskIO:
                 await self._form_semantics(thread, facts)
             else:
                 await self._record_skipped(thread, skipped, len(facts))
+            await self._rerate_memories(thread)
+
+    async def _rerate_memories(self, thread: EmailThread) -> None:
+        """Let the thread's memories follow the rating just saved (ADR-0340).
+
+        A refused re-rating, such as an erased source, never ends the refresh.
+        """
+        try:
+            await self.semantics.rerate_thread(
+                thread.account_id,
+                thread.provider_thread_id,
+                run=self.context.run,
+                lease=self.context.lease,
+            )
+        except (ConflictError, NotFoundError, ToolTrustRejectedError, ToolValidationError):
+            return
 
     async def _bulk_reason(self, thread: EmailThread, assessment: EmailAssessment) -> str | None:
         """Why bulk mail forms nothing (ADR-0116): the census first, then the verdict.

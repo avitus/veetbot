@@ -312,6 +312,7 @@ class EmailExperienceService:
         release_session_transports: Callable[[UUID], Awaitable[None]] | None = None,
         forget_source: Callable[[Principal, str, str, frozenset[str]], Awaitable[None]]
         | None = None,
+        rerate_memories: Callable[[Principal, str, str], Awaitable[None]] | None = None,
         cleanup_artifacts: Callable[[], Awaitable[None]] | None = None,
         cancel_parked_run: Callable[[RepositoryUnitOfWork, Run, str], Awaitable[Run]] | None = None,
         resolve_archive_approval: Callable[[Principal, UUID, WorkerLease | None], Awaitable[None]]
@@ -345,6 +346,7 @@ class EmailExperienceService:
         self.close_session = close_session
         self.release_session_transports = release_session_transports or close_session
         self.forget_source = forget_source
+        self.rerate_memories = rerate_memories
         self.cleanup_artifacts = cleanup_artifacts
         self.cancel_parked_run = cancel_parked_run
         self.resolve_archive_approval = resolve_archive_approval
@@ -718,7 +720,7 @@ class EmailExperienceService:
                     ),
                     expected_revision=0,
                 )
-            return {
+            result: dict[str, object] = {
                 "feedback_id": str(item.id),
                 "thread": thread_summary(
                     apply_feedback(
@@ -726,10 +728,26 @@ class EmailExperienceService:
                     )
                 ),
             }
+        await self._memories_follow(principal, thread)
+        return result
+
+    async def _memories_follow(self, principal: Principal, thread: EmailThread) -> None:
+        """Let the thread's email memories follow the owner's feedback at once (ADR-0340).
+
+        The feedback is already committed. A refused re-rating never fails it;
+        the next assessment of the thread re-rates again.
+        """
+        if self.rerate_memories is None:
+            return
+        try:
+            await self.rerate_memories(principal, thread.account_id, thread.provider_thread_id)
+        except (ConflictError, NotFoundError):
+            return
 
     async def undo_feedback(self, principal: Principal, feedback_id: UUID) -> dict[str, object]:
         """Undo one feedback record and rebuild the thread projection from surviving evidence."""
         require_scope(principal, "email.write")
+        undone = False
         async with self.uow_factory() as uow, uow.email.lock(principal):
             item = await read_value(
                 uow.email, principal, "feedback", str(feedback_id), EmailFeedback
@@ -746,12 +764,16 @@ class EmailExperienceService:
                     self.clock.now(),
                 )
                 await self._bump_profile(uow.email, principal)
+                undone = True
             thread = await self._thread(uow.email, principal, item.thread_id)
-            return thread_summary(
+            summary = thread_summary(
                 apply_feedback(
                     thread, await self._feedback(uow.email, principal), now=self.clock.now()
                 )
             )
+        if undone:
+            await self._memories_follow(principal, thread)
+        return summary
 
     async def _draft(self, store: EmailStore, principal: Principal, draft_id: UUID) -> EmailDraft:
         """Read one authorized draft; a settled body past the window is withheld."""

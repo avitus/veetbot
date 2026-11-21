@@ -2190,6 +2190,26 @@ agent memory questions record --report /var/tmp/question-run.json         # on p
 `agent memory questions export --split holdout --output PATH` writes a half back
 out as a probe file readable by its owner alone.
 
+### Email memories kept by importance (ADR-0340)
+
+A deploy changes no existing memory. New email memories take their retention
+and standing as they form, and those memories follow their thread at each
+later assessment and at each piece of owner feedback. A memory that formed
+before the change is left as it was until the owner re-rates the live email
+memories with one command, run as the operator from the current release:
+
+```sh
+agent memory rerate-email --owner TENANT/PRINCIPAL            # preview: counts only
+agent memory rerate-email --owner TENANT/PRINCIPAL --confirm  # apply
+```
+
+The report is content-free: memories examined and changed, how many became
+first-class or returned to a guess, and how many fall in each retention tier.
+Run the preview first and keep its output. The command needs People enabled,
+revives no expired memory, and is safe to repeat; a second run changes
+nothing. Run the owner question set on a clone before the first `--confirm`
+and again after it, as for any recall change.
+
 ### Conflict reconciliation (ADR-0248)
 
 `agent memory reconcile-conflicts` re-evaluates every live `conflicts_with`

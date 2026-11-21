@@ -46,6 +46,9 @@ class MemoryStatus(StrEnum):
 # rather than belief; a caller that wants history names the statuses it wants.
 LIVE_MEMORY_STATUSES: tuple[MemoryStatus, ...] = (MemoryStatus.ACTIVE, MemoryStatus.PROVISIONAL)
 LIFECYCLE_POLICY_VERSION = "lifecycle@2"
+# ADR-0340: an email memory kept by its thread's importance. Its expiry alone
+# ends it, so the decay sweep leaves it out, as it does kinship beliefs.
+EMAIL_RETENTION_POLICY = "email-retention@1"
 INTEGRATED_EPISODE_MAX_SUBJECTS = 64
 # The lossless fallback episode cites every owned event of its segment on one
 # line each, and segmentation never splits an event, so this must hold the
@@ -150,6 +153,9 @@ def decay_eligible_lifecycle(record: MemoryRecord, min_unused_deliveries: int) -
     observations keep the evidence-clock rule of adaptive-memory-distillation.md.
     """
     if record.authority is MemoryAuthority.USER:
+        return False
+    if record.lifecycle_policy_version == EMAIL_RETENTION_POLICY:
+        # ADR-0340: kept for as long as its thread's importance says.
         return False
     if (
         record.authority is MemoryAuthority.AFFIRMED

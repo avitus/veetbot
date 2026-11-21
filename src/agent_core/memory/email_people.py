@@ -18,13 +18,36 @@ from agent_core.domain.correspondence import (
     header_text,
     summary_text,
 )
-from agent_core.domain.email import EMAIL_HISTORY_DAYS, EmailRecord
+from agent_core.domain.email import (
+    EMAIL_HISTORY_DAYS,
+    EmailAccount,
+    EmailFeedback,
+    EmailMessage,
+    EmailRecord,
+    EmailThread,
+)
+from agent_core.domain.email_memory import (
+    EMAIL_RETENTION_POLICY,
+    EMAIL_STANDING_POLICY,
+    FIRST_CLASS_CONFIDENCE_CEILING,
+    GUESS_CONFIDENCE_CEILING,
+    UNRATED,
+    EmailMemoryStanding,
+    EmailRerateReport,
+    attributed_email_statement,
+    claim_text,
+    first_class_statement,
+    guess_statement,
+    restated,
+    thread_importance,
+)
 from agent_core.domain.email_people import EmailPeopleFact
 from agent_core.domain.email_people_evidence import EmailPeopleEvidence
 from agent_core.domain.email_semantics import (
     EmailSemanticFact,
     EmailSemanticSource,
     semantic_source_key,
+    thread_source_key,
 )
 from agent_core.domain.errors import (
     ConflictError,
@@ -34,11 +57,13 @@ from agent_core.domain.errors import (
 )
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import (
+    LIVE_MEMORY_STATUSES,
     MemoryAuthority,
     MemoryCandidate,
     MemoryDerivation,
     MemoryLongevity,
     MemoryRecord,
+    MemoryStatus,
     Polarity,
     Portability,
     Sensitivity,
@@ -49,6 +74,7 @@ from agent_core.domain.people import (
     PeopleInteraction,
     PeopleQuery,
     PeopleSource,
+    Person,
     observed_email_label,
     summary_pending,
 )
@@ -59,7 +85,8 @@ from agent_core.domain.runs import Run
 from agent_core.memory.communication_sources import FormationSource, FormationSourceKind
 from agent_core.memory.email_semantics import EmailSemanticFormationService
 from agent_core.memory.formation import GovernedMemoryService
-from agent_core.memory.people_correspondence import project_correspondence
+from agent_core.memory.people import resolve_identity
+from agent_core.memory.people_correspondence import _addresses, project_correspondence
 from agent_core.memory.people_formation import (
     PreparedPeople,
     email_source_id,
@@ -67,10 +94,43 @@ from agent_core.memory.people_formation import (
     persist_people,
     prepare_people,
 )
+from agent_core.memory.predicates import predicate_key
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
-EMAIL_PEOPLE_POLICY = "email-semantic@2"
+EMAIL_PEOPLE_POLICY = EMAIL_STANDING_POLICY
+# Sources one re-rating transaction examines before it commits and continues.
+_RERATE_PAGE = 200
+
+
+class _Rerating:
+    """One pass's stored-state reads and its per-memory outcomes (ADR-0340)."""
+
+    def __init__(self) -> None:
+        self.feedback: list[EmailFeedback] | None = None
+        self.owned: frozenset[str] | None = None
+        self.threads: dict[str, EmailThread | None] = {}
+        self.known: dict[tuple[str, str, str], bool] = {}
+        self.changed: set[UUID] = set()
+        self.promoted: set[UUID] = set()
+        self.demoted: set[UUID] = set()
+        self.first_class: dict[UUID, bool] = {}
+        self.retention: dict[UUID, str] = {}
+
+    def report(self, *, applied: bool) -> EmailRerateReport:
+        by_retention: dict[str, int] = {}
+        for label in self.retention.values():
+            by_retention[label] = by_retention.get(label, 0) + 1
+        return EmailRerateReport(
+            applied=applied,
+            examined=len(self.first_class),
+            changed=len(self.changed),
+            promoted=len(self.promoted),
+            demoted=len(self.demoted),
+            first_class=sum(self.first_class.values()),
+            guesses=sum(not value for value in self.first_class.values()),
+            by_retention=by_retention,
+        )
 
 
 class EmailPeopleFormationService(EmailSemanticFormationService):
@@ -655,6 +715,408 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     uow, self._principal, source, header, event, self._clock.now()
                 )
 
+    async def _standing(
+        self,
+        uow: RepositoryUnitOfWork,
+        account_id: str,
+        provider_thread_id: str,
+        message_id: str,
+        *,
+        sender: str | None = None,
+        seen: _Rerating | None = None,
+    ) -> EmailMemoryStanding:
+        """What stored state says about this message's thread and sender (ADR-0340).
+
+        Everything is read from the mailbox projection and People, never from
+        the caller. A thread with no stored record is unrated and its sender
+        unknown, which is today's thirty-day guess.
+        """
+        seen = seen or _Rerating()
+        source_key = thread_source_key(account_id, provider_thread_id)
+        if source_key not in seen.threads:
+            index = await uow.email.get(self._principal, "thread_source", source_key)
+            thread_id = None if index is None else index.payload.get("thread_id")
+            row = (
+                await uow.email.get(self._principal, "thread", thread_id)
+                if isinstance(thread_id, str)
+                else None
+            )
+            seen.threads[source_key] = (
+                None if row is None else EmailThread.model_validate(row.payload)
+            )
+        thread = seen.threads[source_key]
+        if thread is None:
+            return UNRATED
+        if seen.feedback is None:
+            seen.feedback = []
+            after: str | None = None
+            while page := await uow.email.list(self._principal, "feedback", after=after):
+                seen.feedback.extend(EmailFeedback.model_validate(row.payload) for row in page)
+                after = page[-1].key
+        importance, marked = thread_importance(thread, seen.feedback)
+        message = next((item for item in thread.messages if item.id == message_id), None)
+        known = False
+        if message is not None and (sender is None or message.sender == sender):
+            known_key = (account_id, provider_thread_id, message_id)
+            if known_key not in seen.known:
+                seen.known[known_key] = await self._known_sender(uow, message, seen)
+            known = seen.known[known_key]
+        return EmailMemoryStanding(
+            importance=importance,
+            owner_marked_important=marked,
+            owner_replied=any(item.direction == "sent" for item in thread.messages),
+            known_sender=known,
+        )
+
+    async def _known_sender(
+        self, uow: RepositoryUnitOfWork, message: EmailMessage, seen: _Rerating
+    ) -> bool:
+        """The owner on their own sent mail, or one person the owner knows or writes to."""
+        if message.sender_check == "fail":
+            # ADR-0165: an address that failed its check proves nothing about who wrote.
+            return False
+        senders = _addresses(message.sender)
+        if len(senders) != 1:
+            return False
+        address = senders[0][1]
+        if seen.owned is None:
+            accounts = await uow.email.list(self._principal, "account", limit=101)
+            seen.owned = frozenset(
+                owned.casefold()
+                for row in accounts
+                for account in [EmailAccount.model_validate(row.payload)]
+                for _, owned in _addresses([account.email_address, *account.verified_addresses])
+            )
+        if address.casefold() in seen.owned:
+            return message.direction == "sent"
+        if message.direction == "sent":
+            return False
+        match = await resolve_identity(
+            uow.people,
+            self._principal,
+            kind="email",
+            namespace="owner",
+            value=address,
+            context="owner",
+            at=self._clock.now(),
+            ceiling=Sensitivity.SENSITIVE,
+        )
+        if match.status != "matched":
+            return False
+        person = await uow.people.get(
+            self._principal, match.person_ids[0], ceiling=Sensitivity.RESTRICTED
+        )
+        return isinstance(person, Person) and person.state in {"active", "provisional"}
+
+    def _governed_by_table(self, memory: MemoryRecord) -> bool:
+        """A live email memory nothing of the owner's has taken over, and not yet expired."""
+        return (
+            memory.consolidation_policy_version == EMAIL_PEOPLE_POLICY
+            and memory.authority is MemoryAuthority.INFERRED
+            and memory.status in LIVE_MEMORY_STATUSES
+            and memory.superseded_by is None
+            and attributed_email_statement(memory.statement)
+            and (memory.expires_at is None or memory.expires_at > self._clock.now())
+        )
+
+    async def _renew(
+        self,
+        uow: RepositoryUnitOfWork,
+        source: EmailSemanticSource,
+        subject: str,
+        fact: EmailSemanticFact,
+        standing: EmailMemoryStanding,
+        run_id: UUID | None,
+    ) -> MemoryRecord | None:
+        """The memory a different, earlier message already formed for this exact claim.
+
+        A strictly later message renews it: the evidence date moves and the
+        expiry is recomputed and never shortened. A first-class memory becomes
+        active when the later message is from a known sender too. Older or
+        same-dated mail that is processed afterwards finds the memory and
+        changes nothing.
+        """
+        claim = " ".join(claim_text(fact.subject, fact.predicate, fact.value).split())
+        related = await uow.memories.related(
+            self._principal.tenant_id, self._principal.principal_id, subject, fact.belief_type
+        )
+        current = next(
+            (
+                row
+                for row in sorted(related, key=lambda item: item.store_position, reverse=True)
+                if self._governed_by_table(row)
+                and row.polarity is Polarity.ASSERT
+                and row.statement.endswith((f" reports {claim}", f" that {claim}"))
+            ),
+            None,
+        )
+        if current is None:
+            return None
+        if source.sent_at <= current.last_evidence_at:
+            return current
+        expiry = standing.expires_at(source.sent_at)
+        if current.expires_at is None or (expiry is not None and expiry < current.expires_at):
+            expiry = current.expires_at
+        ceiling = (
+            FIRST_CLASS_CONFIDENCE_CEILING
+            if current.derivation is MemoryDerivation.DIRECT
+            else GUESS_CONFIDENCE_CEILING
+        )
+        now = self._clock.now()
+        # Only someone the owner knows settles a first-class memory. A stranger
+        # sending a claim twice renews its dates and leaves it a provisional guess.
+        settles = current.derivation is MemoryDerivation.DIRECT and standing.known_sender
+        renewed = await uow.memories.reinforce(
+            current.model_copy(
+                update={
+                    "last_evidence_at": source.sent_at,
+                    "evidence_count": current.evidence_count + 1,
+                    "corroboration_count": current.corroboration_count + int(settles),
+                    "confidence": max(current.confidence, min(ceiling, current.confidence + 0.1))
+                    if settles
+                    else current.confidence,
+                    "expires_at": expiry,
+                    "status": MemoryStatus.ACTIVE if settles else current.status,
+                    "lifecycle_policy_version": EMAIL_RETENTION_POLICY,
+                    "last_reinforced_at": now,
+                    "store_position": await uow.memories.next_position(),
+                    "updated_at": now,
+                },
+                deep=True,
+            )
+        )
+        await self._governed._append_event(
+            uow, source.session_id, run_id, "memory.reinforced", renewed
+        )
+        return renewed
+
+    async def _keep_by_table(
+        self, uow: RepositoryUnitOfWork, memory: MemoryRecord, standing: EmailMemoryStanding
+    ) -> MemoryRecord:
+        """Give a newly formed memory the table's expiry and its lifecycle label.
+
+        Formation fills a missing expiry with thirty days for a tentative claim,
+        which the table's upper tiers must replace. Old mail may form a memory
+        that is already past its expiry, so the date is set whatever it is.
+        """
+        expiry = standing.expires_at(memory.last_evidence_at)
+        if (
+            memory.consolidation_policy_version != EMAIL_PEOPLE_POLICY
+            or memory.authority is not MemoryAuthority.INFERRED
+            or memory.status not in LIVE_MEMORY_STATUSES
+            or memory.superseded_by is not None
+            or not attributed_email_statement(memory.statement)
+            or (
+                memory.expires_at == expiry
+                and memory.lifecycle_policy_version == EMAIL_RETENTION_POLICY
+            )
+        ):
+            return memory
+        return await uow.memories.reinforce(
+            memory.model_copy(
+                update={"expires_at": expiry, "lifecycle_policy_version": EMAIL_RETENTION_POLICY},
+                deep=True,
+            )
+        )
+
+    async def _rerate_source(
+        self,
+        uow: RepositoryUnitOfWork,
+        record: EmailRecord,
+        seen: _Rerating,
+        *,
+        apply: bool,
+        adopt: bool,
+    ) -> list[UUID]:
+        """Re-rate the memories one retained message governs; returns those it changed.
+
+        A message governs a memory's retention when it supplied the memory's
+        last evidence, and its standing and wording when it formed the memory.
+        For a memory nothing renewed, that is the same message. Only the
+        owner's command adopts a memory formed before the table existed; the
+        hooks follow memories already under it, so nothing is backfilled silently.
+        """
+        payload = record.payload
+        account_id, thread_id, message_id = (
+            payload.get("account_id"),
+            payload.get("provider_thread_id"),
+            payload.get("message_id"),
+        )
+        memory_ids = payload.get("memory_ids")
+        try:
+            evidence_at = datetime.fromisoformat(str(payload.get("evidence_at")))
+        except ValueError:
+            return []
+        if (
+            payload.get("excluded")
+            or not isinstance(account_id, str)
+            or not isinstance(thread_id, str)
+            or not isinstance(message_id, str)
+            or not isinstance(memory_ids, list)
+        ):
+            return []
+        standing = await self._standing(uow, account_id, thread_id, message_id, seen=seen)
+        changed: list[UUID] = []
+        for value in memory_ids:
+            try:
+                memory = await uow.memories.get(UUID(str(value)), self._principal)
+            except (NotFoundError, ValueError):
+                continue
+            latest = memory.last_evidence_at == evidence_at
+            origin = memory.valid_from == evidence_at
+            if (
+                not self._governed_by_table(memory)
+                or not (latest or origin)
+                or not (adopt or memory.lifecycle_policy_version == EMAIL_RETENTION_POLICY)
+            ):
+                continue
+            update: dict[str, object] = {}
+            first_class = memory.derivation is MemoryDerivation.DIRECT
+            if origin and standing.first_class != first_class:
+                statement = restated(
+                    memory.statement,
+                    account_id=account_id,
+                    thread_id=thread_id,
+                    message_id=message_id,
+                    first_class=standing.first_class,
+                )
+                if statement is not None:
+                    first_class = standing.first_class
+                    update.update(
+                        statement=statement,
+                        predicate_key=predicate_key(statement, memory.belief_type),
+                        derivation=MemoryDerivation.DIRECT
+                        if first_class
+                        else MemoryDerivation.HYPOTHESIS,
+                        longevity=MemoryLongevity.DURABLE
+                        if first_class
+                        else MemoryLongevity.TENTATIVE,
+                        # A conflict link still asks the owner which belief holds.
+                        flagged_for_review=not first_class or bool(memory.conflicts_with),
+                        confidence=memory.confidence
+                        if first_class
+                        else min(memory.confidence, GUESS_CONFIDENCE_CEILING),
+                    )
+                    (seen.promoted if first_class else seen.demoted).add(memory.id)
+            if latest:
+                expiry = standing.expires_at(memory.last_evidence_at)
+                if expiry != memory.expires_at:
+                    update["expires_at"] = expiry
+                if memory.lifecycle_policy_version != EMAIL_RETENTION_POLICY:
+                    update["lifecycle_policy_version"] = EMAIL_RETENTION_POLICY
+                seen.retention[memory.id] = standing.retention
+            seen.first_class[memory.id] = first_class
+            if not update:
+                continue
+            seen.changed.add(memory.id)
+            changed.append(memory.id)
+            if apply:
+                now = self._clock.now()
+                if "statement" in update:
+                    # A reworded belief is a change the next turn should see.
+                    update["store_position"] = await uow.memories.next_position()
+                await uow.memories.reinforce(
+                    memory.model_copy(update={**update, "updated_at": now}, deep=True)
+                )
+        return changed
+
+    async def _audit_rerating(
+        self,
+        uow: RepositoryUnitOfWork,
+        changed: list[UUID],
+        *,
+        cause: str,
+        run: Run | None,
+        lease: WorkerLease | None,
+    ) -> None:
+        """One content-free event per applied re-rating that changed something."""
+        if run is None and lease is not None:
+            raise ToolValidationError("semantic lease requires its owning run")
+        if not changed:
+            return
+        session_id = run.session_id if run is not None else None
+        if session_id is None:
+            session_id = (await uow.memories.get(changed[0], self._principal)).source_session_id
+        await uow.events.append(
+            NewEvent(
+                session_id=session_id,
+                run_id=None if run is None else run.id,
+                event_type="email.memory.rerated",
+                actor_type="runtime" if run is not None else "memory",
+                payload={
+                    "cause": cause,
+                    "policy_version": EMAIL_RETENTION_POLICY,
+                    "belief_ids": sorted(str(value) for value in changed),
+                },
+            ),
+            lease=lease,
+        )
+
+    async def rerate_thread(
+        self,
+        account_id: str,
+        provider_thread_id: str,
+        *,
+        apply: bool = True,
+        cause: str = "assessment",
+        run: Run | None = None,
+        lease: WorkerLease | None = None,
+    ) -> EmailRerateReport:
+        """Make one thread's live email memories follow its current importance and sender."""
+        seen = _Rerating()
+        if not self.enabled:
+            return seen.report(applied=apply)
+        async with (
+            self._uow_factory() as uow,
+            uow.email.lock(self._principal),
+            uow.people.lock(self._principal),
+        ):
+            await self._standing(uow, account_id, provider_thread_id, "", seen=seen)
+            thread = seen.threads.get(thread_source_key(account_id, provider_thread_id))
+            changed: list[UUID] = []
+            for message in [] if thread is None else thread.messages:
+                record = await uow.email.get(
+                    self._principal,
+                    "semantic_source",
+                    semantic_source_key(account_id, provider_thread_id, message.id),
+                )
+                if record is not None:
+                    changed += await self._rerate_source(
+                        uow, record, seen, apply=apply, adopt=False
+                    )
+            if apply:
+                await self._audit_rerating(uow, changed, cause=cause, run=run, lease=lease)
+        return seen.report(applied=apply)
+
+    async def rerate_all(self, *, apply: bool) -> EmailRerateReport:
+        """Re-rate every live email memory; a preview unless `apply` (ADR-0340).
+
+        Sources are read in key order, a bounded page per transaction, so the
+        mailbox lock is never held across the whole store.
+        """
+        seen = _Rerating()
+        if not self.enabled:
+            return seen.report(applied=apply)
+        after: str | None = None
+        while True:
+            async with (
+                self._uow_factory() as uow,
+                uow.email.lock(self._principal),
+                uow.people.lock(self._principal),
+            ):
+                page = await uow.email.list(
+                    self._principal, "semantic_source", after=after, limit=_RERATE_PAGE
+                )
+                changed: list[UUID] = []
+                for record in page:
+                    changed += await self._rerate_source(uow, record, seen, apply=apply, adopt=True)
+                if apply:
+                    await self._audit_rerating(uow, changed, cause="command", run=None, lease=None)
+            if len(page) < _RERATE_PAGE:
+                break
+            after = page[-1].key
+        return seen.report(applied=apply)
+
     async def _prepare_fact_people(
         self,
         uow: RepositoryUnitOfWork,
@@ -812,6 +1274,20 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             prior_facts = registered.payload.get("facts", {})
             fact_ids = dict(prior_facts) if isinstance(prior_facts, dict) else {}
             formed = []
+            # A historical import keeps the thirty-day horizon from the source
+            # date, so importing never makes an old claim current (gate 26).
+            standing = (
+                UNRATED
+                if self._import_window is not None
+                else await self._standing(
+                    uow,
+                    source.account_id,
+                    source.provider_thread_id,
+                    source.message_id,
+                    sender=source.sender,
+                )
+            )
+            first_class = standing.first_class
             for fact, linked in prepared:
                 key = hashlib.sha256(
                     json.dumps(
@@ -826,17 +1302,33 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                         continue
                     formed.append(prior)
                     continue
+                subject = linked.subject if linked else fact.subject
+                renewed = await self._renew(uow, source, subject, fact, standing, run_id)
+                if renewed is not None:
+                    formed.append(renewed)
+                    fact_ids[key] = str(renewed.id)
+                    continue
+                claim = claim_text(fact.subject, fact.predicate, fact.value)
+                sent_on = source.sent_at.date().isoformat()
+                # ADR-0340: a known sender in an important thread states the claim
+                # plainly; every other email memory keeps the record line.
                 statement = (
-                    f"Email from {source.sender} on {source.sent_at.date().isoformat()} "
-                    f"(mailbox {source.account_id}, thread {source.provider_thread_id}, "
-                    f"message {source.message_id}) reports {fact.subject} "
-                    f'{fact.predicate}: "{fact.value}".'
+                    first_class_statement(source.sender, sent_on, claim)
+                    if first_class
+                    else guess_statement(
+                        source.sender,
+                        sent_on,
+                        source.account_id,
+                        source.provider_thread_id,
+                        source.message_id,
+                        claim,
+                    )
                 )
                 belief, _ = await self._governed.remember_formation(
                     session_id=source.session_id,
                     run_id=run_id,
                     statement=statement,
-                    subject=linked.subject if linked else fact.subject,
+                    subject=subject,
                     scope=scope,
                     belief_type=fact.belief_type,
                     portability=Portability.CONTEXTUAL,
@@ -846,19 +1338,25 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     explicit=False,
                     authority=MemoryAuthority.INFERRED,
                     polarity=Polarity.ASSERT,
-                    confidence=min(fact.confidence, 0.4),
+                    confidence=min(
+                        fact.confidence,
+                        FIRST_CLASS_CONFIDENCE_CEILING if first_class else GUESS_CONFIDENCE_CEILING,
+                    ),
                     valid_from=source.sent_at,
-                    expires_at=source.sent_at + timedelta(days=30),
+                    expires_at=standing.expires_at(source.sent_at),
                     trigger=EMAIL_PEOPLE_POLICY,
                     record_audit=True,
-                    derivation=MemoryDerivation.HYPOTHESIS,
-                    longevity=MemoryLongevity.TENTATIVE,
+                    derivation=MemoryDerivation.DIRECT
+                    if first_class
+                    else MemoryDerivation.HYPOTHESIS,
+                    longevity=MemoryLongevity.DURABLE if first_class else MemoryLongevity.TENTATIVE,
                     evidence_at=source.sent_at,
                     attributed_external=True,
                     semantic_external=True,
                     existing_uow=uow,
                     audit_model=f"{self._provider}/{self._model}",
                 )
+                belief = await self._keep_by_table(uow, belief, standing)
                 if linked is not None:
                     await persist_people(
                         uow.people, self._principal, linked, belief, self._clock.now()
