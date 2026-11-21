@@ -520,8 +520,9 @@ standing wherever it sorts and whichever thread it is in.
 
   ADR-0336 reads signatures under the same control and carries the same
   risk. The owner asked that mail from people they know form first-class
-  memories; the owner accepts this risk with that, or revisits the rule here
-  and in ADR-0336 together.
+  memories and, shown this risk and a stricter rule that would count only
+  replies to mail the owner sent, chose on 2026-11-21 to keep the sender
+  check as it is. A change to it is made here and in ADR-0336 together.
 - A first-class statement no longer carries identifiers, so two emails that say
   the same thing read alike apart from sender and date. The renewal rule folds
   the exact repeats.

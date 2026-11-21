@@ -164,9 +164,12 @@ next refresh. And the client decides which numbers hold a conversation by its
 own copy of the server's rules (the Important and Inbox thresholds, Needs you,
 Handled, Suspected spam, Other mail, the account filter and the search match),
 so a server rule that changes first makes the adjustment wrong for as long as
-an archive is pending. The remedy is on the server and is follow-up work: the
-list response should say, with its numbers, which of them hold each
-conversation that has a pending archive.
+an archive is pending. Removing either would need the server: a list response
+that says, with its numbers, which of them hold each conversation that has a
+pending archive. The owner decided on 2026-11-21 that this is not needed:
+these numbers are eventually consistent. They may be off by one per hidden
+conversation for a moment and are right again at the next refresh, and the
+client adds no further machinery to make them exact in between.
 
 Legacy clients' **Mark handled** command remains a local, reversible dismissal
 of that source revision. It does not archive Gmail and is not evidence that a
