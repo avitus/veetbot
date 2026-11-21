@@ -4,6 +4,35 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-20 — Email memory, signature and Email screen repairs from review (ADR-0336, ADR-0340, ADR-0341)
+
+- An email memory is now shortened or returned to a guess only on a known
+  rating. An older record's partial score, a rejected or ungrounded
+  assessment and a junk first pass can lengthen it but not shorten it.
+- Mail counts as from someone you know only when Gmail's sender check passed,
+  so a message that merely claims a familiar address stays an attributed
+  guess. It is still kept by its thread's importance.
+- Marking a person or topic Important now lengthens their memories in other
+  threads at once. Less important still reaches other threads only at their
+  next assessment or when you run `agent memory rerate-email`, because a
+  shortened memory cannot be brought back.
+- Re-rating tells messages apart by their own record instead of their
+  timestamp, re-reads your feedback for each page of `rerate-email`, and its
+  preview matches what applying does. A retried feedback request resumes a
+  re-rating that did not run.
+- Fact values keep the punctuation that changes them (`-5 °C` is not `5 °C`),
+  and a merge gives the memory it keeps the latest evidence and longest
+  retention of its copies.
+- The Email reading text keeps a postscript written under a `-- ` signature
+  delimiter while still removing the rest of the block, and no longer reads a
+  list of names under a heading as a signature. People places a signature read
+  out of order between the ones already recorded, so only one title holds at
+  a time.
+- Email on Mac, iPad and iPhone: archiving a conversation and then opening
+  another collection, account or page no longer puts it back into the sidebar
+  counts while Gmail is still confirming the archive. Discarding a reply
+  brings Reply and Draft with Veetbot back at once.
+
 ## 2026-11-20 — A recorded run belongs to the question content it tested (ADR-0338, ADR-0339)
 
 - A recall question's recorded result now names a fingerprint of what the

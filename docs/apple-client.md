@@ -946,7 +946,7 @@ applied with its own Undo. Topic feedback uses selectable
 chips and still requires an explicit topic. The thread menu offers Mark handled
 and Mark not handled separately from Archive in Gmail. On Mac, iPad and iPhone, the reply body grows inline below the conversation.
 The recipient line opens the envelope for editing. Close saves the draft
-before returning to the manual and Veetbot reply choices. Anything
+before returning to the manual and Veetbot reply choices; a discarded or sent reply returns to them too. Anything
 the draft waits on (new mail in the thread, an unknown send status, a pending
 approval, an edit from another device) is one amber-ruled card that names the
 decision with its action beside it; a save refused because another device
