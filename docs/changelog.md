@@ -22,6 +22,9 @@ title: Changelog
   beside your statement and both are flagged for you. An email claim could
   replace an automatically captured statement of yours before; it no longer
   can.
+- A memory is shortened or demoted only on a full, current reading of its
+  thread. A thread whose rating is waiting to be redone after a new message,
+  or a long thread only partly stored, never lowers a memory.
 - Memories that already exist change only when you run
   `agent memory rerate-email`, which previews first.
 - By your choice: an email memory enters the session-start summary only once

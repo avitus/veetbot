@@ -107,6 +107,13 @@ async def test_a_refresh_keeps_a_new_memory_by_its_threads_saved_importance(
         )
         # An unknown sender stays a guess whatever the thread is rated.
         assert memory.derivation is MemoryDerivation.HYPOTHESIS
+        # The rating is kept with the assessment, for when a new message resets the thread's.
+        async with app.uow_factory() as uow:
+            [rated] = await uow.email.list(app.principal, "thread")
+            assessment = await uow.email.get(app.principal, "assessment", str(rated.payload["id"]))
+        assert assessment is not None
+        assert assessment.payload["priority"] == rated.payload["priority"]
+        assert float(str(rated.payload["priority"])) > 0
         # Each saved assessment re-rates the thread's memories under the run's lease.
         [(account_id, thread_id, under_run)] = rerated
         assert thread_id == "thread-1" and under_run

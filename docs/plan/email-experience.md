@@ -1008,6 +1008,9 @@ horizon and the tentative construction.
   owner's surviving importance feedback. Important sets 1.0 and Less important
   sets 0.0. A thread with no stored rating counts as 0, and the dated-attention
   rule does not lower it.
+  A new message resets the stored rating to zero until the thread is assessed
+  again. That zero is read as unknown: the last saved assessment, which keeps
+  the rating it produced, answers instead.
 - **Retention**, measured from the memory's last evidence date:
 
   | Thread | Kept for |
@@ -1035,7 +1038,12 @@ horizon and the tentative construction.
   and the review flag.
 - **Re-rating.** Retention and standing are recomputed after every saved
   assessment of the thread, and at once when the owner gives or undoes feedback
-  on it. These two hooks follow only a memory that already carries
+  on it. A re-rating lengthens or promotes on whatever the stored thread shows.
+  It shortens only when the importance is known and the thread is held whole,
+  changes standing only when the memory's message is among those held, and
+  demotes only when that sender is no longer known or such a reading rates the
+  thread lower. It reaches a thread's memories through the index of every
+  message observed, since a long thread stores only a window. These two hooks follow only a memory that already carries
   `email-retention@1`; a memory formed earlier is brought under the table by
   the command below. Only a live memory that is still inferred, still under this policy,
   still worded as an email statement and not yet past its expiry is touched. A

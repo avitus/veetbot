@@ -495,6 +495,14 @@ class EmailSyncState(EmailValue):
     history_since: int | None = None
 
 
+def assessment_priority(
+    content: float, relationship: float, urgency: float, *, bulk: bool
+) -> float:
+    """The thread rating an assessment's features give; it orders the Inbox."""
+    priority = min(1.0, max(content * 0.9, relationship * 0.7 + content * 0.3) + urgency * 0.1)
+    return priority * 0.4 if bulk else priority
+
+
 def addresses(values: list[str]) -> list[str]:
     result: list[str] = []
     for value in values:

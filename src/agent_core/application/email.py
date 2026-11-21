@@ -66,6 +66,7 @@ from agent_core.domain.email import (
     addresses,
     apply_feedback,
     archive_result_matches,
+    assessment_priority,
     body_cutoff,
     draft_expired,
     feedback_matches,
@@ -3550,11 +3551,9 @@ class EmailExperienceService:
                         reason="email_assessment_stale",
                     )
             urgency = score("urgency")
-            priority = min(
-                1.0, max(content * 0.9, relationship * 0.7 + content * 0.3) + urgency * 0.1
+            priority = assessment_priority(
+                content, relationship, urgency, bulk=bool(assessment.get("bulk"))
             )
-            if assessment.get("bulk"):
-                priority *= 0.4
             # ADR-0165: protection keyed to an address needs a verified address.
             received = [m for m in thread.messages if m.direction == "received"]
             protected = (replies > 0 or supported) and (
@@ -3567,7 +3566,9 @@ class EmailExperienceService:
                 and not thread.spam_cleared
                 and not protected
             )
-            assessment = {**assessment, "suspected_spam": suspected_spam}
+            # ADR-0340: the rating is kept with the assessment, because a new
+            # message resets the thread's own rating until it is assessed again.
+            assessment = {**assessment, "suspected_spam": suspected_spam, "priority": priority}
             topics = assessment.get("topics", [])
             if (
                 not isinstance(topics, list)

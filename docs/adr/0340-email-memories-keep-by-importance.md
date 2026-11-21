@@ -57,6 +57,25 @@ evaluated construction unchanged.
   address that is unresolved, ambiguous, or one of the owner's own on received
   mail is unknown.
 
+A stored thread is not always a full, current reading, and the first read of
+production on 2026-11-20 showed how much that matters. The 667 live email
+memories sat in 239 threads. Eighteen of those threads, holding 316 of the
+memories, had a rating of zero that was not a rating. Three, holding 257,
+stored only part of their messages, and 262 memories came from a message
+outside the part held. One long thread accounted for most of each figure.
+
+- **A reset rating is not a rating.** A new message resets the thread's stored
+  rating to zero until the thread is assessed again. A zero with no assessment
+  version is read as unknown, and the thread's last saved assessment answers
+  instead. The assessment record now keeps the rating it produced. A record
+  saved before this change holds only the model's features, so the content
+  share of the same formula stands in as a floor. With no assessment and no
+  owner feedback, the importance is unknown.
+- **A long thread stores a window of its messages.** The owner's reply, or the
+  message a memory came from, may be outside it. The thread index lists every
+  message ever observed, and re-rating reaches a thread's memories through
+  that list.
+
 ### 2. Retention follows importance
 
 The expiry is measured from the memory's last evidence date: the date of the
@@ -118,6 +137,14 @@ No ranking code changes, so the `retrieval@7` label stays.
   when the owner gives or undoes feedback on that thread. Person and topic
   feedback reaches other threads when they are next assessed. A reply reaches
   the memory when the sent message is synced.
+- **Raising needs what is visible; lowering needs proof.** A re-rating
+  lengthens a memory's retention, or promotes it, on whatever the stored
+  thread shows. It shortens retention only on a reading whose importance is
+  known and whose thread is held whole, so that "no owner reply" is a fact and
+  not a gap. It changes standing only when the memory's message is among those
+  held, and it demotes only when that sender is no longer known or such a
+  reading rates the thread lower. A reset rating, a partial thread, or a
+  message that left the window lowers nothing.
 - **Older memories wait for the command.** The two hooks follow only a memory
   already under the table, one that carries `email-retention@1`. A memory
   formed before this change is brought under it only by the owner's command

@@ -79,8 +79,15 @@ async def seed_thread(
     messages: list[EmailMessage],
     provider_thread_id: str = "t-mail",
     thread_id: UUID = THREAD_ID,
+    assessed: bool = True,
+    complete: bool = True,
 ) -> EmailThread:
-    """The thread as the mailbox projection stores it, with its assessed importance."""
+    """The thread as the mailbox projection stores it, with its assessed importance.
+
+    A new message resets the stored rating to zero until the thread is assessed
+    again (`assessed=False`), and a long thread keeps only some of its messages
+    (`complete=False`).
+    """
     thread = EmailThread(
         id=thread_id,
         account_id="work",
@@ -91,13 +98,23 @@ async def seed_thread(
         last_accessed_at=NOW,
         priority=priority,
         messages=messages,
+        assessment_version="email-experience@1" if assessed else "",
+        complete=complete,
     )
     await _put(factory, "thread", str(thread.id), thread.model_dump(mode="json"))
+    index_key = thread_source_key("work", provider_thread_id)
+    async with factory() as uow:
+        index = await uow.email.get(principal(), "thread_source", index_key)
+    observed = set() if index is None else set(index.payload["observed_message_ids"])
     await _put(
         factory,
         "thread_source",
-        thread_source_key("work", provider_thread_id),
-        {"thread_id": str(thread.id)},
+        index_key,
+        {
+            "thread_id": str(thread.id),
+            # As the mailbox does: every message ever observed, whatever is stored now.
+            "observed_message_ids": sorted(observed | {message.id for message in messages}),
+        },
     )
     return thread
 
@@ -233,6 +250,18 @@ def test_importance_is_the_saved_rating_after_the_owners_importance_feedback() -
         ).model_copy(update=updates)
 
     assert thread_importance(thread, []) == (0.4, False)
+    # A new message resets the stored rating; the last assessment still says what it was.
+    reset = thread.model_copy(update={"priority": 0.0, "assessment_version": ""})
+    assert thread_importance(reset, []) == (None, False)
+    assert thread_importance(reset, [], {"priority": 0.7}) == (0.7, False)
+    older_record = {"content_importance": 0.95, "relationship_importance": 0.9, "urgency": 0.6}
+    floor, _ = thread_importance(reset, [], older_record)
+    bulk_floor, _ = thread_importance(reset, [], {**older_record, "bulk": True})
+    assert floor == pytest.approx(0.915) and bulk_floor == pytest.approx(0.366)
+    assert thread_importance(reset, [feedback("important")]) == (1.0, True)
+    # A rating that survived with its version cleared (an expired body cache) is still the rating.
+    kept = thread.model_copy(update={"assessment_version": ""})
+    assert thread_importance(kept, [], {"priority": 0.9}) == (0.4, False)
     assert thread_importance(thread, [feedback("important")]) == (1.0, True)
     assert thread_importance(thread, [feedback("less_important")]) == (0.0, False)
     assert thread_importance(thread, [feedback("important", undone_at=NOW)]) == (0.4, False)
@@ -759,3 +788,84 @@ async def test_memories_formed_before_the_change_wait_for_the_owners_command() -
     # Once the command has brought it under the table, it follows its thread.
     await seed_feedback(factory, "less_important")
     assert (await service.rerate_thread("work", "t-mail")).demoted == 1
+
+
+async def test_a_reset_rating_falls_back_to_the_threads_last_assessment() -> None:
+    """A new message zeroes the stored rating until the next assessment; zero is not a rating."""
+    factory, service = await correspondence_stack()
+    await seed_account(factory)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY)
+    await seed_thread(factory, priority=0.0, messages=[_message(source)], assessed=False)
+    await _put(
+        factory,
+        "assessment",
+        str(THREAD_ID),
+        {"content_importance": 0.95, "relationship_importance": 0.9, "urgency": 0.6, "bulk": False},
+    )
+    [memory] = await service.form(source, [fact_for(source)])
+    assert memory.expires_at is None
+
+    other = await mail(
+        factory, message_id="m-2", sender=ALEX, body="The diligence package is due Monday."
+    )
+    await seed_thread(
+        factory, priority=0.0, messages=[_message(source), _message(other)], assessed=False
+    )
+    await _put(factory, "assessment", str(THREAD_ID), {"priority": 0.7})
+    [second] = await service.form(
+        other, [fact_for(other, subject="Diligence package", predicate="is due", value="Monday")]
+    )
+    assert second.expires_at == other.sent_at + timedelta(days=365)
+
+
+async def test_rerating_lowers_a_memory_only_on_a_current_complete_reading_of_its_thread() -> None:
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY)
+    newer = await mail(factory, message_id="m-new", sender="Sam <sam@example.test>", days_ago=1)
+    await seed_thread(factory, priority=0.7, messages=[_message(source)])
+    [memory] = await service.form(source, [fact_for(source)])
+    assert memory.derivation is MemoryDerivation.DIRECT
+    assert memory.expires_at == source.sent_at + timedelta(days=365)
+
+    # A new message arrives: the rating is reset and nothing has assessed the thread yet.
+    await seed_thread(
+        factory, priority=0.0, messages=[_message(source), _message(newer)], assessed=False
+    )
+    assert (await service.rerate_thread("work", "t-mail")).changed == 0
+    # A long thread keeps a window of its messages; this memory's message scrolled out of it.
+    await seed_thread(factory, priority=0.1, messages=[_message(newer)], complete=False)
+    assert (await service.rerate_thread("work", "t-mail")).changed == 0
+    # Rated low, but part of the thread is unread: an owner reply may be in the unread part.
+    await seed_thread(
+        factory, priority=0.1, messages=[_message(source), _message(newer)], complete=False
+    )
+    assert (await service.rerate_thread("work", "t-mail")).changed == 0
+    assert (await service.rerate_all(apply=True)).changed == 0
+    assert await stored(factory, memory) == memory
+
+    # Raising needs no such care: the owner's mark holds whatever else is unknown.
+    await seed_feedback(factory, "important")
+    await seed_thread(factory, priority=0.0, messages=[_message(newer)], assessed=False)
+    report = await service.rerate_thread("work", "t-mail")
+    assert (report.changed, report.by_retention) == (1, {"no_expiry": 1})
+    raised = await stored(factory, memory)
+    assert raised.expires_at is None and raised.derivation is MemoryDerivation.DIRECT
+
+    # A current, complete reading that rates the thread low does lower it.
+    await seed_feedback(factory, "important", undone=True)
+    await seed_thread(factory, priority=0.1, messages=[_message(source), _message(newer)])
+    report = await service.rerate_thread("work", "t-mail")
+    assert (report.changed, report.demoted, report.by_retention) == (1, 1, {"30_days": 1})
+    lowered = await stored(factory, memory)
+    assert lowered.derivation is MemoryDerivation.HYPOTHESIS
+    assert lowered.expires_at == source.sent_at + timedelta(days=30)
+
+
+def test_the_rating_formula_is_one_function_shared_with_the_assessment() -> None:
+    from agent_core.domain.email import assessment_priority
+
+    assert assessment_priority(0.6, 0.0, 0.0, bulk=False) == pytest.approx(0.54)
+    assert assessment_priority(0.2, 0.9, 0.5, bulk=False) == pytest.approx(0.74)
+    assert assessment_priority(1.0, 1.0, 1.0, bulk=False) == 1.0
+    assert assessment_priority(0.5, 0.0, 0.0, bulk=True) == pytest.approx(0.18)

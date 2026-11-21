@@ -38,6 +38,7 @@ from agent_core.domain.email_memory import (
     claim_text,
     first_class_statement,
     guess_statement,
+    kept_label,
     restated,
     thread_importance,
 )
@@ -110,6 +111,7 @@ class _Rerating:
         self.feedback: list[EmailFeedback] | None = None
         self.owned: frozenset[str] | None = None
         self.threads: dict[str, EmailThread | None] = {}
+        self.ratings: dict[str, tuple[float | None, bool]] = {}
         self.known: dict[tuple[str, str, str], bool] = {}
         self.changed: set[UUID] = set()
         self.promoted: set[UUID] = set()
@@ -753,19 +755,30 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             while page := await uow.email.list(self._principal, "feedback", after=after):
                 seen.feedback.extend(EmailFeedback.model_validate(row.payload) for row in page)
                 after = page[-1].key
-        importance, marked = thread_importance(thread, seen.feedback)
+        if source_key not in seen.ratings:
+            assessment = None
+            if not thread.assessment_version and thread.priority == 0:
+                # A new message reset the stored rating; the last assessment still holds it.
+                row = await uow.email.get(self._principal, "assessment", str(thread.id))
+                assessment = None if row is None else row.payload
+            seen.ratings[source_key] = thread_importance(thread, seen.feedback, assessment)
+        importance, marked = seen.ratings[source_key]
         message = next((item for item in thread.messages if item.id == message_id), None)
+        sender_seen = message is not None and (sender is None or message.sender == sender)
         known = False
-        if message is not None and (sender is None or message.sender == sender):
+        if message is not None and sender_seen:
             known_key = (account_id, provider_thread_id, message_id)
             if known_key not in seen.known:
                 seen.known[known_key] = await self._known_sender(uow, message, seen)
             known = seen.known[known_key]
         return EmailMemoryStanding(
-            importance=importance,
+            importance=importance or 0.0,
             owner_marked_important=marked,
             owner_replied=any(item.direction == "sent" for item in thread.messages),
             known_sender=known,
+            rated=importance is not None,
+            complete=thread.complete,
+            sender_seen=sender_seen,
         )
 
     async def _known_sender(
@@ -972,7 +985,17 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 continue
             update: dict[str, object] = {}
             first_class = memory.derivation is MemoryDerivation.DIRECT
-            if origin and standing.first_class != first_class:
+            # A promotion needs only what is visible. A demotion needs evidence:
+            # the sender is seen and no longer known, or a current, complete
+            # reading rates the thread lower. A reset rating or a message that
+            # left the stored window demotes nothing.
+            restandable = (
+                origin
+                and standing.sender_seen
+                and standing.first_class != first_class
+                and (standing.first_class or not standing.known_sender or standing.may_lower)
+            )
+            if restandable:
                 statement = restated(
                     memory.statement,
                     account_id=account_id,
@@ -999,12 +1022,18 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     )
                     (seen.promoted if first_class else seen.demoted).add(memory.id)
             if latest:
-                expiry = standing.expires_at(memory.last_evidence_at)
-                if expiry != memory.expires_at:
+                expiry, current = standing.expires_at(memory.last_evidence_at), memory.expires_at
+                raises = current is not None and (expiry is None or expiry > current)
+                # Lengthening needs only what is visible; shortening needs a
+                # current, complete reading of the thread.
+                if expiry != current and (raises or standing.may_lower):
                     update["expires_at"] = expiry
                 if memory.lifecycle_policy_version != EMAIL_RETENTION_POLICY:
                     update["lifecycle_policy_version"] = EMAIL_RETENTION_POLICY
-                seen.retention[memory.id] = standing.retention
+                seen.retention[memory.id] = kept_label(
+                    update.get("expires_at", current),  # type: ignore[arg-type]
+                    memory.last_evidence_at,
+                )
             seen.first_class[memory.id] = first_class
             if not update:
                 continue
@@ -1072,13 +1101,22 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             uow.people.lock(self._principal),
         ):
             await self._standing(uow, account_id, provider_thread_id, "", seen=seen)
-            thread = seen.threads.get(thread_source_key(account_id, provider_thread_id))
+            source_key = thread_source_key(account_id, provider_thread_id)
+            thread = seen.threads.get(source_key)
+            # A long thread stores a window of its messages; the index remembers
+            # every message ever observed, and each may have formed a memory.
+            index = await uow.email.get(self._principal, "thread_source", source_key)
+            observed = None if index is None else index.payload.get("observed_message_ids")
+            message_ids = {
+                *(str(value) for value in (observed if isinstance(observed, list) else [])),
+                *(message.id for message in ([] if thread is None else thread.messages)),
+            }
             changed: list[UUID] = []
-            for message in [] if thread is None else thread.messages:
+            for message_id in sorted(message_ids) if thread is not None else []:
                 record = await uow.email.get(
                     self._principal,
                     "semantic_source",
-                    semantic_source_key(account_id, provider_thread_id, message.id),
+                    semantic_source_key(account_id, provider_thread_id, message_id),
                 )
                 if record is not None:
                     changed += await self._rerate_source(
