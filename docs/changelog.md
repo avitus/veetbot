@@ -45,6 +45,12 @@ title: Changelog
   another collection, account or page no longer puts it back into the sidebar
   counts while Gmail is still confirming the archive. Discarding a reply
   brings Reply and Draft with Veetbot back at once.
+- Email on Mac, iPad and iPhone: the sidebar counts also stay right while an
+  archive waits for Gmail when new mail pushes the archived conversation off
+  the first page, when its reply need changes, when you search, and when you
+  archive from the open conversation. What you typed into Teach Veetbot is
+  still there after you reply and close the reply. On iPhone, pressing Reply
+  brings the reply into view above the keyboard.
 
 ## 2026-11-20 — A recorded run belongs to the question content it tested (ADR-0338, ADR-0339)
 
