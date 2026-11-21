@@ -67,6 +67,10 @@ title: Changelog
 - A signature-shaped example inside a code block (fenced, or indented in plain
   text) is no longer taken for the sender's signature: it stays in the Email
   reading text and People reads nothing from it.
+- An indented code example that begins with a `-- ` line also stays in the
+  Email reading text, and one such example no longer keeps the message's real
+  signature in view: a signature beside a code block, or one a mail program
+  indents under a list or in quoted history, is left out as before.
 - The Email reader finds link destinations in one pass, so a message with a
   long run of unfinished links can no longer slow it down.
 - The Email reading text now applies both of two reader rules that were made
