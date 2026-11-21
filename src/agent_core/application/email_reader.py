@@ -6,7 +6,7 @@ survives; the client always offers the unchanged retained source alongside this 
 
 import re
 from bisect import bisect_left
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from html import unescape
 from html.parser import HTMLParser
@@ -52,7 +52,8 @@ _REPEATED_BLOCK_LINES = 3
 # How Gmail, Outlook and Apple Mail mark the signature they insert.
 _SIGNATURE_CLASSES = frozenset({"gmail_signature", "gmail_signature_prefix"})
 _SIGNATURE_IDS = frozenset({"signature", "ms-outlook-mobile-signature", "applemailsignature"})
-_DESTINATION = re.compile(r"\]\(https?://[^\s)]*\)")
+# Where a link destination stops: its closing parenthesis, or whitespace it cannot hold.
+_DESTINATION_END = re.compile(r"[\s)]")
 _HOST_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)\\?")
 
 
@@ -218,9 +219,38 @@ def _without_delimited_signatures(lines: list[str]) -> list[str]:
     return result
 
 
+def _destinations(text: str) -> Iterator[tuple[int, int]]:
+    """Each `](http…)` link destination, as where its `](` starts and where it ends.
+
+    One pass over the text. A run with no closing parenthesis before its next
+    whitespace holds no destination, wherever in it a link seems to start, so the
+    scan resumes after the run instead of trying each start in it again. A
+    sender can write such a run as long as the message.
+    """
+    position = 0
+    while (start := text.find("](http", position)) != -1:
+        begin = start + 2
+        if not text.startswith(("http://", "https://"), begin):
+            position = begin
+            continue
+        end = _DESTINATION_END.search(text, begin)
+        if end is None:
+            # No parenthesis or whitespace is left, so nothing later closes either.
+            return
+        if end[0] == ")":
+            yield start, end.end()
+        position = end.end()
+
+
 def _visible(line: str) -> str:
     """A rendered line as its reader sees it: no destinations, markup or line break."""
-    return re.sub(r"[\[\]*_\\]", "", _DESTINATION.sub("]", line)).strip()
+    kept: list[str] = []
+    position = 0
+    for start, end in _destinations(line):
+        kept.append(line[position : start + 1])
+        position = end
+    kept.append(line[position:])
+    return re.sub(r"[\[\]*_\\]", "", "".join(kept)).strip()
 
 
 def _without_named_signature(lines: list[str], sender: str) -> list[str]:
@@ -639,7 +669,7 @@ def merge_image_body(
         return " ".join(re.findall(r"\w+", "".join(labels).casefold()))
 
     represented = " " + words(html_text) + " "
-    linked = {match[1:] for match in _DESTINATION.findall(html_text)}
+    linked = {html_text[start + 1 : end] for start, end in _destinations(html_text)}
 
     def held(text: str) -> str | None:
         """This plain text's words as the HTML text holds them; None when it lacks them."""

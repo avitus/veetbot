@@ -170,8 +170,9 @@ title: Changelog
 - A memory is shortened or demoted only on a full, current reading of its
   thread. A thread whose rating is waiting to be redone after a new message,
   or a long thread only partly stored, never lowers a memory.
-- Memories that already exist change only when you run
-  `agent memory rerate-email`, which previews first.
+- A deploy changes no existing memory. A memory already under these rules
+  follows its thread at each later assessment and at your feedback; an older
+  one changes when you run `agent memory rerate-email`, which previews first.
 - By your choice: an email memory enters the session-start summary only once
   something repeats or confirms it, and email memories are not sent to the
   dreaming provider.

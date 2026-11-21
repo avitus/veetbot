@@ -1095,7 +1095,7 @@ horizon and the tentative construction.
   TENANT/PRINCIPAL` re-rates every live email memory; it previews unless
   `--confirm` is given, and its report holds counts only. It commits two hundred sources at a time and reads feedback, threads and senders again for each, so the owner's mark given meanwhile is not undone. When it puts a memory back it reads its sources once more for that memory.
 - **Renewal.** A later message with a strictly later date that states the same
-  subject, predicate and value renews the existing memory: the evidence date
+  subject and value for the same belief type renews the existing memory: the evidence date
   moves and the expiry is recomputed and never shortened. A first-class memory
   becomes active when the later message is from a known sender too; a guess
   stays provisional. The message that formed a memory sets its standing; the

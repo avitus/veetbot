@@ -774,6 +774,24 @@ def test_image_merge_stays_quick_on_unclosed_link_delimiters() -> None:
     assert time.monotonic() - started < 1
 
 
+def test_link_destinations_are_found_in_one_pass_over_a_run_that_never_closes() -> None:
+    """A long run of link starts with no closing parenthesis is scanned once, not once
+    per start, in the merge and in the signature scan that reads a line as its reader does."""
+    from agent_core.application.email_reader import _visible, merge_image_body
+
+    hostile = "](https://a" * 40000
+    started = time.monotonic()
+    assert merge_image_body("Keep this text.", hostile, hostile).startswith("Keep this text.")
+    assert _visible(hostile).startswith("(https://a")
+    assert time.monotonic() - started < 1
+
+    # The same destinations are still found, and a run that never closes hides none after it.
+    text = "[deck](https://files.example/a_(1)) ](https://open [post](https://www.example.com/p)"
+    plain = "[www.example.com](https://www.example.com/p)"
+    assert merge_image_body(plain, text, text) == text
+    assert _visible("See [the deck](https://files.example/d) now") == "See the deck now"
+
+
 def test_images_inside_links_keep_surrounding_text_linked() -> None:
     """An image splits an anchor into linked text segments and standalone image markers."""
     urls: list[str] = []
