@@ -353,9 +353,13 @@ public final class EmailViewModel: ObservableObject {
         loadedCounts?.settled[value.id] = holdings(read.held(value.id)).subtracting(holdings(value))
     }
 
+    /// How many times a refused conversation has made Email ask the list what still reads.
+    /// Only the latest of those requests decides whether the other accounts keep their mail.
+    private var refusalChecks = 0
+
     /// The server refused to show this conversation, so its account can no longer be read. What
-    /// is held from that account goes at once, the numbers with it, and other accounts keep
-    /// their mail. A list read then says whether anything else was revoked.
+    /// is held from that account goes at once, and the numbers with it: they stay gone until a
+    /// list read asked for after the refusal answers, which is how the caller knows one has.
     private func forgetDeniedAccount(holding id: UUID) {
         let known = inboxItems.first { $0.id == id } ?? hiddenAsLastRead[id] ?? archiveRequests[id]?.thread
         let gone = { (row: EmailThreadView) in row.id == id || row.accountID == known?.accountID }
@@ -2105,10 +2109,10 @@ public final class EmailViewModel: ObservableObject {
     /// One status read, applied as the outcome of the pending action when it still answers the
     /// latest request. Returns the conversation as the server holds it whether or not it was
     /// applied: a read a newer gesture overtook still shows where the numbers hold it.
-    /// When the read shows that the list is out of date (Gmail confirmed the archive, or the
-    /// account was refused), the screen is first put right without the list, and the list is
-    /// then read again. What the screen shows therefore never depends on that second read
-    /// succeeding, or on a list read it replaces.
+    /// When the read shows that Gmail confirmed the archive, the screen is first put right
+    /// without the list and the list is then read again, so what the screen shows never depends
+    /// on that read succeeding or on a list read it replaces. When the server refuses the read,
+    /// that account's mail goes at once, and the rest stays only if the list then answers.
     @discardableResult
     private func readArchiveStatus(_ threadID: UUID) async -> EmailThreadView? {
         let connection = generation
@@ -2136,12 +2140,23 @@ public final class EmailViewModel: ObservableObject {
             guard acceptsRead(connection: connection, activation: foreground), archiveVersions[threadID] == mailboxVersions[threadID] else { return nil }
             if case HTTPTransportError.authorizationDenied = error {
                 // One refused conversation does not say that all of Email was revoked. Its
-                // account's mail goes, and the list read says whether the rest still reads.
+                // account's mail goes at once, and the list is asked what still reads.
                 forgetDeniedAccount(holding: threadID)
+                refusalChecks += 1
+                let check = refusalChecks
                 await reload(preserveOrder: true, activation: foreground)
+                // A list that was refused as well has cleared everything by itself.
+                guard generation == connection else { return nil }
                 archiveTasks[threadID]?.cancel()
                 archiveTasks[threadID] = nil
-                if generation == connection { errorMessage = error.localizedDescription }
+                // A later refusal asked the list again and replaced this request. It decides.
+                guard check == refusalChecks else { return nil }
+                // Other accounts keep their mail only once a list read asked for after the
+                // refusal has answered, which is the only thing that brings the numbers back.
+                // Unanswered for any reason, nothing confirms what may still be read, so
+                // everything is cleared, as after every refusal.
+                if loadedCounts == nil { resetConnection() }
+                errorMessage = error.localizedDescription
                 return nil
             }
             archiveReadErrors.insert(threadID)

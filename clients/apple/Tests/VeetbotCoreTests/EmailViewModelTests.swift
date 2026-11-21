@@ -1905,14 +1905,17 @@ import SwiftUI
         await archiving.value
     }
 
-    /// A hidden conversation's status can be refused once its account is revoked. That says
-    /// nothing against the other accounts: the list is read again and their mail stays on
-    /// screen, and only the refused account's mail goes.
-    @Test func testDeniedStatusOfAHiddenConversationKeepsOtherAccountsMail() async throws {
+    /// A hidden conversation's status can be refused once its account is revoked, here while a
+    /// list read is checking it. The refused account's mail goes at once. The other accounts
+    /// keep theirs only once the list, asked again after the refusal, has answered: the read
+    /// that was in flight was asked before it and confirms nothing.
+    @Test(arguments: [200, 503])
+    func testRefusalSeenDuringAListReadWaitsForTheListToAnswerAgain(listAfterwards: Int) async throws {
         let admission = EmailArchiveResponseGate()
         let revoked = EmailTestFlag()
-        let personalID = "00000000-0000-0000-0000-000000000899"
-        let personal = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: personalID)
+        let answeredOnce = EmailTestFlag()
+        let personalID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let personal = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(personalID)")
         let model = try makeArchiveRaceModel { request in
             if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
             if request.url!.path.hasSuffix("archive") { return (202, self.operationJSON(status: "QUEUED"), admission) }
@@ -1922,9 +1925,15 @@ import SwiftUI
                     ? (403, Self.error("permission_denied", "Work mail can no longer be read."), nil)
                     : (200, work, nil)
             }
-            return (200, "{\"items\":[\(revoked.isSet ? personal : "\(work),\(personal)")],\"next_cursor\":null,"
-                + "\"collection_counts\":\(Self.archiveCountsJSON(counted: !revoked.isSet)),"
-                + "\"total_count\":\(revoked.isSet ? 6 : 7)}", nil)
+            guard revoked.isSet else {
+                return (200, "{\"items\":[\(work),\(personal)],\"next_cursor\":null,"
+                    + "\"collection_counts\":\(Self.archiveCountsJSON(counted: true)),\"total_count\":7}", nil)
+            }
+            // The read in flight answers. The one asked for after the refusal answers as the case says.
+            if answeredOnce.isSet, listAfterwards == 503 { return (503, Self.error("unavailable", "Try again."), nil) }
+            answeredOnce.set()
+            return (200, "{\"items\":[\(personal)],\"next_cursor\":null,"
+                + "\"collection_counts\":\(Self.archiveCountsJSON(counted: false)),\"total_count\":6}", nil)
         }
         defer { admission.release(); model.resetConnection() }
         await model.reload()
@@ -1933,18 +1942,21 @@ import SwiftUI
         try await waitForEmailTestCondition { admission.isWaiting }
         revoked.set()
         await model.reload(preserveOrder: true)
-        #expect(model.items.map(\.id) == [UUID(uuidString: personalID)!], "Personal mail can still be read, so it is still shown")
-        #expect(model.collectionCounts == Self.archiveCountsWithoutIt(),
-                "The counts are the ones the list returned once Work could no longer be read")
-        #expect(model.accounts.count == 2)
+        let kept = listAfterwards == 200
+        #expect(model.items.map(\.id) == (kept ? [personalID] : []),
+                "Personal mail stays only once the list has answered after the refusal")
+        #expect(model.collectionCounts == (kept ? Self.archiveCountsWithoutIt() : nil))
+        #expect(model.accounts.count == (kept ? 2 : 0))
+        #expect(model.errorMessage != nil)
         admission.release()
         await archiving.value
-        #expect(model.items.map(\.id) == [UUID(uuidString: personalID)!])
+        #expect(model.items.map(\.id) == (kept ? [personalID] : []))
     }
 
     /// A refused status read cannot tell one revoked account from the whole of Email. It drops
-    /// that conversation's account and lets the list answer: a list that still reads keeps the
-    /// other accounts' mail, and a list that is refused as well clears everything.
+    /// that conversation's account and asks the list. Only a list that answers keeps the other
+    /// accounts' mail. One that is refused as well, or cannot be read, confirms nothing, and
+    /// everything is cleared as after any refusal.
     @Test(arguments: [200, 403, 503])
     func testDeniedStatusReadLetsTheListSayWhatWasRevoked(list: Int) async throws {
         let revoked = EmailTestFlag()
@@ -1969,9 +1981,97 @@ import SwiftUI
         #expect(model.accounts.count == 2)
         revoked.set()
         await model.checkArchiveStatus(threadID)
-        #expect(model.items.map(\.id) == (list == 403 ? [] : [personalID]),
-                "Work's rows go at once; Personal's stay unless the list is refused too")
-        #expect(model.accounts.count == (list == 403 ? 0 : 2))
+        #expect(model.items.map(\.id) == (list == 200 ? [personalID] : []),
+                "Personal's rows stay only when the list has answered after the refusal")
+        #expect(model.accounts.count == (list == 200 ? 2 : 0))
+        #expect(model.errorMessage != nil)
+    }
+
+    /// The one-second status poll is where a refusal usually arrives. The poll asks the list
+    /// itself, and the list's answer decides as it does for any other refused read.
+    @Test(arguments: [200, 503])
+    func testRefusalSeenByTheStatusPollWaitsForTheListToAnswer(list: Int) async throws {
+        let requests = EmailRequestRecorder()
+        let revoked = EmailTestFlag()
+        let personalID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let personal = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(personalID)")
+        let model = try makeModel { request in
+            requests.append(request)
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if path.hasSuffix("refresh") || path.contains("/operations/") {
+                return (200, self.operationJSON(status: "COMPLETED"))
+            }
+            let work = self.archiveThreadJSON(account: "work", inInbox: true, status: "pending")
+            guard path.hasSuffix("threads") else {
+                return revoked.isSet ? (403, Self.error("permission_denied", "Work mail can no longer be read.")) : (200, work)
+            }
+            if revoked.isSet, list == 503 { return (503, Self.error("unavailable", "Try again.")) }
+            return (200, "{\"items\":[\(revoked.isSet ? personal : "\(work),\(personal)")],\"next_cursor\":null}")
+        }
+        defer { model.resetConnection() }
+        model.setActive(true)
+        try await waitForEmailTestCondition {
+            requests.snapshot.contains { $0.httpMethod == "POST" } && !model.isRefreshing && !model.isReadingList
+        }
+        #expect(model.items.map(\.id) == [personalID], "The Work archive is pending, so its row is hidden")
+        revoked.set()
+        // The poll reads the hidden conversation's status a second after it was first seen.
+        try await waitForEmailTestCondition {
+            list == 200 ? model.errorMessage != nil && !model.isReadingList : model.accounts.isEmpty
+        }
+        #expect(model.items.map(\.id) == (list == 200 ? [personalID] : []))
+        #expect(model.accounts.count == (list == 200 ? 2 : 0))
+        #expect(model.errorMessage != nil)
+    }
+
+    /// Two conversations of a revoked account can be refused one after the other. Each refusal
+    /// asks the list again, and the later request replaces the earlier one. The later one
+    /// decides: the earlier refusal does not clear Email because its own request was replaced.
+    @Test func testLaterRefusalsListReadDecidesForAnEarlierOne() async throws {
+        let requests = EmailRequestRecorder()
+        let firstList = EmailArchiveResponseGate()
+        let secondList = EmailArchiveResponseGate()
+        let revoked = EmailTestFlag()
+        let personalID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let secondWorkID = UUID(uuidString: "00000000-0000-0000-0000-000000000898")!
+        let otherWorkID = UUID(uuidString: "00000000-0000-0000-0000-000000000897")!
+        let personal = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(personalID)")
+        let otherWork = archiveThreadJSON(account: "work", inInbox: true)
+            .replacingOccurrences(of: "\(threadID)", with: "\(otherWorkID)")
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            guard path.hasSuffix("threads") else {
+                return (403, Self.error("permission_denied", "Work mail can no longer be read."), nil)
+            }
+            guard revoked.isSet else {
+                let work = self.archiveThreadJSON(account: "work", inInbox: true, status: "pending")
+                let secondWork = work.replacingOccurrences(of: "\(self.threadID)", with: "\(secondWorkID)")
+                return (200, "{\"items\":[\(work),\(secondWork),\(otherWork),\(personal)],\"next_cursor\":null}", nil)
+            }
+            // Each refusal asks the list again. Both answers are held so that the test orders them.
+            let asked = requests.snapshot.filter { $0.url!.path.hasSuffix("threads") }.count
+            return (200, "{\"items\":[\(personal)],\"next_cursor\":null}", asked == 2 ? firstList : secondList)
+        }
+        defer { firstList.release(); secondList.release(); model.resetConnection() }
+        await model.reload()
+        #expect(model.items.map(\.id) == [otherWorkID, personalID], "Both Work archives are pending, so their rows are hidden")
+        revoked.set()
+        let first = Task { await model.checkArchiveStatus(threadID) }
+        try await waitForEmailTestCondition { firstList.isWaiting }
+        #expect(model.items.map(\.id) == [personalID], "Work's other row went with the refusal, before the list answered")
+        let second = Task { await model.checkArchiveStatus(secondWorkID) }
+        try await waitForEmailTestCondition { secondList.isWaiting }
+        firstList.release()
+        await first.value
+        #expect(model.items.map(\.id) == [personalID], "The later refusal's list read has not answered yet, and it decides")
+        #expect(model.accounts.count == 2)
+        secondList.release()
+        await second.value
+        #expect(model.items.map(\.id) == [personalID])
+        #expect(model.accounts.count == 2)
     }
 
     /// A conversation can be archived while a refresh is reading the statuses of the hidden
