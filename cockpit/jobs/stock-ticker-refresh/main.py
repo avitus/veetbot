@@ -9,8 +9,12 @@ def number(value):
         return None
     return float(value) if math.isfinite(value) else None
 
+def base_quote(stock):
+    kind = 'INDEX' if stock.get('is_index', False) else 'EQUITY'
+    return {'symbol': stock['symbol'], 'name': stock['name'], 'currency': stock['currency'], 'instrumentType': kind, 'unit': 'points' if kind == 'INDEX' else 'currency'}
+
 def normalize(stock, response, now_ms):
-    base = {'symbol': stock['symbol'], 'name': stock['name'], 'currency': stock['currency']}
+    base = base_quote(stock)
     if response.get('status') != 200:
         return dict(base, status='unavailable', message='Quote source unavailable')
     chart = (response.get('json') or {}).get('chart') or {}
@@ -19,7 +23,7 @@ def normalize(stock, response, now_ms):
         return dict(base, status='unavailable', message='Quote not available from source')
     meta = results[0].get('meta') or {}
     identity = ' '.join(str(meta.get(k) or '') for k in ('longName', 'shortName')).lower()
-    if (meta.get('symbol') != stock['symbol'] or stock['match_name'].lower() not in identity or meta.get('exchangeName') != stock['exchange'] or meta.get('currency') != stock['currency'] or meta.get('instrumentType') != 'EQUITY'):
+    if (meta.get('symbol') != stock['symbol'] or stock['match_name'].lower() not in identity or meta.get('exchangeName') != stock['exchange'] or meta.get('currency') != stock['currency'] or meta.get('instrumentType') != base['instrumentType']):
         return dict(base, status='unavailable', message='Quote identity could not be verified')
     price = number(meta.get('regularMarketPrice'))
     stamp = number(meta.get('regularMarketTime'))
@@ -35,27 +39,30 @@ def normalize(stock, response, now_ms):
 def main(inputs, job):
     stocks = inputs.get('stocks') or []
     if not 1 <= len(stocks) <= 20:
-        raise ValueError('Provide between 1 and 20 stocks')
+        raise ValueError('Provide between 1 and 20 instruments')
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     quotes = []
     fixture = 'fixture_responses' in inputs
     for stock in stocks:
-        if not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,14}', stock['symbol']):
-            raise ValueError('Invalid stock symbol')
+        if not re.fullmatch(r'\^?[A-Z][A-Z0-9.-]{0,14}', stock['symbol']):
+            raise ValueError('Invalid symbol')
+        if not isinstance(stock.get('is_index', False), bool):
+            raise ValueError('is_index must be boolean')
         try:
             if fixture:
                 response = inputs['fixture_responses'].get(stock['symbol'], {'status': 404})
             else:
-                url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + stock['symbol'] + '?interval=1d&range=1d'
+                url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + stock['symbol'].replace('^', '%5E') + '?interval=1d&range=1d'
                 response = job.http.request('GET', url)
             quote = normalize(stock, response, now_ms)
         except Exception:
-            quote = {'symbol': stock['symbol'], 'name': stock['name'], 'currency': stock['currency'], 'status': 'unavailable', 'message': 'Quote fetch or parsing failed'}
+            quote = dict(base_quote(stock), status='unavailable', message='Quote fetch or parsing failed')
         quotes.append(quote)
     statuses = [q['status'] for q in quotes]
     if 'expected_statuses' in inputs:
         assert statuses == inputs['expected_statuses'], 'Unexpected normalization result'
         for q in quotes:
+            assert q['unit'] == ('points' if q['instrumentType'] == 'INDEX' else 'currency')
             if q['status'] == 'ok' and q['changeFraction'] is not None:
                 assert abs((q['price'] - q['change']) * q['changeFraction'] - q['change']) < 0.00001
     missing = sum(s != 'ok' for s in statuses)
