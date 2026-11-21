@@ -125,8 +125,11 @@
 # memories. Retention now follows the thread's importance (30 days, 90 days,
 # 1 year, no expiry); mail from a known sender in a thread kept a year or more
 # forms a plain, direct, unflagged memory. A correspondent's claim still never
-# replaces an owner belief. Existing memories change only when the owner runs
-# `agent memory rerate-email`. Asked the same day, the owner chose retention by
+# replaces an owner belief. While People memory is on, each saved assessment of
+# a thread and the owner's feedback on it re-rate that thread's memories already
+# under the table. A memory formed before the change joins the table only when
+# the owner runs `agent memory rerate-email`, which re-rates every live email
+# memory. Asked the same day, the owner chose retention by
 # importance for every sender, entry to the session-start summary only once a
 # memory is active, and no email memories sent to the dreaming provider.
 # Sandbox tests only; no real mailbox run. No milestone or gate moves.
