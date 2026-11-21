@@ -2397,6 +2397,10 @@ import SwiftUI
         #expect(model.items.isEmpty, "Nothing is left to confirm what may still be read")
         #expect(model.accounts.isEmpty)
         #expect(model.errorMessage != nil)
+        let posts = { requests.snapshot.filter { $0.httpMethod == "POST" }.count }
+        let before = posts()
+        await model.refresh()
+        #expect(posts() == before, "The owner has left Email, so its visit is over and nothing refreshes")
     }
 
     /// An archive, or a move back to the Inbox, can still be waiting to be admitted when another
@@ -2487,6 +2491,183 @@ import SwiftUI
         await refusal.value
         #expect(model.items.map(\.id) == [personalID])
         #expect(model.accounts.count == 2)
+    }
+
+    /// When the list read that decides after a refusal fails, everything is cleared. Email is
+    /// still on screen, though, and its visit goes on: Refresh asks again without the owner
+    /// having to leave and come back.
+    @Test func testRefreshStaysAvailableWhenTheListFailsAfterARefusal() async throws {
+        let requests = EmailRequestRecorder()
+        let revoked = EmailTestFlag()
+        let personalID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let personal = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(personalID)")
+        let model = try makeModel { request in
+            requests.append(request)
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if path.hasSuffix("refresh") || path.contains("/operations/") {
+                return (200, self.operationJSON(status: "COMPLETED"))
+            }
+            let work = self.archiveThreadJSON(account: "work", inInbox: true, status: "pending")
+            guard path.hasSuffix("threads") else {
+                return revoked.isSet ? (403, Self.error("permission_denied", "Work mail can no longer be read.")) : (200, work)
+            }
+            if revoked.isSet { return (503, Self.error("unavailable", "Try again.")) }
+            return (200, "{\"items\":[\(work),\(personal)],\"next_cursor\":null}")
+        }
+        defer { model.resetConnection() }
+        let refreshes = { requests.snapshot.filter { $0.httpMethod == "POST" && $0.url!.path.hasSuffix("refresh") }.count }
+        model.setActive(true)
+        try await waitForEmailTestCondition { refreshes() == 1 && !model.isRefreshing && !model.isReadingList }
+        #expect(model.items.map(\.id) == [personalID], "The Work archive is pending, so its row is hidden")
+        revoked.set()
+        // The poll reads the hidden conversation's status a second after it was first seen.
+        try await waitForEmailTestCondition { model.accounts.isEmpty }
+        #expect(model.items.isEmpty, "The list failed after the refusal, so nothing confirmed what may be read")
+        #expect(model.errorMessage != nil)
+        let before = refreshes()
+        await model.refresh()
+        #expect(refreshes() == before + 1, "Email is still on screen, so Refresh asks again")
+    }
+
+    /// The list read that decides after a refusal can itself end in three ways that clear
+    /// everything. Only one of them, needing to sign in again, is reported to the connection.
+    @Test(arguments: [401, 403, 503])
+    func testListReadAfterARefusalTakesItsOwnErrorRoute(list: Int) async throws {
+        let revoked = EmailTestFlag()
+        let signIn = EmailTestFlag()
+        let personalID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let personal = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(personalID)")
+        let model = try makeModel { request in
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            let work = self.archiveThreadJSON(account: "work", inInbox: true, status: "pending")
+            guard path.hasSuffix("threads") else {
+                return revoked.isSet ? (403, Self.error("permission_denied", "Work mail can no longer be read.")) : (200, work)
+            }
+            guard revoked.isSet else { return (200, "{\"items\":[\(work),\(personal)],\"next_cursor\":null}") }
+            return (list, Self.error(list == 401 ? "unauthenticated" : list == 403 ? "permission_denied" : "unavailable",
+                "The list could not be read."))
+        }
+        defer { model.resetConnection() }
+        model.authenticationFailure = { _ in signIn.set() }
+        await model.reload()
+        #expect(model.items.map(\.id) == [personalID])
+        revoked.set()
+        await model.checkArchiveStatus(threadID)
+        #expect(model.items.isEmpty)
+        #expect(model.accounts.isEmpty)
+        #expect(model.errorMessage != nil)
+        #expect(signIn.isSet == (list == 401), "Only a list that needs the owner to sign in again asks for it")
+    }
+
+    /// A status check learns that an archive was confirmed and reads the list. The list shows
+    /// that the conversation has since come back and has a newer archive pending, which hides
+    /// its row. The older outcome is applied before the list is read, so it does not lift the
+    /// newer archive's hide afterwards.
+    @Test func testConfirmedArchiveDoesNotLiftANewerArchivesHide() async throws {
+        let requests = EmailRequestRecorder()
+        let confirmed = EmailTestFlag()
+        let newerOperation = UUID(uuidString: "00000000-0000-0000-0000-000000000877")!
+        let model = try makeModel { request in
+            requests.append(request)
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            let other = { (json: String) in json.replacingOccurrences(of: "\"priority\":0.95", with: "\"priority\":0.4") }
+            guard request.url!.path.hasSuffix("threads") else {
+                // The first archive, begun on another device, has been confirmed.
+                return (200, other(self.archiveThreadJSON(inInbox: false, status: "completed")))
+            }
+            // When the list is read again the conversation is back in the Inbox, with a newer archive pending.
+            return (200, "{\"items\":[\(other(self.archiveThreadJSON(inInbox: true, status: "pending", operationID: confirmed.isSet ? newerOperation : nil)))],\"next_cursor\":null}")
+        }
+        defer { model.resetConnection() }
+        model.setListView("other")
+        try await waitForEmailTestCondition {
+            requests.snapshot.contains { $0.url!.path.hasSuffix("threads") } && !model.isReadingList
+        }
+        #expect(model.items.isEmpty, "The first archive is pending, so its row is hidden")
+        confirmed.set()
+        await model.checkArchiveStatus(threadID)
+        #expect(model.items.isEmpty, "The newer archive is pending, so the row stays hidden")
+    }
+
+    /// The one-second poll is usually the first to learn that Gmail confirmed an archive.
+    /// Applying that outcome ends the poll, and the list is still read afterwards, so the mail
+    /// that has arrived meanwhile is shown.
+    @Test func testPollThatLearnsOfAConfirmedArchiveStillReadsTheList() async throws {
+        let requests = EmailRequestRecorder()
+        let confirmed = EmailTestFlag()
+        let arrivalID = UUID(uuidString: "00000000-0000-0000-0000-000000000898")!
+        let arrival = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(arrivalID)")
+        let model = try makeModel { request in
+            requests.append(request)
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if path.hasSuffix("refresh") || path.contains("/operations/") {
+                return (200, self.operationJSON(status: "COMPLETED"))
+            }
+            guard path.hasSuffix("threads") else {
+                return (200, self.archiveThreadJSON(
+                    inInbox: !confirmed.isSet, status: confirmed.isSet ? "completed" : "pending"))
+            }
+            // Once Gmail has confirmed, the list holds new mail in place of the archived conversation.
+            let row = confirmed.isSet ? arrival : self.archiveThreadJSON(inInbox: true, status: "pending")
+            return (200, "{\"items\":[\(row)],\"next_cursor\":null}")
+        }
+        defer { model.resetConnection() }
+        model.setActive(true)
+        try await waitForEmailTestCondition {
+            requests.snapshot.contains { $0.httpMethod == "POST" } && !model.isRefreshing && !model.isReadingList
+        }
+        #expect(model.items.isEmpty, "The archive is pending, so its row is hidden")
+        confirmed.set()
+        // The poll reads the status a second after the archive was first seen, and then the list.
+        try await waitForEmailTestCondition { model.items.map(\.id) == [arrivalID] }
+        #expect(model.items.map(\.id) == [arrivalID], "The list was read after the confirmation")
+    }
+
+    /// A refusal waits only while a list read asked after it is out. When the owner changes
+    /// collection and that collection's list read cannot start, none is left to answer, and
+    /// everything is cleared, as when the read fails.
+    @Test func testRefusalClearsEverythingWhenTheReplacementListReadCannotStart() async throws {
+        let recovery = EmailArchiveResponseGate()
+        let revoked = EmailTestFlag()
+        let closed = EmailTestFlag()
+        let personalID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let personal = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(personalID)")
+        let id = EmailArchiveRaceURLProtocol.register { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            guard request.url!.path.hasSuffix("threads") else {
+                return (403, Self.error("permission_denied", "Work mail can no longer be read."), nil)
+            }
+            let work = self.archiveThreadJSON(account: "work", inInbox: true, status: "pending")
+            guard revoked.isSet else { return (200, "{\"items\":[\(work),\(personal)],\"next_cursor\":null}", nil) }
+            // The list read asked for by the refusal is held.
+            return (200, "{\"items\":[\(personal)],\"next_cursor\":null}", recovery)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [EmailArchiveRaceURLProtocol.self]
+        configuration.httpAdditionalHeaders = ["X-Email-Archive-Race": id]
+        let api = VeetbotAPIClient(transport: HTTPTransport(
+            configuration: try ConnectionConfiguration(baseURLString: "https://email.test"),
+            tokenStore: InMemoryTokenStore(token: "test-token"), session: URLSession(configuration: configuration)
+        ))
+        let model = EmailViewModel(makeAPIClient: { closed.isSet ? nil : api })
+        defer { recovery.release(); model.resetConnection() }
+        await model.reload()
+        #expect(model.items.map(\.id) == [personalID])
+        revoked.set()
+        let refusal = Task { await model.checkArchiveStatus(threadID) }
+        try await waitForEmailTestCondition { recovery.isWaiting }
+        // From here no client is handed out, so the new collection's list read cannot start.
+        closed.set()
+        model.setCollection(.inbox)
+        try await waitForEmailTestCondition { model.accounts.isEmpty }
+        #expect(model.items.isEmpty)
+        #expect(model.errorMessage != nil)
+        recovery.release()
+        await refusal.value
+        #expect(model.accounts.isEmpty)
     }
 
     /// The statuses a list read asks for belong to the connection it began on. When the
@@ -2689,8 +2870,10 @@ import SwiftUI
     }
 
     /// A draft's attached file is read in two requests. If the connection changes after the
-    /// first, the second is not sent and nothing is handed back.
-    @Test func testDraftAttachmentIsNotReadAcrossAConnectionChange() async throws {
+    /// first, the second is not sent and nothing is handed back. On an unchanged connection the
+    /// same two requests return the file.
+    @Test(arguments: [false, true])
+    func testDraftAttachmentIsNotReadAcrossAConnectionChange(changing: Bool) async throws {
         let requests = EmailRequestRecorder()
         let metadata = EmailArchiveResponseGate()
         let artifactID = UUID(uuidString: "00000000-0000-0000-0000-000000000890")!
@@ -2703,12 +2886,13 @@ import SwiftUI
                 + "\"created_at\":\"2026-09-23T00:00:00Z\"}", metadata)
         }
         defer { metadata.release(); model.resetConnection() }
-        let loading = Task { (try? await model.loadDraftAttachment(artifactID)) != nil }
+        let loading = Task { try? await model.loadDraftAttachment(artifactID).data }
         try await waitForEmailTestCondition { metadata.isWaiting }
-        model.resetConnection()
+        if changing { model.resetConnection() }
         metadata.release()
-        #expect(await loading.value == false, "Nothing is handed back")
-        #expect(!requests.snapshot.contains { $0.url!.path.hasSuffix("content") },
+        #expect(await loading.value == (changing ? nil : Data("notes".utf8)),
+                "The file is handed back on the connection that asked for it, and on no other")
+        #expect(requests.snapshot.contains { $0.url!.path.hasSuffix("content") } == !changing,
                 "The file itself is not asked for on a connection that has changed")
     }
 
