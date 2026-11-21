@@ -24,13 +24,53 @@ from agent_core.domain.people import (
 from agent_core.memory.people_formation import _Common
 from agent_core.ports.persistence import RepositoryUnitOfWork
 
-# The most copies of one detail read to place a message among them. Past it
-# the message adds nothing: the detail is already recorded that many times.
+# The most pages of one detail's copies, or of one person's distinct aliases,
+# read to place a message among them. Past it the message adds nothing: the
+# detail is already recorded that many times.
 _COPY_PAGES = 20
 
 
 def _copy_id(source_id: UUID, kind: str, key: str) -> UUID:
     return uuid5(source_id, f"signature:{kind}:{key}")
+
+
+async def _ever_stated(
+    uow: RepositoryUnitOfWork, principal: Principal, person_id: UUID
+) -> dict[str, set[str]] | None:
+    """Every title and number this person's signatures have stated, or None past the bound.
+
+    Ended details are included: a message read late is placed among them too.
+    """
+    keys: dict[str, set[str]] = {"role": set(), "phone": set()}
+    after: UUID | None = None
+    for _ in range(_COPY_PAGES):
+        page = await uow.people.query(
+            PeopleQuery(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                person_id=person_id,
+                kinds=["identifier"],
+                assigned="attached",
+                distinct_assignments=True,
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+                after=after,
+                limit=100,
+            )
+        )
+        for row in page[:100]:
+            if (
+                isinstance(row, PersonIdentifier)
+                and row.person_id == person_id
+                and row.namespace == SIGNATURE_NAMESPACE
+                and row.identifier_kind in keys
+            ):
+                keys[row.identifier_kind].add(
+                    normalize_identifier(row.identifier_kind, SIGNATURE_NAMESPACE, row.value)
+                )
+        if len(page) <= 100:
+            return keys
+        after = page[99].id
+    return None
 
 
 async def _copies(
@@ -121,67 +161,54 @@ async def project_signature(
             stated["phone"][normalize_identifier("phone", SIGNATURE_NAMESPACE, phone)] = phone
         except ValueError:
             continue
-    current = await uow.people.query(
-        PeopleQuery(
-            tenant_id=principal.tenant_id,
-            principal_id=principal.principal_id,
-            person_id=person_id,
-            kinds=["identifier"],
-            assigned="attached",
-            valid_at=now,
-            distinct_assignments=True,
-            sensitivity_ceiling=Sensitivity.RESTRICTED,
-            limit=100,
-        )
-    )
-    if len(current) > 100:
-        # Too many live aliases to know the current signature; change nothing.
+    known = await _ever_stated(uow, principal, person_id)
+    if known is None:
+        # Too many aliases to know what the signatures have said; change nothing.
         return
     sent_at = source.sent_at
     for kind, values in stated.items():
         if not values:
             # A signature without this detail says nothing about it.
             continue
-        live = {
-            normalize_identifier(kind, SIGNATURE_NAMESPACE, row.value)
-            for row in current
-            if isinstance(row, PersonIdentifier)
-            and row.namespace == SIGNATURE_NAMESPACE
-            and row.identifier_kind == kind
-            and row.valid_to is None
-        }
         copies: dict[str, list[PersonIdentifier]] = {}
-        for key in sorted(live | set(values)):
+        for key in sorted(known[kind] | set(values)):
             found = await _copies(uow, principal, person_id, kind, key)
             if found is None:
                 break
             copies[key] = found
         else:
-            # The earliest later signature: a detail it omits ended there.
-            later = min(
-                (
-                    copy.valid_from
-                    for key in live
+            # What each signature stated, by its sent time. Each copy holds from
+            # its own message to the earliest later signature that omits it, so
+            # the intervals are the same whatever order the mail is read in.
+            signatures: dict[datetime, set[str]] = {}
+            for key, rows in copies.items():
+                for row in rows:
+                    signatures.setdefault(row.valid_from, set()).add(key)
+            for key in sorted(copies.keys() - set(values)):
+                # This message omits the detail, so a copy still holding at its
+                # sent time ends there, even one a later signature had ended.
+                holding = [
+                    copy
                     for copy in copies[key]
-                    if copy.valid_to is None and copy.valid_from > sent_at
-                ),
-                default=None,
-            )
-            for key in sorted(live - set(values)):
-                for copy in copies[key]:
-                    if copy.valid_to is None and copy.valid_from < sent_at:
-                        await uow.people.put(
-                            copy.model_copy(
-                                update={
-                                    "valid_to": sent_at,
-                                    "revision": copy.revision + 1,
-                                    "updated_at": max(
-                                        now, copy.updated_at + timedelta(microseconds=1)
-                                    ),
-                                }
-                            ),
-                            expected_revision=copy.revision,
-                        )
+                    if copy.valid_from < sent_at
+                    and (copy.valid_to is None or copy.valid_to > sent_at)
+                ]
+                if any(copy.valid_to is not None for copy in holding) and any(
+                    [await _owner_ended(uow, principal, c, kind, key) for c in copies[key]]
+                ):
+                    # The owner said when it ended; that stays as they set it.
+                    continue
+                for copy in holding:
+                    await uow.people.put(
+                        copy.model_copy(
+                            update={
+                                "valid_to": sent_at,
+                                "revision": copy.revision + 1,
+                                "updated_at": max(now, copy.updated_at + timedelta(microseconds=1)),
+                            }
+                        ),
+                        expected_revision=copy.revision,
+                    )
             for key, written in values.items():
                 if any([await _owner_ended(uow, principal, c, kind, key) for c in copies[key]]):
                     # The owner's correction wins over a signature that repeats it.
@@ -203,7 +230,14 @@ async def project_signature(
                         context=SIGNATURE_CONTEXT,
                         verification="contextual",
                         valid_from=sent_at,
-                        valid_to=None if key in live else later,
+                        valid_to=min(
+                            (
+                                at
+                                for at, said in signatures.items()
+                                if at > sent_at and key not in said
+                            ),
+                            default=None,
+                        ),
                         support_ids=[source_id],
                         **common,
                     ),

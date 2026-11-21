@@ -93,20 +93,28 @@ Four existing rules bound the design:
      source mail supports them.
    - Each message writes its own copy, with that message as its only source,
      valid from the time it was sent. The profile lists each distinct detail
-     once. Placing a message reads the copies of the details it concerns, at
-     most 2,000 of each; past that the message adds nothing. Erasing or excluding a message removes its copies. A detail other
+     once. Placing a message reads every copy of the titles, or of the
+     numbers, the sender's signatures have stated, ended or not, at most 2,000
+     of each detail; past that the message adds nothing. Erasing or excluding a message removes its copies. A detail other
      retained messages also stated remains on theirs.
    - Titles and phone numbers are replaced separately. When a later message
      states a different title, the earlier title ends at that message's sent
      time. When a later message states phone numbers, an earlier number it
      omits ends the same way. A signature with no title, or no numbers, says
      nothing about them and ends nothing.
-   - The rule reads sent times, not arrival order, so history walked newest
-     first leaves the same current details. The end time recorded on an older
-     copy can be later than the true one when three or more signatures
-     alternate and arrive out of order.
+   - The rule reads sent times, not arrival order. A copy holds from its
+     message's sent time to the earliest later signature that omits it. A
+     message read late takes its place in that sequence: it ends an earlier
+     copy that still held at its sent time, even one a later signature had
+     already ended, and its own copy ends at the next signature that omits
+     it. The recorded intervals are therefore the same whatever order mail is
+     read in. Until the review of 2026-11-20, three or more signatures read
+     out of order could leave two titles holding together. A message that
+     left no copy, because it was erased or stated only a detail the owner
+     had ended, is not part of the sequence.
    - A detail the owner ended stays ended. A later signature repeating it
-     adds nothing.
+     adds nothing, and an older signature read late does not move the end the
+     owner set.
 6. **Extraction is deterministic and no model is called.**
    - The block is found by the reader's third sign: the sender's name line
      and the short lines under it. One function now serves both the reader

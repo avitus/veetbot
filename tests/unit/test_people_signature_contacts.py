@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timedelta
+from itertools import permutations
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -304,6 +306,108 @@ async def test_a_changed_title_ends_the_earlier_one_in_any_processing_order(
     assert titles["Partner, Scale"].valid_to is None
     # The number both signatures state stays current.
     assert _current(rows) == {("phone", "650.378.6038"), ("role", "Partner, Scale")}
+
+
+async def test_an_older_signature_arriving_late_takes_its_place_in_the_sequence() -> None:
+    """Analyst, then Director, then the Partner signature that was sent between them."""
+    factory, service = await _stack()
+    sent: dict[str, datetime] = {}
+    for message_id, days_ago, title in (
+        ("m-1", 6, "Analyst, Scale"),
+        ("m-3", 2, "Director, Scale"),
+        ("m-2", 4, "Partner, Scale"),
+    ):
+        sent[message_id] = (
+            await _receive(
+                factory, service, message_id, days_ago=days_ago, body=_signed(title=title)
+            )
+        ).sent_at
+
+    rows = await _details(factory)
+
+    titles = {
+        row.value: (row.valid_from, row.valid_to) for row in rows if row.identifier_kind == "role"
+    }
+    # One title at a time: Analyst ends where Partner begins, not where Director does.
+    assert titles == {
+        "Analyst, Scale": (sent["m-1"], sent["m-2"]),
+        "Partner, Scale": (sent["m-2"], sent["m-3"]),
+        "Director, Scale": (sent["m-3"], None),
+    }
+
+
+# Each history is its signatures oldest first, as (days ago, body).
+_HISTORIES: dict[str, list[tuple[int, str]]] = {
+    "three titles": [
+        (6, _signed(title="Analyst, Scale")),
+        (4, _signed(title="Partner, Scale")),
+        (2, _signed(title="Director, Scale")),
+    ],
+    "a title that returns": [
+        (8, _signed(title="Analyst, Scale")),
+        (6, _signed(title="Partner, Scale")),
+        (4, _signed(title="Analyst, Scale")),
+        (2, _signed(title="Partner, Scale")),
+    ],
+    "numbers that overlap": [
+        (6, _signed(phone="650.555.0100")),
+        (4, _signed(phone="650.555.0100 | 650.555.0142")),
+        (2, _signed(phone="650.555.0142")),
+    ],
+}
+
+
+async def _intervals(
+    history: list[tuple[int, str]], order: Iterable[int]
+) -> dict[tuple[datetime, str, str], datetime | None]:
+    factory, service = await _stack()
+    for index in order:
+        days_ago, body = history[index]
+        await _receive(factory, service, f"m-{index}", days_ago=days_ago, body=body)
+    return {
+        (row.valid_from, row.identifier_kind, row.value): row.valid_to
+        for row in await _details(factory)
+    }
+
+
+@pytest.mark.parametrize("name", list(_HISTORIES))
+async def test_signatures_hold_the_same_intervals_in_any_processing_order(name: str) -> None:
+    history = _HISTORIES[name]
+    chronological = await _intervals(history, range(len(history)))
+    for order in permutations(range(len(history))):
+        assert await _intervals(history, order) == chronological, order
+
+
+async def test_a_late_older_signature_leaves_the_owners_ending_alone() -> None:
+    """The owner said when a number ended; a signature sent before then does not move it."""
+    factory, service = await _stack()
+    await _receive(factory, service, "m-first", days_ago=5, body=_signed(phone="650.555.0100"))
+    rory = (await _people(factory))["Rory O'Driscoll"]
+    [number] = [row for row in await _details(factory) if row.identifier_kind == "phone"]
+    owner = principal().model_copy(update={"scopes": {"people.read", "people.write"}})
+    await PublicPeopleService(factory, service._clock).update(
+        owner,
+        rory.id,
+        UpdatePerson(
+            session_id=session().id,
+            expected_revision=rory.revision,
+            alias=EndPersonAlias(
+                operation="end",
+                identifier_id=number.id,
+                expected_revision=number.revision,
+                valid_to=NOW - timedelta(days=1),
+            ),
+        ),
+        key="end-signature-number",
+        ceiling=Sensitivity.SENSITIVE,
+    )
+    [ended] = [row for row in await _details(factory) if row.identifier_kind == "phone"]
+
+    await _receive(factory, service, "m-late", days_ago=3, body=_signed(phone="650.555.0142"))
+
+    numbers = {row.value: row for row in await _details(factory) if row.identifier_kind == "phone"}
+    assert numbers["650.555.0100"] == ended
+    assert numbers["650.555.0142"].valid_to is None
 
 
 async def test_a_later_signature_replaces_the_numbers_it_states() -> None:

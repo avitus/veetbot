@@ -349,9 +349,12 @@ mail-formed facts; they last while their source mail supports them. Titles and
 phone numbers are replaced separately: a later message that states a different
 title ends the earlier one at its sent time, and a later message that states
 numbers ends an earlier number it omits. A signature without a title, or
-without numbers, ends nothing. The rule compares sent times, so the current
-details are the same whatever order mail is processed in. A detail the owner
-ended is never added again. Erasing or excluding a message removes its copies, and a detail that
+without numbers, ends nothing. The rule compares sent times: a copy holds from
+its message's sent time to the earliest later signature that omits it, and a
+message read late takes its place in that sequence, ending an earlier copy that
+still held at its sent time. The details and the interval each one held are
+therefore the same whatever order mail is processed in. A detail the owner
+ended is never added again, and the end the owner set is not moved. Erasing or excluding a message removes its copies, and a detail that
 other retained messages also stated remains on theirs.
 
 ### Merge and split

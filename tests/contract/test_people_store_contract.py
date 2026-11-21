@@ -1043,6 +1043,36 @@ async def people_identifier_lookup_contract(store: PeopleStore) -> None:
         (row.context, row.valid_to) for row in periods if isinstance(row, PersonIdentifier)
     } == {("owner", None), ("owner", ended_at), ("email:later", None)}
 
+    # Distinct assignments page by identifier, so every detail one person has
+    # held can be listed however many there are (ADR-0336).
+    paged = Person(id=uuid4(), display_name="Paged correspondent", **common)
+    await store.put(paged, expected_revision=0)
+    held = {f"{number}-{address}" for number in range(3)}
+    for value in sorted(held):
+        for _ in range(2):
+            await store.put(identifier(paged.id, value), expected_revision=0)
+    listed: set[str] = set()
+    after = None
+    while True:
+        page = await store.query(
+            PeopleQuery(
+                tenant_id=owner.tenant_id,
+                principal_id=owner.principal_id,
+                person_id=paged.id,
+                kinds=["identifier"],
+                assigned="attached",
+                distinct_assignments=True,
+                sensitivity_ceiling=Sensitivity.RESTRICTED,
+                after=after,
+                limit=1,
+            )
+        )
+        listed.update(row.value for row in page[:1] if isinstance(row, PersonIdentifier))
+        if len(page) <= 1:
+            break
+        after = page[0].id
+    assert listed == held
+
 
 async def test_memory_people_identifier_lookup_contract() -> None:
     await people_identifier_lookup_contract(InMemoryPeopleStore(FixedClock(NOW)))
