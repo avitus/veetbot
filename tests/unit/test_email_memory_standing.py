@@ -1085,6 +1085,90 @@ async def test_a_first_class_claim_never_upgrades_a_hypothesis_it_repeats() -> N
     assert kept.longevity is MemoryLongevity.TENTATIVE
 
 
+async def test_the_pass_over_a_persons_other_threads_lengthens_and_promotes_and_never_lowers() -> (
+    None
+):
+    """A mark on a person rates every thread from them. Their other threads' memories
+    gain what the mark gives at once; what it would take away waits for a full re-rating."""
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY, thread_id="t-2")
+    await seed_thread(factory, priority=0.2, messages=[_message(source)], provider_thread_id="t-2")
+    [guess] = await service.form(source, [fact_for(source)])
+    assert guess.expires_at == source.sent_at + timedelta(days=30)
+
+    async def person_feedback(judgment: str, *, undone: bool = False) -> None:
+        item = EmailFeedback(
+            id=UUID(int=905),
+            thread_id=UUID(int=904),  # given on another of Alex's threads
+            target="person",
+            judgment=judgment,  # type: ignore[arg-type]
+            target_values=["alex@example.test"],
+            created_at=NOW,
+            undone_at=NOW if undone else None,
+        )
+        await _put(factory, "feedback", str(item.id), item.model_dump(mode="json"))
+
+    # Less important on the person would lower this memory; the pass leaves it alone.
+    await seed_thread(factory, priority=0.7, messages=[_message(source)], provider_thread_id="t-2")
+    assert (await service.rerate_thread("work", "t-2")).promoted == 1
+    first_class = await stored(factory, guess)
+    await person_feedback("less_important")
+    assert (await service.lengthen_threads([("work", "t-2")])).changed == 0
+    assert await stored(factory, guess) == first_class
+
+    # Important on the person lengthens it at once.
+    await person_feedback("important")
+    report = await service.lengthen_threads([("work", "t-2"), ("work", "t-unknown")])
+    assert (report.changed, report.demoted, report.by_retention) == (1, 0, {"no_expiry": 1})
+    raised = await stored(factory, guess)
+    assert raised.expires_at is None and raised.derivation is MemoryDerivation.DIRECT
+    async with factory() as uow:
+        events = await uow.events.list_after(guess.source_session_id, 0, principal())
+    assert [e.payload["cause"] for e in events if e.event_type == "email.memory.rerated"] == [
+        "assessment",
+        "feedback",
+    ]
+
+    # Undone, the pass takes nothing back; the thread's own re-rating does.
+    await person_feedback("important", undone=True)
+    await seed_thread(factory, priority=0.2, messages=[_message(source)], provider_thread_id="t-2")
+    assert (await service.lengthen_threads([("work", "t-2")])).changed == 0
+    assert await stored(factory, guess) == raised
+    report = await service.rerate_thread("work", "t-2")
+    assert (report.demoted, report.by_retention) == (1, {"30_days": 1})
+
+
+async def test_the_pass_over_other_threads_promotes_a_guess_the_mark_makes_first_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory, service = await correspondence_stack()
+    await know_alex(factory, service)
+    source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY, thread_id="t-2")
+    await seed_thread(factory, priority=0.2, messages=[_message(source)], provider_thread_id="t-2")
+    [guess] = await service.form(source, [fact_for(source)])
+    item = EmailFeedback(
+        id=UUID(int=905),
+        thread_id=UUID(int=904),
+        target="person",
+        judgment="important",
+        target_values=["alex@example.test"],
+        created_at=NOW,
+    )
+    await _put(factory, "feedback", str(item.id), item.model_dump(mode="json"))
+    # The pass runs inside the owner's request. Once its time is spent it starts no
+    # new thread, and the thread waits for its own assessment or the command.
+    monkeypatch.setattr("agent_core.memory.email_people._LENGTHEN_SECONDS", 0.0)
+    assert (await service.lengthen_threads([("work", "t-2")])).examined == 0
+    assert await stored(factory, guess) == guess
+    monkeypatch.undo()
+
+    report = await service.lengthen_threads([("work", "t-2")])
+    assert (report.promoted, report.by_retention) == (1, {"no_expiry": 1})
+    promoted = await stored(factory, guess)
+    assert promoted.derivation is MemoryDerivation.DIRECT and promoted.expires_at is None
+
+
 async def test_a_familiar_address_needs_gmails_passed_check_to_be_a_known_sender() -> None:
     """Anyone can write a familiar address in a From line. Only Gmail's passed sender
     check ties a received message to that address; `none` says nothing either way."""

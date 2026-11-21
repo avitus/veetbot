@@ -6177,6 +6177,16 @@ async def _compose(
                 uow_factory, clock, ids, owner, provider="memory-rerate", model="none"
             ).rerate_thread(account_id, thread_id, cause="feedback")
 
+        async def lengthen_email_memories(
+            owner: Principal, threads: Sequence[tuple[str, str]]
+        ) -> None:
+            """Person or topic feedback lengthens memories in the other threads it rates."""
+            from agent_core.memory.email_people import EmailPeopleFormationService
+
+            await EmailPeopleFormationService(
+                uow_factory, clock, ids, owner, provider="memory-rerate", model="none"
+            ).lengthen_threads(threads, cause="feedback")
+
         async def cleanup_email_artifacts() -> None:
             await artifact_writers.sweep_expired()
             await trajectory_service.sweep_once()
@@ -6362,6 +6372,7 @@ async def _compose(
                 release_session_transports=mcp_runtime.release_session_transports,
                 forget_source=forget_email_source,
                 rerate_memories=rerate_email_memories if settings.people_enabled else None,
+                lengthen_memories=lengthen_email_memories if settings.people_enabled else None,
                 cleanup_artifacts=cleanup_email_artifacts,
                 cancel_parked_run=executor.cancel_parked_run,
                 resolve_archive_approval=resolve_email_archive_approval,

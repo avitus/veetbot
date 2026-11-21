@@ -147,9 +147,28 @@ No ranking code changes, so the `retrieval@7` label stays.
   path saved it, and at once when the owner gives or undoes feedback on that
   thread. The feedback commits first. A retry of the same request, or a
   repeated undo, writes nothing and re-rates again, so a re-rating that did not
-  run is made up by the retry or by the thread's next assessment. Person and
-  topic feedback reaches other threads when they are next assessed. A reply
+  run is made up by the retry or by the thread's next assessment. A reply
   reaches the memory when the sent message is synced.
+- **Person and topic feedback, and the other threads it matches.** Importance
+  feedback on a person or a topic rates every thread it matches, not only the
+  one it was given on. That thread is re-rated in full. When the feedback is
+  saved or undone, the other matching threads are visited at once in the
+  lengthening direction only: a memory there gains a longer retention, or
+  first-class standing, and nothing is shortened or demoted. Lengthening
+  needs only what is visible, so it is safe at once. What the feedback takes
+  away in those threads, by Less important or by an Important since undone,
+  waits for each thread's next assessment or for the owner's command, which
+  read the thread whole. Until then a memory raised by a mark the owner has
+  undone keeps what it gained. A single Less important on a person therefore
+  cannot expire memories across that person's threads in one request.
+
+  The pass runs inside the request, after the feedback commits. It takes up
+  to 250 other threads, newest first, fifty to a transaction, each under its
+  own locks with feedback, threads and senders read again, and it starts no
+  new thread after three quarters of a second. A thread it does not reach
+  waits for its next assessment or the command. A pass that fails never fails
+  the feedback, and the retry that resumes the thread's own re-rating runs the
+  pass again.
 - **Raising needs what is visible; lowering needs proof.** A re-rating
   lengthens a memory's retention, or promotes it, on whatever the stored
   thread shows. It shortens retention only on a reading whose importance is
@@ -161,7 +180,8 @@ No ranking code changes, so the `retrieval@7` label stays.
   does a sender check that merely reads no verdict: the stored message may
   have been cached before the check existed, so it earns no standing and takes
   none from a memory that is already first-class. A failed check demotes.
-- **Older memories wait for the command.** The two hooks follow only a memory
+- **Older memories wait for the command.** The two hooks, and the pass over
+  other threads, follow only a memory
   already under the table, one that carries `email-retention@1`. A memory
   formed before this change is brought under it only by the owner's command
   in decision 8, or by a later email that renews it.

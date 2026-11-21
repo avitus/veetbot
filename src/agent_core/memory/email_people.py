@@ -7,6 +7,7 @@ import json
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from datetime import datetime, timedelta
+from time import monotonic
 from typing import Literal
 from uuid import UUID
 
@@ -108,6 +109,12 @@ from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 EMAIL_PEOPLE_POLICY = EMAIL_STANDING_POLICY
 # Sources one re-rating transaction examines before it commits and continues.
 _RERATE_PAGE = 200
+# Threads one lengthening transaction visits before it commits and continues,
+# and how long one such pass may take new threads. It runs inside the owner's
+# feedback request, where a thread that holds a memory costs about 13 ms and
+# one that holds none about 3 ms.
+_LENGTHEN_PAGE = 50
+_LENGTHEN_SECONDS = 0.75
 # What a retained message did for a memory it lists, strongest first. The source
 # record's `facts` map keeps one `<role>:<memory id>` entry beside each fact's
 # identity, so a message is told apart by itself and not by its timestamp.
@@ -1046,6 +1053,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         *,
         apply: bool,
         adopt: bool,
+        lower: bool = True,
     ) -> list[UUID]:
         """Re-rate the memories one retained message governs; returns those it changed.
 
@@ -1058,6 +1066,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         message only on a record written before roles were kept. Only the
         owner's command adopts a memory formed before the table existed; the
         hooks follow memories already under it, so nothing is backfilled silently.
+        With `lower` false the pass only lengthens and promotes.
         """
         payload = record.payload
         account_id, thread_id, message_id = (
@@ -1076,6 +1085,8 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             or not isinstance(thread_id, str)
             or not isinstance(message_id, str)
             or not isinstance(memory_ids, list)
+            # Most retained messages formed nothing: read no thread for them.
+            or not memory_ids
         ):
             return []
         standing = await self._standing(uow, account_id, thread_id, message_id, seen=seen)
@@ -1107,7 +1118,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 origin
                 and standing.sender_seen
                 and standing.first_class != first_class
-                and (standing.first_class or standing.may_demote)
+                and (standing.first_class or (lower and standing.may_demote))
             )
             if restandable:
                 statement = restated(
@@ -1140,7 +1151,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 raises = current is not None and (expiry is None or expiry > current)
                 # Lengthening needs only what is visible; shortening needs a
                 # current, complete reading of the thread.
-                if expiry != current and (raises or standing.may_lower):
+                if expiry != current and (raises or (lower and standing.may_lower)):
                     update["expires_at"] = expiry
                 if memory.lifecycle_policy_version != EMAIL_RETENTION_POLICY:
                     update["lifecycle_policy_version"] = EMAIL_RETENTION_POLICY
@@ -1241,6 +1252,87 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             if apply:
                 await self._audit_rerating(uow, changed, cause=cause, run=run, lease=lease)
         return seen.report(applied=apply)
+
+    async def lengthen_threads(
+        self, threads: Sequence[tuple[str, str]], *, cause: str = "feedback"
+    ) -> EmailRerateReport:
+        """Let these threads' memories gain what stored state now gives them (ADR-0340).
+
+        The owner's feedback on a person or a topic rates every thread it
+        matches. Its own thread is re-rated in full. This pass takes the other
+        threads, as `(account, provider thread)` pairs, and only lengthens and
+        promotes: lengthening needs only what is visible, so it is safe at
+        once. What the feedback would shorten or demote there waits for that
+        thread's next assessment or the owner's command, which read it whole.
+
+        A bounded page of threads is committed per transaction, and each page
+        reads feedback, threads and senders again under its own locks. A
+        thread is read only when one of its retained messages lists a memory.
+        The pass runs inside the owner's request, so it takes the threads in
+        the order given and starts no new one once its time is spent; a thread
+        it does not reach waits like the rest.
+        """
+        seen = _Rerating()
+        if not self.enabled:
+            return seen.report(applied=True)
+        deadline = monotonic() + _LENGTHEN_SECONDS
+        for start in range(0, len(threads), _LENGTHEN_PAGE):
+            if monotonic() >= deadline:
+                break
+            async with (
+                self._uow_factory() as uow,
+                uow.email.lock(self._principal),
+                uow.people.lock(self._principal),
+            ):
+                seen.fresh()
+                changed: list[UUID] = []
+                for account_id, provider_thread_id in threads[start : start + _LENGTHEN_PAGE]:
+                    if monotonic() >= deadline:
+                        break
+                    for record in await self._thread_sources(uow, account_id, provider_thread_id):
+                        changed += await self._rerate_source(
+                            uow, record, seen, apply=True, adopt=False, lower=False
+                        )
+                await self._audit_rerating(uow, changed, cause=cause, run=None, lease=None)
+        return seen.report(applied=True)
+
+    async def _thread_sources(
+        self, uow: RepositoryUnitOfWork, account_id: str, provider_thread_id: str
+    ) -> list[EmailRecord]:
+        """One thread's retained messages, from the index of every message observed."""
+        index = await uow.email.get(
+            self._principal, "thread_source", thread_source_key(account_id, provider_thread_id)
+        )
+        if index is None:
+            return []
+        observed, thread_id = (
+            index.payload.get("observed_message_ids"),
+            index.payload.get("thread_id"),
+        )
+        if isinstance(observed, list):
+            message_ids = {str(value) for value in observed}
+        else:
+            # An index that lists no observed messages: the stored thread's own.
+            row = (
+                await uow.email.get(self._principal, "thread", thread_id)
+                if isinstance(thread_id, str)
+                else None
+            )
+            message_ids = (
+                set()
+                if row is None
+                else {message.id for message in EmailThread.model_validate(row.payload).messages}
+            )
+        records: list[EmailRecord] = []
+        for message_id in sorted(message_ids):
+            record = await uow.email.get(
+                self._principal,
+                "semantic_source",
+                semantic_source_key(account_id, provider_thread_id, message_id),
+            )
+            if record is not None:
+                records.append(record)
+        return records
 
     async def merge_duplicates(self, *, apply: bool) -> EmailMergeReport:
         """Keep one memory per fact in each thread; a preview unless `apply` (ADR-0341).

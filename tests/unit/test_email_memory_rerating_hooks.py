@@ -210,6 +210,165 @@ async def test_a_retried_feedback_request_resumes_a_rerating_that_did_not_run() 
         assert (await _memories(app))[0].expires_at == memory.expires_at
 
 
+async def _second_thread(app: Any, memory: MemoryRecord) -> MemoryRecord:
+    """Another conversation from the same sender, holding its own memory under the table."""
+    from agent_core.domain.email_semantics import semantic_source_key, thread_source_key
+
+    other_id, copy_id = UUID(int=7_702), UUID(int=7_703)
+    async with app.uow_factory() as uow:
+        [thread] = await uow.email.list(app.principal, "thread")
+        [source] = [
+            row
+            for row in await uow.email.list(app.principal, "semantic_source")
+            if str(memory.id) in row.payload["memory_ids"]
+        ]
+        account_id = str(thread.payload["account_id"])
+        index = await uow.email.get(
+            app.principal, "thread_source", thread_source_key(account_id, "thread-1")
+        )
+        assert index is not None
+        copy: MemoryRecord = await uow.memories.upsert_belief(
+            memory.model_copy(
+                update={
+                    "id": copy_id,
+                    "statement": memory.statement.replace("thread-1", "thread-2"),
+                    "store_position": await uow.memories.next_position(),
+                }
+            )
+        )
+        for record, key, payload in (
+            (thread, str(other_id), {"id": str(other_id), "provider_thread_id": "thread-2"}),
+            (
+                index,
+                thread_source_key(account_id, "thread-2"),
+                {"thread_id": str(other_id)},
+            ),
+            (
+                source,
+                semantic_source_key(account_id, "thread-2", "m1"),
+                {
+                    "provider_thread_id": "thread-2",
+                    "memory_ids": [str(copy.id)],
+                    "facts": {f"formed:{copy.id}": str(copy.id)},
+                },
+            ),
+        ):
+            await uow.email.put(
+                record.model_copy(
+                    update={"key": key, "revision": 1, "payload": {**record.payload, **payload}}
+                ),
+                expected_revision=0,
+            )
+    return copy
+
+
+async def test_a_mark_on_a_person_lengthens_their_memories_in_other_threads_at_once() -> None:
+    """Person and topic feedback rates every thread it matches. Lengthening is always
+    safe, so the other threads' memories gain it at once; shortening them still waits
+    for their own next assessment or the owner's command."""
+    settings = replace(_email_settings(), email_mode_enabled=True, people_enabled=True)
+    async with build(
+        settings=settings,
+        script=FakeModelScript(turns=[_assessment(0.6)]),
+        mcp_client_factory=await _mail(census=False),
+        fixed_clock_at=NOW,
+    ) as app:
+        await app.services.email.submit_task(app.principal, kind="refresh")
+        async with app.uow_factory() as uow:
+            [thread] = await uow.email.list(app.principal, "thread")
+        [memory] = await _memories(app)
+        ninety = memory.last_evidence_at + timedelta(days=90)
+        assert memory.expires_at == ninety
+        other = await _second_thread(app, memory)
+
+        async def expiries() -> tuple[datetime | None, datetime | None]:
+            kept = {row.id: row.expires_at for row in await _memories(app)}
+            return kept[memory.id], kept[other.id]
+
+        async def feedback(target: str, judgment: str) -> UUID:
+            marked = await app.services.email.feedback(
+                app.principal,
+                thread_id=UUID(str(thread.payload["id"])),
+                target=target,  # type: ignore[arg-type]
+                judgment=judgment,  # type: ignore[arg-type]
+            )
+            return UUID(str(marked["feedback_id"]))
+
+        # A mark on the thread itself touches only that thread.
+        marked = await feedback("thread", "important")
+        assert await expiries() == (None, ninety)
+        await app.services.email.undo_feedback(app.principal, marked)
+        assert await expiries() == (ninety, ninety)
+
+        # Less important on the person lowers this thread's memory and shortens
+        # nothing in the person's other threads.
+        lowered = await feedback("person", "less_important")
+        assert await expiries() == (memory.last_evidence_at + timedelta(days=30), ninety)
+        await app.services.email.undo_feedback(app.principal, lowered)
+        assert await expiries() == (ninety, ninety)
+
+        # Important on the person removes the expiry in the other thread at once.
+        marked = await feedback("person", "important")
+        assert await expiries() == (None, None)
+        # Undoing it lowers this thread's memory; the other thread's waits.
+        await app.services.email.undo_feedback(app.principal, marked)
+        assert await expiries() == (ninety, None)
+
+
+async def test_a_failed_pass_over_other_threads_never_fails_the_feedback() -> None:
+    """The feedback is committed first. The same retry that resumes this thread's
+    re-rating resumes the pass over the person's other threads."""
+    settings = replace(_email_settings(), email_mode_enabled=True, people_enabled=True)
+    async with build(
+        settings=settings,
+        script=FakeModelScript(turns=[_assessment(0.6)]),
+        mcp_client_factory=await _mail(census=False),
+        fixed_clock_at=NOW,
+    ) as app:
+        await app.services.email.submit_task(app.principal, kind="refresh")
+        async with app.uow_factory() as uow:
+            [thread] = await uow.email.list(app.principal, "thread")
+        [memory] = await _memories(app)
+        other = await _second_thread(app, memory)
+        email = app.services.email
+        lengthen = email.lengthen_memories
+        asked: list[list[tuple[str, str]]] = []
+
+        async def unavailable(_: object, threads: Any) -> None:
+            asked.append(list(threads))
+            raise RuntimeError("the store went away")
+
+        async def mark() -> dict[str, object]:
+            return await email.feedback(
+                app.principal,
+                thread_id=UUID(str(thread.payload["id"])),
+                target="person",
+                judgment="important",
+                idempotency_key="person-once",
+            )
+
+        email.lengthen_memories = unavailable
+        marked = await mark()
+        # Only the other matching thread is asked for; this one has its own pass.
+        assert asked == [[(str(thread.payload["account_id"]), "thread-2")]]
+        kept = {row.id: row.expires_at for row in await _memories(app)}
+        assert kept == {memory.id: None, other.id: other.expires_at}
+
+        email.lengthen_memories = lengthen
+        assert (await mark())["feedback_id"] == marked["feedback_id"]
+        assert {row.expires_at for row in await _memories(app)} == {None}
+
+        # Feedback about replies changes no importance, so no other thread is visited.
+        email.lengthen_memories = unavailable
+        await email.feedback(
+            app.principal,
+            thread_id=UUID(str(thread.payload["id"])),
+            target="person",
+            judgment="needs_reply",
+        )
+        assert len(asked) == 1
+
+
 async def test_an_abstaining_assessment_leaves_the_threads_memories_as_they_were() -> None:
     """A result that cannot be grounded is saved as zero features, and rates the thread zero."""
     ungrounded = json.loads(_assessment(0.8).text or "")

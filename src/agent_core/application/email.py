@@ -12,7 +12,7 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -111,6 +111,9 @@ logger = logging.getLogger(__name__)
 
 # Inbox omits conversations ranked below this; Needs you still lists them (ADR-0329).
 INBOX_RELEVANCE_FLOOR = 0.1
+# Other threads one piece of person or topic feedback lengthens memories in at
+# once, newest first (ADR-0340). The rest follow at their own next assessment.
+FEEDBACK_FOLLOW_THREADS = 250
 
 
 async def records(store: EmailStore, principal: Principal, kind: str) -> AsyncIterator[EmailRecord]:
@@ -314,6 +317,8 @@ class EmailExperienceService:
         forget_source: Callable[[Principal, str, str, frozenset[str]], Awaitable[None]]
         | None = None,
         rerate_memories: Callable[[Principal, str, str], Awaitable[None]] | None = None,
+        lengthen_memories: Callable[[Principal, Sequence[tuple[str, str]]], Awaitable[None]]
+        | None = None,
         cleanup_artifacts: Callable[[], Awaitable[None]] | None = None,
         cancel_parked_run: Callable[[RepositoryUnitOfWork, Run, str], Awaitable[Run]] | None = None,
         resolve_archive_approval: Callable[[Principal, UUID, WorkerLease | None], Awaitable[None]]
@@ -348,6 +353,7 @@ class EmailExperienceService:
         self.release_session_transports = release_session_transports or close_session
         self.forget_source = forget_source
         self.rerate_memories = rerate_memories
+        self.lengthen_memories = lengthen_memories
         self.cleanup_artifacts = cleanup_artifacts
         self.cancel_parked_run = cancel_parked_run
         self.resolve_archive_approval = resolve_archive_approval
@@ -667,10 +673,14 @@ class EmailExperienceService:
             replay = None if key is None else await uow.email.get(principal, "feedback_replay", key)
             if replay is not None and replay.payload.get("request_digest") != request_digest:
                 raise ConflictError("idempotency key was used for different feedback")
-            feedback_id = (
-                str(replay.payload["feedback_id"])
-                if replay is not None
-                else await self._save_feedback(
+            item: EmailFeedback | None
+            if replay is not None:
+                feedback_id = str(replay.payload["feedback_id"])
+                item = await read_value(
+                    uow.email, principal, "feedback", feedback_id, EmailFeedback
+                )
+            else:
+                item = await self._save_feedback(
                     uow.email,
                     principal,
                     thread,
@@ -682,7 +692,7 @@ class EmailExperienceService:
                     replay=None if key is None else (key, request_digest),
                     now=now,
                 )
-            )
+                feedback_id = str(item.id)
             result: dict[str, object] = {
                 "feedback_id": feedback_id,
                 "thread": thread_summary(
@@ -693,7 +703,7 @@ class EmailExperienceService:
             }
         # A replayed request re-rates too: the first one may have ended after its
         # feedback committed and before the memories followed.
-        await self._memories_follow(principal, thread)
+        await self._memories_follow(principal, thread, item)
         return result
 
     async def _save_feedback(
@@ -709,8 +719,8 @@ class EmailExperienceService:
         expected_revision: int | None,
         replay: tuple[str, str] | None,
         now: datetime,
-    ) -> str:
-        """Write one feedback record and its replay receipt; returns the feedback id."""
+    ) -> EmailFeedback:
+        """Write one feedback record and its replay receipt; returns the record."""
         if expected_revision is not None and thread.revision != expected_revision:
             raise ConflictError("email thread changed")
         values = (
@@ -753,21 +763,57 @@ class EmailExperienceService:
                 ),
                 expected_revision=0,
             )
-        return str(item.id)
+        return item
 
-    async def _memories_follow(self, principal: Principal, thread: EmailThread) -> None:
-        """Let the thread's email memories follow the owner's feedback at once (ADR-0340).
+    async def _memories_follow(
+        self, principal: Principal, thread: EmailThread, feedback: EmailFeedback | None
+    ) -> None:
+        """Let email memories follow the owner's feedback at once (ADR-0340).
 
         The feedback is already committed. A refused re-rating never fails it:
         a retry of the request, a repeated undo, or the next assessment of the
         thread re-rates again.
+
+        The thread the feedback was given on is re-rated in full. Importance
+        feedback on a person or a topic also rates every other thread it
+        matches, and their memories gain at once what it gives them: a longer
+        retention, or first-class standing. That pass never shortens and never
+        demotes; what the feedback takes away there waits for each thread's
+        next assessment or the owner's command.
         """
         if self.rerate_memories is None:
             return
-        try:
+        with suppress(ConflictError, NotFoundError):
             await self.rerate_memories(principal, thread.account_id, thread.provider_thread_id)
-        except (ConflictError, NotFoundError):
+        if (
+            self.lengthen_memories is None
+            or feedback is None
+            or feedback.target == "thread"
+            or feedback.judgment not in {"important", "less_important"}
+        ):
             return
+        try:
+            async with self.uow_factory() as uow:
+                summaries = await self._summaries.read(uow.email, principal)
+            # An undone record matches nothing; the threads it rated are the ones to visit.
+            given = feedback.model_copy(update={"undone_at": None})
+            others = sorted(
+                (
+                    stored
+                    for stored in summaries
+                    if stored.id != thread.id and feedback_matches(given, stored)
+                ),
+                key=lambda stored: stored.updated_at,
+                reverse=True,
+            )[:FEEDBACK_FOLLOW_THREADS]
+            if others:
+                await self.lengthen_memories(
+                    principal, [(stored.account_id, stored.provider_thread_id) for stored in others]
+                )
+        except Exception:
+            # The pass is a courtesy to an already committed judgment; a retry,
+            # each thread's next assessment or the owner's command makes it up.
+            logger.warning("email_memory_follow_deferred")
 
     async def undo_feedback(self, principal: Principal, feedback_id: UUID) -> dict[str, object]:
         """Undo one feedback record and rebuild the thread projection from surviving evidence."""
@@ -796,7 +842,7 @@ class EmailExperienceService:
             )
         # A repeated undo writes nothing and re-rates again: the first one may have
         # ended after it committed and before the memories followed.
-        await self._memories_follow(principal, thread)
+        await self._memories_follow(principal, thread, item)
         return summary
 
     async def _draft(self, store: EmailStore, principal: Principal, draft_id: UUID) -> EmailDraft:

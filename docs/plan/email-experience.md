@@ -1038,7 +1038,7 @@ horizon and the tentative construction.
   and the review flag.
 - **Re-rating.** Retention and standing are recomputed after every saved
   assessment of the thread, whichever path saved it, and at once when the owner gives or undoes feedback
-  on it. A retried feedback request or a repeated undo writes nothing and re-rates again. A re-rating lengthens or promotes on whatever the stored thread shows.
+  on it. A retried feedback request or a repeated undo writes nothing and re-rates again. Importance feedback on a person or a topic, saved or undone, also lengthens or promotes memories at once in the other threads it matches (up to 250, newest first, within three quarters of a second) and shortens or demotes nothing there; that waits for each thread's next assessment or the command. A re-rating lengthens or promotes on whatever the stored thread shows.
   It shortens only when the importance is known and the thread is held whole,
   changes standing only when the memory's message is among those held, and
   demotes only when that sender is no longer known or such a reading rates the
