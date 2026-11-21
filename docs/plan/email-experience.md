@@ -1063,6 +1063,26 @@ horizon and the tentative construction.
   message that supplied its last evidence sets its retention. The owner's own
   statement about the same subject takes the memory over under the ordinary
   rules, and "Still true" replaces it at owner authority.
+- **One fact, one memory (ADR-0341).** A thread's analysis restarts when a
+  message arrives, and a reply quotes what it answers, so the same fact is
+  proposed many times in different words.
+  - A message forms one memory per fact: a proposal with the same subject,
+    belief type and value as a memory the message already formed changes
+    nothing, whatever that memory's status. Values are compared without case
+    or punctuation.
+  - A fact whose quote is quoted text forms nothing and renews nothing. Quoted
+    text appears in the message only on lines marked `>`, or is a quote of at
+    least six words that an earlier message of the stored thread already
+    holds. A forwarded message's content is new to the thread and still forms.
+  - Renewal matches on subject, belief type and value; the predicate's wording
+    no longer has to match.
+  - `agent memory merge-email-duplicates --owner TENANT/PRINCIPAL` merges the
+    copies already stored. Within a thread, live email memories that share a
+    subject, a belief type and a value are one fact: the earliest evidence
+    stays and each copy is superseded by it. Copies under different subjects
+    are counted and left. It previews unless `--confirm` is given, reports
+    counts only, and appends one content-free `email.memory.merged` event per
+    thread it changes.
 - **Not included.** A first-class memory enters the session-start summary only
   once it is active, as a chat memory does. Email memories are not sent to the
   dreaming provider.

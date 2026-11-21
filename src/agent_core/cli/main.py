@@ -1272,6 +1272,41 @@ def memory_rerate_email(
     typer.echo(json.dumps(report))
 
 
+async def _memory_merge_email_duplicates(owner: str, confirm: bool) -> dict[str, Any]:
+    async with build(storage="postgres") as composition:
+        principal = composition.principal
+        if owner != f"{principal.tenant_id}/{principal.principal_id}":
+            raise AuthorizationError("--owner must match the configured tenant/principal")
+        merge = composition.email_memory_merge
+        if merge is None:
+            raise NotFoundError("People is disabled")
+        return (await merge(principal, confirm)).model_dump(mode="json")
+
+
+@memory_app.command("merge-email-duplicates")
+def memory_merge_email_duplicates(
+    owner: Annotated[
+        str, typer.Option("--owner", help="Exact configured tenant/principal identity.")
+    ],
+    confirm: Annotated[
+        bool, typer.Option("--confirm", help="Apply the merge. Without it, only preview.")
+    ] = False,
+) -> None:
+    """Keep one memory per fact in each email thread (ADR-0341); previews unless --confirm.
+
+    Live email memories of one thread that share a subject, a belief type and
+    a value are one fact. The earliest stays and each copy is superseded by it.
+    The report holds counts only.
+    """
+
+    try:
+        report = asyncio.run(_memory_merge_email_duplicates(owner, confirm))
+    except (ConfigurationError, AuthorizationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(json.dumps(report))
+
+
 @memory_app.command("get")
 def memory_get(belief_id: UUID) -> None:
     """Inspect one governed memory, including formation and source identifiers."""

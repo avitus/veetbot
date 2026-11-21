@@ -98,3 +98,67 @@ async def test_postgres_keeps_an_email_memory_by_importance_and_follows_owner_fe
         assert returned.expires_at == memory.expires_at
         applied = await rerating(app.principal, True)
         assert (applied.applied, applied.examined, applied.changed) == (True, 1, 0)
+
+
+async def test_postgres_merges_a_repeated_email_fact_into_the_earliest_memory() -> None:
+    """ADR-0341: the copy points at the memory kept, through the store's own foreign key."""
+    from agent_core.domain.email_memory import EmailMergeReport
+    from agent_core.domain.memory import MemoryStatus
+
+    settings = replace(
+        _email_settings(),
+        email_mode_enabled=True,
+        people_enabled=True,
+        database_url=database_settings().database_url,
+    )
+    async with build(
+        settings=settings,
+        storage="postgres",
+        clock=FixedClock(NOW),
+        script=FakeModelScript(turns=[_assessment(0.6)]),
+        mcp_client_factory=await _mail(census=False),
+    ) as app:
+        operation = await app.services.email.submit_task(app.principal, kind="refresh")
+        worker = cast(DurableWorker, app.async_worker_factory("email-merge-test"))
+        while (await app.runs.get(operation.run_id)).status is not RunStatus.COMPLETED:
+            assert await worker.run_once(), (await app.runs.get(operation.run_id)).model_dump()
+        [kept] = await _memories(app)
+        async with app.uow_factory() as uow:
+            copy = await uow.memories.upsert_belief(
+                kept.model_copy(
+                    update={
+                        "id": UUID(int=9_901),
+                        "statement": kept.statement.replace("requested_action", "asked_to"),
+                        "store_position": await uow.memories.next_position(),
+                    }
+                )
+            )
+            sources = await uow.email.list(app.principal, "semantic_source")
+            [source] = [
+                row for row in sources if str(kept.id) in cast(list[str], row.payload["memory_ids"])
+            ]
+            listed = cast(list[str], source.payload["memory_ids"])
+            await uow.email.put(
+                source.model_copy(
+                    update={
+                        "revision": source.revision + 1,
+                        "payload": {**source.payload, "memory_ids": [*listed, str(copy.id)]},
+                    }
+                ),
+                expected_revision=source.revision,
+            )
+        merge = app.email_memory_merge
+        assert merge is not None
+        preview = await merge(app.principal, False)
+        assert preview == EmailMergeReport(applied=False, examined=2, facts=1, superseded=1)
+        assert len(await _memories(app)) == 2
+        applied = await merge(app.principal, True)
+        assert (applied.facts, applied.superseded) == (1, 1)
+        async with app.uow_factory() as uow:
+            merged = await uow.memories.get(copy.id, app.principal)
+            events = await uow.events.list_after(kept.source_session_id, 0, app.principal)
+        assert merged.status is MemoryStatus.SUPERSEDED and merged.superseded_by == kept.id
+        assert [row.id for row in await _memories(app)] == [kept.id]
+        [audit] = [event for event in events if event.event_type == "email.memory.merged"]
+        assert audit.payload == {"kept": str(kept.id), "superseded": [str(copy.id)]}
+        assert (await merge(app.principal, True)).superseded == 0

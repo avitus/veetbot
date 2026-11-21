@@ -114,6 +114,12 @@
 # saved jobs. Each schedule names its servers, the approval lists them, and a
 # job's grant names what it may read. Implemented, not yet delivered: the schedule
 # environment must mirror AGENT_SVP_ENABLED first. No milestone or gate moves.
+# ADR-0341 (Accepted, 2026-11-20): production held the same email fact many
+# times (271 of 668 live email memories repeated a value from their own thread).
+# The owner chose rules in code: one memory per fact per message whatever the
+# wording, a quoted sentence is not the replier's statement, a restatement
+# renews the one memory, and an owner-run `agent memory merge-email-duplicates`
+# supersedes the stored copies. Sandbox tests only. No milestone or gate moves.
 # ADR-0340 (Accepted, 2026-11-20): the owner asked that email memories be kept
 # longer the more important the email is, and that email still form first-class
 # memories. Retention now follows the thread's importance (30 days, 90 days,

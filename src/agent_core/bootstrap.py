@@ -540,7 +540,7 @@ from agent_core.domain.credentials import CredentialRef
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits, EmailRecord
-from agent_core.domain.email_memory import EmailRerateReport
+from agent_core.domain.email_memory import EmailMergeReport, EmailRerateReport
 from agent_core.domain.email_subscriptions import SUBSCRIPTIONS_TOOL_NAME, UNSUBSCRIBE_TOOL_NAME
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
@@ -961,6 +961,21 @@ def _email_memory_rerating(
     return rerate
 
 
+def _email_memory_merge(
+    uow_factory: UnitOfWorkFactory, clock: Clock, ids: IdFactory
+) -> Callable[[Principal, bool], Awaitable[EmailMergeReport]]:
+    """Keep one memory per fact in each email thread (ADR-0341); no model."""
+
+    async def merge(owner: Principal, confirm: bool) -> EmailMergeReport:
+        from agent_core.memory.email_people import EmailPeopleFormationService
+
+        return await EmailPeopleFormationService(
+            uow_factory, clock, ids, owner, provider="memory-merge", model="none"
+        ).merge_duplicates(apply=confirm)
+
+    return merge
+
+
 def _retained_email_reader(
     uow_factory: UnitOfWorkFactory, clock: Clock, ids: IdFactory
 ) -> Callable[[Principal], RetainedEmailReader]:
@@ -1220,6 +1235,8 @@ class Composition:
     people_repair: PeopleDirectoryRepair | None = None
     # ADR-0340: the owner-run re-rating of live email memories; None without People.
     email_memory_rerating: Callable[[Principal, bool], Awaitable[EmailRerateReport]] | None = None
+    # ADR-0341: the owner-run merge of repeated email facts; None without People.
+    email_memory_merge: Callable[[Principal, bool], Awaitable[EmailMergeReport]] | None = None
     call_plans: CallPlanSweep | None = None
     call_follow_ups: CallResultFollowUps | None = None
     # The Cockpit builder and its own sandbox manager, only behind the flag (M35).
@@ -6590,6 +6607,9 @@ async def _compose(
                 judgment_provider=judgment_provider,
                 people_repair=people_repair,
                 email_memory_rerating=_email_memory_rerating(uow_factory, clock, ids)
+                if settings.people_enabled
+                else None,
+                email_memory_merge=_email_memory_merge(uow_factory, clock, ids)
                 if settings.people_enabled
                 else None,
                 call_plans=call_plan_sweep,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -225,6 +227,67 @@ def restated(
     return " ".join(
         guess_statement(sender, sent_on, account_id, thread_id, message_id, claim).split()
     )
+
+
+# A quote this long that also stands in an earlier message of the thread is that
+# message's sentence. A shorter one, such as "Approved", two people can each write.
+QUOTED_SENTENCE_WORDS = 6
+
+
+def stated_value(statement: str) -> str | None:
+    """The value an email statement quotes at its end, in either wording."""
+    if not attributed_email_statement(statement):
+        return None
+    found = re.search(r': "(.*)"\.$', statement, re.S)
+    return None if found is None else found[1]
+
+
+def value_key(value: str) -> str:
+    """A value compared without case, punctuation or spacing (ADR-0341)."""
+    return " ".join(re.sub(r"[^\w]+", " ", value.casefold()).split())
+
+
+def claim_key(belief_type: str, subject: str, value: str) -> str:
+    """One fact per message: its subject, belief type and value, whatever the wording."""
+    identity = json.dumps([belief_type, " ".join(subject.casefold().split()), value_key(value)])
+    return "claim:" + hashlib.sha256(identity.encode()).hexdigest()
+
+
+def _unmarked(text: str) -> str:
+    """Text with quote marks at line starts dropped and its wrapping collapsed."""
+    return " ".join(re.sub(r"(?m)^[ \t]*(?:>[ \t]?)+", "", text).split())
+
+
+def quoted_text(quote: str, body: str, earlier_bodies: Sequence[str]) -> bool:
+    """Whether a fact's quote is quoted text in the message it names (ADR-0341).
+
+    It is when it appears only on lines marked ``>``, or when it is a sentence of
+    at least six words that an earlier message of the thread already holds,
+    whatever the reply's layout. Marks and line wrapping are ignored.
+    """
+    needle = _unmarked(quote)
+    if not needle:
+        return False
+    own = _unmarked(
+        "\n".join(line for line in body.splitlines() if not line.lstrip().startswith(">"))
+    )
+    if needle not in own:
+        return needle in _unmarked(body)
+    if len(needle.split()) < QUOTED_SENTENCE_WORDS:
+        return False
+    return any(needle in _unmarked(earlier) for earlier in earlier_bodies)
+
+
+class EmailMergeReport(BaseModel):
+    """Counts only: what a merge of repeated email facts found and changed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    applied: bool = False
+    examined: int = 0
+    facts: int = 0
+    superseded: int = 0
+    other_subjects: int = 0
 
 
 class EmailRerateReport(BaseModel):

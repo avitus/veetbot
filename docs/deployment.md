@@ -2210,6 +2210,23 @@ revives no expired memory, and is safe to repeat; a second run changes
 nothing. Run the owner question set on a clone before the first `--confirm`
 and again after it, as for any recall change.
 
+### Repeated email facts (ADR-0341)
+
+New mail forms one memory per fact. The copies stored before that are merged
+with one command, run as the operator from the current release:
+
+```sh
+agent memory merge-email-duplicates --owner TENANT/PRINCIPAL            # preview: counts only
+agent memory merge-email-duplicates --owner TENANT/PRINCIPAL --confirm  # apply
+```
+
+The report is content-free: memories examined, facts stored more than once,
+copies superseded, and copies left because they sit under a different subject.
+The earliest memory of each fact stays and each copy is superseded by it, so
+nothing is deleted. Run the preview first and keep its output. A second run
+changes nothing. Run it before `agent memory rerate-email --confirm`, so the
+re-rating works on one memory per fact.
+
 ### Conflict reconciliation (ADR-0248)
 
 `agent memory reconcile-conflicts` re-evaluates every live `conflicts_with`

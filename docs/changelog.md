@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-20 — One fact in an email thread, one memory (ADR-0341)
+
+- Veetbot was storing the same fact from an email thread many times: 271 of
+  668 live email memories repeated a value already stored from the same
+  thread, and one value was stored 57 times. Each new message made it read the
+  whole thread again and word the same facts differently, and every reply that
+  quoted a sentence counted as saying it again.
+- A message now forms one memory per fact, however the fact is worded.
+- A sentence quoted in a reply is not counted as the replier's statement.
+- A later email that restates a fact in its own words renews the one memory.
+- The copies already stored are merged only when you run
+  `agent memory merge-email-duplicates`, which previews first. The earliest
+  memory of each fact stays and the copies point at it; nothing is deleted.
+
 ## 2026-11-20 — Email memories are kept by importance (ADR-0340)
 
 - A memory formed from an email used to expire thirty days after the email,

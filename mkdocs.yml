@@ -479,4 +479,5 @@ nav:
       - "ADR-0338 — Recall trace summary and stage timings": adr/0338-recall-trace-summary-and-stage-timings.md
       - "ADR-0339 — Recall question page": adr/0339-recall-question-page.md
       - "ADR-0340 — Email memories kept by importance": adr/0340-email-memories-keep-by-importance.md
+      - "ADR-0341 — One memory per email fact": adr/0341-one-memory-per-email-fact.md
   - Changelog: changelog.md

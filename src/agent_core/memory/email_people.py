@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import suppress
 from datetime import datetime, timedelta
 from typing import Literal
 from uuid import UUID
@@ -33,14 +34,19 @@ from agent_core.domain.email_memory import (
     GUESS_CONFIDENCE_CEILING,
     UNRATED,
     EmailMemoryStanding,
+    EmailMergeReport,
     EmailRerateReport,
     attributed_email_statement,
+    claim_key,
     claim_text,
     first_class_statement,
     guess_statement,
     kept_label,
+    quoted_text,
     restated,
+    stated_value,
     thread_importance,
+    value_key,
 )
 from agent_core.domain.email_people import EmailPeopleFact
 from agent_core.domain.email_people_evidence import EmailPeopleEvidence
@@ -735,17 +741,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         """
         seen = seen or _Rerating()
         source_key = thread_source_key(account_id, provider_thread_id)
-        if source_key not in seen.threads:
-            index = await uow.email.get(self._principal, "thread_source", source_key)
-            thread_id = None if index is None else index.payload.get("thread_id")
-            row = (
-                await uow.email.get(self._principal, "thread", thread_id)
-                if isinstance(thread_id, str)
-                else None
-            )
-            seen.threads[source_key] = (
-                None if row is None else EmailThread.model_validate(row.payload)
-            )
+        await self._stored_thread(uow, account_id, provider_thread_id, seen)
         thread = seen.threads[source_key]
         if thread is None:
             return UNRATED
@@ -821,6 +817,55 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         )
         return isinstance(person, Person) and person.state in {"active", "provisional"}
 
+    async def _stored_thread(
+        self, uow: RepositoryUnitOfWork, account_id: str, provider_thread_id: str, seen: _Rerating
+    ) -> EmailThread | None:
+        """The thread as the mailbox projection holds it now, or None when it holds none."""
+        source_key = thread_source_key(account_id, provider_thread_id)
+        if source_key not in seen.threads:
+            index = await uow.email.get(self._principal, "thread_source", source_key)
+            thread_id = None if index is None else index.payload.get("thread_id")
+            row = (
+                await uow.email.get(self._principal, "thread", thread_id)
+                if isinstance(thread_id, str)
+                else None
+            )
+            seen.threads[source_key] = (
+                None if row is None else EmailThread.model_validate(row.payload)
+            )
+        return seen.threads[source_key]
+
+    async def _formed_by_message(
+        self,
+        uow: RepositoryUnitOfWork,
+        registered: EmailRecord,
+        subject: str,
+        fact: EmailSemanticFact,
+    ) -> MemoryRecord | None:
+        """The memory this message already formed for this fact, in any status (ADR-0341).
+
+        A message assessed again proposes the same fact in other words. The
+        subject, belief type and value say it is the same one, so the first
+        memory stands, including one that has since expired or been merged away.
+        """
+        wanted, named = value_key(fact.value), " ".join(subject.casefold().split())
+        listed = registered.payload.get("memory_ids")
+        for value in listed if isinstance(listed, list) else []:
+            try:
+                memory = await uow.memories.get(UUID(str(value)), self._principal)
+            except (NotFoundError, ValueError):
+                continue
+            stated = stated_value(memory.statement)
+            if (
+                stated is not None
+                and memory.consolidation_policy_version == EMAIL_PEOPLE_POLICY
+                and memory.belief_type is fact.belief_type
+                and " ".join(memory.subject.casefold().split()) == named
+                and value_key(stated) == wanted
+            ):
+                return memory
+        return None
+
     def _governed_by_table(self, memory: MemoryRecord) -> bool:
         """A live email memory nothing of the owner's has taken over, and not yet expired."""
         return (
@@ -849,7 +894,9 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         same-dated mail that is processed afterwards finds the memory and
         changes nothing.
         """
-        claim = " ".join(claim_text(fact.subject, fact.predicate, fact.value).split())
+        # ADR-0341: the same subject, belief type and value is the same fact,
+        # however the model worded the predicate this time.
+        wanted = value_key(fact.value)
         related = await uow.memories.related(
             self._principal.tenant_id, self._principal.principal_id, subject, fact.belief_type
         )
@@ -859,7 +906,8 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 for row in sorted(related, key=lambda item: item.store_position, reverse=True)
                 if self._governed_by_table(row)
                 and row.polarity is Polarity.ASSERT
-                and row.statement.endswith((f" reports {claim}", f" that {claim}"))
+                and (stated := stated_value(row.statement)) is not None
+                and value_key(stated) == wanted
             ),
             None,
         )
@@ -1126,6 +1174,118 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 await self._audit_rerating(uow, changed, cause=cause, run=run, lease=lease)
         return seen.report(applied=apply)
 
+    async def merge_duplicates(self, *, apply: bool) -> EmailMergeReport:
+        """Keep one memory per fact in each thread; a preview unless `apply` (ADR-0341).
+
+        Within one thread, live email memories that share a subject, a belief
+        type and a value are one fact. The earliest evidence stays and each
+        other copy is superseded by it. Copies under different subjects are
+        counted and left: two people in one thread can each hold the same value.
+        """
+        report = EmailMergeReport(applied=apply)
+        if not self.enabled:
+            return report
+        by_thread: dict[tuple[str, str], list[str]] = {}
+        after: str | None = None
+        while True:
+            async with self._uow_factory() as uow:
+                page = await uow.email.list(
+                    self._principal, "semantic_source", after=after, limit=_RERATE_PAGE
+                )
+            for record in page:
+                payload = record.payload
+                account_id, thread_id = (
+                    payload.get("account_id"),
+                    payload.get("provider_thread_id"),
+                )
+                listed = payload.get("memory_ids")
+                if (
+                    not payload.get("excluded")
+                    and isinstance(account_id, str)
+                    and isinstance(thread_id, str)
+                    and isinstance(listed, list)
+                ):
+                    by_thread.setdefault((account_id, thread_id), []).extend(map(str, listed))
+            if len(page) < _RERATE_PAGE:
+                break
+            after = page[-1].key
+        examined = facts = superseded = other_subjects = 0
+        for _thread, listed_ids in sorted(by_thread.items()):
+            async with (
+                self._uow_factory() as uow,
+                uow.email.lock(self._principal),
+                uow.people.lock(self._principal),
+            ):
+                groups: dict[tuple[str, str, str], list[MemoryRecord]] = {}
+                for value in dict.fromkeys(listed_ids):
+                    try:
+                        memory = await uow.memories.get(UUID(value), self._principal)
+                    except (NotFoundError, ValueError):
+                        continue
+                    stated = stated_value(memory.statement)
+                    if (
+                        stated is None
+                        or memory.polarity is not Polarity.ASSERT
+                        or not self._governed_by_table(memory)
+                    ):
+                        continue
+                    examined += 1
+                    key = (
+                        memory.belief_type.value,
+                        value_key(stated),
+                        " ".join(memory.subject.casefold().split()),
+                    )
+                    groups.setdefault(key, []).append(memory)
+                subjects_by_value: dict[tuple[str, str], int] = {}
+                for belief_type, stated_key, _subject in groups:
+                    pair = (belief_type, stated_key)
+                    subjects_by_value[pair] = subjects_by_value.get(pair, 0) + 1
+                other_subjects += sum(count - 1 for count in subjects_by_value.values())
+                for group in groups.values():
+                    if len(group) < 2:
+                        continue
+                    kept, *copies = sorted(
+                        group, key=lambda item: (item.valid_from, item.store_position)
+                    )
+                    facts += 1
+                    superseded += len(copies)
+                    if not apply:
+                        continue
+                    now = self._clock.now()
+                    for copy in copies:
+                        await uow.memories.reinforce(
+                            copy.model_copy(
+                                update={
+                                    "status": MemoryStatus.SUPERSEDED,
+                                    "valid_to": now,
+                                    "superseded_by": kept.id,
+                                    "store_position": await uow.memories.next_position(),
+                                    "updated_at": now,
+                                },
+                                deep=True,
+                            )
+                        )
+                    await uow.events.append(
+                        NewEvent(
+                            session_id=kept.source_session_id,
+                            run_id=None,
+                            event_type="email.memory.merged",
+                            actor_type="memory",
+                            payload={
+                                "kept": str(kept.id),
+                                "superseded": sorted(str(copy.id) for copy in copies),
+                            },
+                        )
+                    )
+        return report.model_copy(
+            update={
+                "examined": examined,
+                "facts": facts,
+                "superseded": superseded,
+                "other_subjects": other_subjects,
+            }
+        )
+
     async def rerate_all(self, *, apply: bool) -> EmailRerateReport:
         """Re-rate every live email memory; a preview unless `apply` (ADR-0340).
 
@@ -1283,6 +1443,17 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
             )
             prepared: list[tuple[EmailSemanticFact, PreparedPeople | None]] = []
             self_references = await owner_references(uow.email, self._principal)
+            seen = _Rerating()
+            thread = await self._stored_thread(
+                uow, source.account_id, source.provider_thread_id, seen
+            )
+            earlier_bodies = [
+                message.body
+                for message in ([] if thread is None else thread.messages)
+                if message.id != source.message_id
+                and message.sent_at < source.sent_at
+                and message.body
+            ]
             for proposed in facts:
                 fact = (
                     EmailPeopleFact.model_validate(proposed.model_dump())
@@ -1295,6 +1466,9 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     or fact.value not in fact.quote
                 ):
                     raise ToolValidationError("semantic email fact lacks exact source grounding")
+                if quoted_text(fact.quote, source.body, earlier_bodies):
+                    # ADR-0341: a sentence a reply quotes is not the replier's statement.
+                    continue
                 linked = None
                 if isinstance(fact, EmailPeopleFact) and fact.people is not None:
                     try:
@@ -1323,6 +1497,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                     source.provider_thread_id,
                     source.message_id,
                     sender=source.sender,
+                    seen=seen,
                 )
             )
             first_class = standing.first_class
@@ -1333,18 +1508,22 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                         sort_keys=True,
                     ).encode()
                 ).hexdigest()
-                if key in fact_ids:
-                    try:
-                        prior = await uow.memories.get(UUID(str(fact_ids[key])), self._principal)
-                    except NotFoundError:
-                        continue
-                    formed.append(prior)
-                    continue
                 subject = linked.subject if linked else fact.subject
-                renewed = await self._renew(uow, source, subject, fact, standing, run_id)
-                if renewed is not None:
-                    formed.append(renewed)
-                    fact_ids[key] = str(renewed.id)
+                # ADR-0341: one memory per fact per message, whatever the wording.
+                identity = claim_key(fact.belief_type.value, subject, fact.value)
+                known = fact_ids.get(key) or fact_ids.get(identity)
+                if known is not None:
+                    fact_ids[identity] = known
+                    # A memory the owner deleted is gone and is not formed again.
+                    with suppress(NotFoundError):
+                        formed.append(await uow.memories.get(UUID(str(known)), self._principal))
+                    continue
+                existing = await self._formed_by_message(
+                    uow, registered, subject, fact
+                ) or await self._renew(uow, source, subject, fact, standing, run_id)
+                if existing is not None:
+                    formed.append(existing)
+                    fact_ids[key] = fact_ids[identity] = str(existing.id)
                     continue
                 claim = claim_text(fact.subject, fact.predicate, fact.value)
                 sent_on = source.sent_at.date().isoformat()
@@ -1400,7 +1579,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                         uow.people, self._principal, linked, belief, self._clock.now()
                     )
                 formed.append(belief)
-                fact_ids[key] = str(belief.id)
+                fact_ids[key] = fact_ids[identity] = str(belief.id)
             previous_ids = registered.payload.get("memory_ids", [])
             memory_ids = (
                 sorted({str(value) for value in previous_ids} | {str(row.id) for row in formed})
