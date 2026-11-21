@@ -2569,11 +2569,13 @@ import SwiftUI
     /// A status check learns that an archive was confirmed and reads the list. The list shows
     /// that the conversation has since come back and has a newer archive pending, which hides
     /// its row. The older outcome is applied before the list is read, so it does not lift the
-    /// newer archive's hide afterwards.
+    /// newer archive's hide afterwards. The list read also brings mail that has arrived since,
+    /// which shows that its answer was applied.
     @Test func testConfirmedArchiveDoesNotLiftANewerArchivesHide() async throws {
         let requests = EmailRequestRecorder()
         let confirmed = EmailTestFlag()
         let newerOperation = UUID(uuidString: "00000000-0000-0000-0000-000000000877")!
+        let arrivalID = UUID(uuidString: "00000000-0000-0000-0000-000000000898")!
         let model = try makeModel { request in
             requests.append(request)
             if request.url!.path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
@@ -2582,8 +2584,11 @@ import SwiftUI
                 // The first archive, begun on another device, has been confirmed.
                 return (200, other(self.archiveThreadJSON(inInbox: false, status: "completed")))
             }
-            // When the list is read again the conversation is back in the Inbox, with a newer archive pending.
-            return (200, "{\"items\":[\(other(self.archiveThreadJSON(inInbox: true, status: "pending", operationID: confirmed.isSet ? newerOperation : nil)))],\"next_cursor\":null}")
+            // When the list is read again the conversation is back in the Inbox, with a newer
+            // archive pending, and new mail has arrived beside it.
+            let row = other(self.archiveThreadJSON(inInbox: true, status: "pending", operationID: confirmed.isSet ? newerOperation : nil))
+            let arrival = other(self.archiveThreadJSON(inInbox: true)).replacingOccurrences(of: "\(self.threadID)", with: "\(arrivalID)")
+            return (200, "{\"items\":[\(confirmed.isSet ? "\(row),\(arrival)" : row)],\"next_cursor\":null}")
         }
         defer { model.resetConnection() }
         model.setListView("other")
@@ -2593,7 +2598,67 @@ import SwiftUI
         #expect(model.items.isEmpty, "The first archive is pending, so its row is hidden")
         confirmed.set()
         await model.checkArchiveStatus(threadID)
-        #expect(model.items.isEmpty, "The newer archive is pending, so the row stays hidden")
+        #expect(model.items.map(\.id) == [arrivalID], "The list was read after the confirmation, and its answer is shown")
+        #expect(!model.items.contains { $0.id == threadID }, "The newer archive is pending, so the row stays hidden")
+    }
+
+    /// A list loaded two pages deep is read again as deep as it was before a row left it. The
+    /// row leaves because Gmail confirmed its archive, because its account was refused, because
+    /// opening it showed that it has left the list, or because the owner excluded it. Taking
+    /// the depth after the row has gone reads one page where two were loaded, and once new mail
+    /// has arrived, the row loaded from the second page is no longer listed.
+    @Test(arguments: ["confirmed", "refused", "opened", "excluded"])
+    func testListStaysAsDeepAsItWasLoadedWhenARowLeaves(how: String) async throws {
+        let left = EmailTestFlag()
+        let arrivalID = UUID(uuidString: "00000000-0000-0000-0000-000000000898")!
+        let tailID = UUID(uuidString: "00000000-0000-0000-0000-000000002099")!
+        let withoutDraft = { (json: String) in
+            json.replacingOccurrences(of: "\"draft_id\":\"\(self.draftID)\"", with: "\"draft_id\":null")
+        }
+        let row = { (id: String) in
+            withoutDraft(self.archiveThreadJSON(inInbox: true)).replacingOccurrences(of: "\(self.threadID)", with: id)
+        }
+        let fillers = (0..<100).map { row(String(format: "00000000-0000-0000-0000-%012d", 2000 + $0)) }
+        // The row that leaves. A pending archive hides it where the archive, or a refusal of
+        // the archive's status, is what takes it away.
+        let hidden = how == "confirmed" || how == "refused"
+        let lead = withoutDraft(archiveThreadJSON(
+            account: how == "refused" ? "work" : "personal", inInbox: true, status: hidden ? "pending" : nil))
+        let model = try makeModel { request in
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            if path.hasSuffix("exclude") { return (200, "{}") }
+            guard path.hasSuffix("threads") else {
+                // The conversation itself, as each cause finds it once the row is to leave.
+                guard left.isSet else { return (200, lead) }
+                switch how {
+                case "confirmed": return (200, withoutDraft(self.archiveThreadJSON(inInbox: false, status: "completed")))
+                case "refused": return (403, Self.error("permission_denied", "Work mail can no longer be read."))
+                default: return (200, withoutDraft(self.archiveThreadJSON(inInbox: false)))
+                }
+            }
+            // Page one holds a hundred rows, led by the row that leaves or, afterwards, by mail
+            // that has arrived since. Page two holds the last row.
+            let second = request.url?.query?.contains("cursor=100") == true
+            let first = ([left.isSet ? row("\(arrivalID)") : lead] + fillers.prefix(99)).joined(separator: ",")
+            return (200, "{\"items\":[\(second ? fillers[99] : first)],\"next_cursor\":\(second ? "null" : "\"100\"")}")
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        await model.loadMore()
+        #expect(model.items.count == (hidden ? 100 : 101), "A hundred and one rows are loaded")
+        #expect(model.items.contains { $0.id == tailID })
+        if how == "excluded" { await model.openThread(threadID) }
+        left.set()
+        switch how {
+        case "opened": await model.openThread(threadID)
+        case "excluded": await model.excludeSelectedThread()
+        default: await model.checkArchiveStatus(threadID)
+        }
+        try await waitForEmailTestCondition { model.items.contains { $0.id == arrivalID } && !model.isReadingList }
+        #expect(model.items.contains { $0.id == arrivalID }, "The list was read again after the row left")
+        #expect(!model.items.contains { $0.id == self.threadID })
+        #expect(model.items.contains { $0.id == tailID }, "The row loaded from the second page is still listed")
     }
 
     /// The one-second poll is usually the first to learn that Gmail confirmed an archive.
@@ -2751,6 +2816,161 @@ import SwiftUI
         recovery.release()
         await refusal.value
         #expect(model.accounts.isEmpty)
+    }
+
+    /// A caller that no longer counts, here one whose task was cancelled, asks nothing and
+    /// says nothing about whether the list can be read. While a refusal waits, it clears
+    /// nothing: the list read that is out for the refusal still answers, and its answer keeps
+    /// the other accounts' mail.
+    @Test func testCancelledCallerClearsNothingWhileARefusalWaitsForItsList() async throws {
+        let recovery = EmailArchiveResponseGate()
+        let revoked = EmailTestFlag()
+        let personalID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let arrivalID = UUID(uuidString: "00000000-0000-0000-0000-000000000898")!
+        let personalRow = { (id: UUID) in
+            self.archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(self.threadID)", with: "\(id)")
+        }
+        let model = try makeArchiveRaceModel { request in
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            guard path.hasSuffix("threads") else {
+                return (403, Self.error("permission_denied", "Work mail can no longer be read."), nil)
+            }
+            let work = self.archiveThreadJSON(account: "work", inInbox: true, status: "pending")
+            guard revoked.isSet else {
+                return (200, "{\"items\":[\(work),\(personalRow(personalID))],\"next_cursor\":null}", nil)
+            }
+            // The list read asked for by the refusal is held. It brings a row of its own.
+            return (200, "{\"items\":[\(personalRow(arrivalID)),\(personalRow(personalID))],\"next_cursor\":null}", recovery)
+        }
+        defer { recovery.release(); model.resetConnection() }
+        await model.reload()
+        #expect(model.items.map(\.id) == [personalID], "The Work archive is pending, so its row is hidden")
+        revoked.set()
+        let refusal = Task { await model.checkArchiveStatus(threadID) }
+        try await waitForEmailTestCondition { recovery.isWaiting }
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            await model.reload(preserveOrder: true)
+        }
+        await cancelled.value
+        #expect(model.items.map(\.id) == [personalID], "A caller that no longer counts clears nothing")
+        #expect(model.accounts.count == 2)
+        recovery.release()
+        await refusal.value
+        #expect(Set(model.items.map(\.id)) == [personalID, arrivalID], "The list read out for the refusal still answers")
+        #expect(model.accounts.count == 2)
+        #expect(model.errorMessage == "Work mail can no longer be read.")
+    }
+
+    /// A list read asked before a refusal can answer just after it. Its answer is older than
+    /// the refusal and may still hold the refused account's mail. It is not shown, and it does
+    /// not stand in for the list read that has to answer after the refusal. Here that read
+    /// fails, so everything is cleared.
+    @Test func testListReadAskedBeforeARefusalIsNotShownAfterIt() async throws {
+        let requests = EmailRequestRecorder()
+        let earlier = EmailArchiveResponseGate()
+        let status = EmailArchiveResponseGate()
+        let personalID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let otherWorkID = UUID(uuidString: "00000000-0000-0000-0000-000000000897")!
+        let personal = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(personalID)")
+        let otherWork = archiveThreadJSON(account: "work", inInbox: true)
+            .replacingOccurrences(of: "\(threadID)", with: "\(otherWorkID)")
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            guard path.hasSuffix("threads") else {
+                return (403, Self.error("permission_denied", "Work mail can no longer be read."), status)
+            }
+            let work = self.archiveThreadJSON(account: "work", inInbox: true, status: "pending")
+            let rows = "{\"items\":[\(work),\(otherWork),\(personal)],\"next_cursor\":null}"
+            switch requests.snapshot.filter({ $0.url!.path.hasSuffix("threads") }).count {
+            case 1: return (200, rows, nil)
+            // Asked before the refusal and answered after it, with Work's mail as it stood.
+            case 2: return (200, rows, earlier)
+            // Asked after the refusal.
+            default: return (503, Self.error("unavailable", "Try again."), nil)
+            }
+        }
+        defer { earlier.release(); status.release(); model.resetConnection() }
+        await model.reload()
+        #expect(model.items.map(\.id) == [otherWorkID, personalID], "The Work archive is pending, so its row is hidden")
+        let before = Task { await model.reload(preserveOrder: true) }
+        try await waitForEmailTestCondition { earlier.isWaiting }
+        let refusal = Task { await model.checkArchiveStatus(threadID) }
+        try await waitForEmailTestCondition { status.isWaiting }
+        // The refusal arrives, and the earlier list answer right behind it. Both are waiting
+        // for the model before either is taken up, so nothing else comes between them.
+        status.release()
+        Self.holdTheMainActor()
+        earlier.release()
+        Self.holdTheMainActor()
+        await refusal.value
+        await before.value
+        #expect(model.items.isEmpty, "Nothing asked before the refusal is shown, and the list read after it failed")
+        #expect(model.accounts.isEmpty)
+        #expect(model.errorMessage == "Work mail can no longer be read.")
+    }
+
+    /// Keeps the model from taking up anything while responses already released reach it.
+    private static func holdTheMainActor() {
+        Thread.sleep(forTimeInterval: 0.3)
+    }
+
+    /// A refusal can still be waiting when a regular refresh comes round: the list read asked
+    /// for it has not answered. A refresh reads the list only once the server has admitted
+    /// it, and the refusal does not wait on that. The list is asked first, and that read
+    /// decides: its answer keeps the other accounts' mail, and its failure clears everything.
+    @Test(arguments: [200, 503])
+    func testRegularRefreshAsksTheListFirstWhileARefusalStillWaits(list: Int) async throws {
+        let requests = EmailRequestRecorder()
+        let afterRefusal = EmailRequestRecorder()
+        let recovery = EmailArchiveResponseGate()
+        let revoked = EmailTestFlag()
+        let personalID = UUID(uuidString: "00000000-0000-0000-0000-000000000899")!
+        let personal = archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(threadID)", with: "\(personalID)")
+        let model = try makeArchiveRaceModel(refreshNanoseconds: 1_500_000_000) { request in
+            requests.append(request)
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            // No refresh is admitted, so no refresh reads the list.
+            if path.hasSuffix("refresh") { return (500, Self.error("internal", "Try again."), nil) }
+            let work = self.archiveThreadJSON(account: "work", inInbox: true, status: "pending")
+            guard path.hasSuffix("threads") else {
+                return revoked.isSet
+                    ? (403, Self.error("permission_denied", "Work mail can no longer be read."), nil)
+                    : (200, work, nil)
+            }
+            guard revoked.isSet else { return (200, "{\"items\":[\(work),\(personal)],\"next_cursor\":null}", nil) }
+            afterRefusal.append(request)
+            // The list read the refusal asks for is never answered. The next one is.
+            if afterRefusal.snapshot.count == 1 { return (200, "{\"items\":[\(personal)],\"next_cursor\":null}", recovery) }
+            return list == 200 ? (200, "{\"items\":[\(personal)],\"next_cursor\":null}", nil)
+                : (503, Self.error("unavailable", "Try again."), nil)
+        }
+        defer { recovery.release(); model.resetConnection() }
+        model.setActive(true)
+        try await waitForEmailTestCondition {
+            requests.snapshot.contains { $0.httpMethod == "POST" } && !model.isRefreshing && !model.isReadingList
+        }
+        #expect(model.items.map(\.id) == [personalID], "The Work archive is pending, so its row is hidden")
+        revoked.set()
+        // The poll reads the hidden conversation's status a second after it was first seen.
+        try await waitForEmailTestCondition { recovery.isWaiting }
+        // The next regular refresh comes round within a second and a half.
+        try await waitForEmailTestCondition {
+            list == 200 ? afterRefusal.snapshot.count >= 2 && !model.isReadingList : model.accounts.isEmpty
+        }
+        guard list == 200 else {
+            #expect(model.items.isEmpty, "The list could not be read, so nothing confirmed what may still be read")
+            #expect(model.errorMessage != nil)
+            return
+        }
+        // Leaving Email clears everything while a refusal still waits, and nothing once it was answered.
+        model.setActive(false)
+        #expect(model.items.map(\.id) == [personalID], "The list answered, so the refusal no longer waits")
+        #expect(model.accounts.count == 2)
     }
 
     /// The statuses a list read asks for belong to the connection it began on. When the
@@ -3935,6 +4155,7 @@ import SwiftUI
 
     /// Builds an isolated transport whose selected response can be delivered after an independent request finishes.
     private func makeArchiveRaceModel(
+        refreshNanoseconds: UInt64 = 60_000_000_000,
         handler: @escaping (URLRequest) throws -> (Int, String, EmailArchiveResponseGate?)
     ) throws -> EmailViewModel {
         let id = EmailArchiveRaceURLProtocol.register(handler)
@@ -3945,7 +4166,7 @@ import SwiftUI
             configuration: try ConnectionConfiguration(baseURLString: "https://email.test"),
             tokenStore: InMemoryTokenStore(token: "test-token"), session: URLSession(configuration: configuration)
         ))
-        return EmailViewModel(makeAPIClient: { api })
+        return EmailViewModel(makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds)
     }
 
     /// Adds explicit feature support without changing unrelated account fixture defaults.

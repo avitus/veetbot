@@ -355,9 +355,9 @@ public final class EmailViewModel: ObservableObject {
     ///    numbers, its archives with their requests, polls and status reads, and the reader if
     ///    it shows one of its conversations (`forgetDeniedAccount`).
     /// 3. An answer for something retired changes nothing and reports nothing.
-    /// 4. The list is asked at once, which replaces every list read in flight: those were asked
-    ///    before the refusal and are never shown. The latest list read asked after it decides,
-    ///    by the way it ends:
+    /// 4. Every list read in flight is retired with them: those were asked before the refusal
+    ///    and are never shown. The list is then asked again, and the latest list read asked
+    ///    after the refusal decides, by the way it ends:
     ///    - It answers: nothing more is cleared, the visit goes on, and the refusal's message
     ///      is shown with the list.
     ///    - It is refused, or fails in any way but the next: everything is cleared and the
@@ -366,8 +366,13 @@ public final class EmailViewModel: ObservableObject {
     ///    - It needs the owner to sign in again: that takes its usual route, which clears
     ///      everything, ends the visit and tells the connection.
     ///    - Another list read replaced it: nothing. The newer read decides.
-    ///    - A list read cannot start while the refusal waits: as when it fails.
+    ///    - It cannot start because there is no connection to ask through: as when it fails.
     ///    - The owner leaves Email first: everything is cleared and the visit ends.
+    /// 5. A caller that no longer counts is none of these. A list read asked from a cancelled
+    ///    task, or for a visit that has ended, asks nothing, replaces nothing and clears
+    ///    nothing, and the read that is out still decides. A refusal is never left waiting on
+    ///    such a caller: ending the visit or the connection clears it at once, and while Email
+    ///    stays on screen each regular refresh asks the list first for as long as it waits.
     private var refusalAwaitingList: String?
 
     /// The account of a conversation, from every place the model can know it: the note made
@@ -743,6 +748,12 @@ public final class EmailViewModel: ObservableObject {
                 do { try await Task.sleep(nanoseconds: self.refreshNanoseconds) } catch { return }
             }
             while self.acceptsRead(connection: connection, activation: foreground) {
+                // A refusal still waiting when a regular refresh comes round is asked about
+                // first. A refresh reads the list only once the server has admitted it, and
+                // the refusal does not wait on that.
+                if self.refusalAwaitingList != nil {
+                    await self.reload(preserveOrder: true, activation: foreground)
+                }
                 await self.refresh(activation: foreground)
                 do { try await Task.sleep(nanoseconds: self.refreshNanoseconds) }
                 catch { return }
@@ -915,13 +926,19 @@ public final class EmailViewModel: ObservableObject {
     }
 
     /// Retains the initiating visit through every asynchronous projection read and error path.
-    private func reload(preserveOrder: Bool = false, activation foreground: UUID?) async {
+    /// A caller that has just taken rows off the list passes `depth`, the number of rows loaded
+    /// before it did, so that the list is read again as deep as it was.
+    private func reload(preserveOrder: Bool = false, activation foreground: UUID?, atLeast depth: Int = 0) async {
         let connection = generation
         let projection = projectionGeneration
         let mailboxVersions = archiveVersions
-        guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else {
-            // A refusal is waiting for the list, and a list read that cannot start will not
-            // answer it. Whatever stopped this one stops any other, so none is left.
+        // A caller that no longer counts (its task was cancelled, or its visit has ended) asks
+        // nothing, and says nothing about whether the list can be read. Nothing changes for it,
+        // and whatever list read is out still decides for a refusal that is waiting.
+        guard acceptsRead(connection: connection, activation: foreground) else { return }
+        guard let api = makeAPIClient() else {
+            // A refusal is waiting for the list, and there is no connection to ask it through.
+            // That stops every other list read too, so none is left to answer.
             if refusalAwaitingList != nil { clearAfterRefusal() }
             return
         }
@@ -931,7 +948,7 @@ public final class EmailViewModel: ObservableObject {
             loadedListVersion = nil
             loadedCounts = nil
         }
-        let visibleCount = preserveOrder ? max(pageSize, inboxItems.count) : pageSize
+        let visibleCount = preserveOrder ? max(pageSize, inboxItems.count, depth) : pageSize
         // An unchanged page says nothing new about a hidden conversation it does not hold.
         let listed = Set(inboxItems.map(\.id))
         let reusable = preserveOrder && archiveHiddenThreads.isSubset(of: listed)
@@ -1377,6 +1394,8 @@ public final class EmailViewModel: ObservableObject {
                 invalidateMailSnapshots()
                 resetListQuery()
                 isLoading = false
+                // The row may leave the list here, so the depth to read again is taken first.
+                let depth = inboxItems.count
                 if let index = inboxItems.firstIndex(where: { $0.id == id }) {
                     if Self.staysListed(result, in: queryListView) {
                         inboxItems[index] = result
@@ -1389,7 +1408,7 @@ public final class EmailViewModel: ObservableObject {
                 Task { [weak self] in
                     guard let self, self.generation == connection, self.activation == visit,
                           self.listRequest == query else { return }
-                    await self.reload(preserveOrder: true, activation: foreground)
+                    await self.reload(preserveOrder: true, activation: foreground, atLeast: depth)
                 }
             }
             thread = result
@@ -2230,13 +2249,15 @@ public final class EmailViewModel: ObservableObject {
             guard acceptsArchiveOperation(value) else { return value }
             mergeArchive(value)
             // The outcome is applied before the list is read. A newer archive of the same
-            // conversation that the list then shows is that read's to follow.
+            // conversation that the list then shows is that read's to follow. Applying it can
+            // take the row off the list, so the depth to read again is taken first.
+            let depth = inboxItems.count
             observeArchive(value)
             if value.archiveOperation?.status == "completed", owner == nil {
                 // Applying the outcome ended this conversation's poll, which may be the task
                 // running this. The list is read in a task of its own, so that it still runs.
                 await Task { [weak self] in
-                    await self?.reload(preserveOrder: true, activation: foreground)
+                    await self?.reload(preserveOrder: true, activation: foreground, atLeast: depth)
                 }.value
             }
             return value
@@ -2245,13 +2266,18 @@ public final class EmailViewModel: ObservableObject {
             if case HTTPTransportError.authorizationDenied = error {
                 // One refused conversation does not say that all of Email was revoked. Its
                 // account's mail goes at once, and the list is asked what still reads.
+                let depth = inboxItems.count
                 forgetDeniedAccount(holding: threadID)
                 refusalAwaitingList = error.localizedDescription
+                // Every list read in flight was asked before the refusal. They are retired
+                // here and now: the list is asked from another task, and an answer already on
+                // its way could otherwise be shown, and taken for the list's answer, first.
+                listRequest = UUID()
                 // The refused conversation's poll was retired with it, and may be the task
                 // running this. The list is read in a task of its own, so that it still runs,
                 // and whatever poll that read starts is left alone afterwards.
                 await Task { [weak self] in
-                    await self?.reload(preserveOrder: true, activation: foreground)
+                    await self?.reload(preserveOrder: true, activation: foreground, atLeast: depth)
                 }.value
                 return nil
             }
@@ -2447,9 +2473,11 @@ public final class EmailViewModel: ObservableObject {
             invalidateMailSnapshots()
             edits = edits.filter { $0.value.base.threadID != thread.id }
             // The row goes now: a failed reload must not leave the excluded summary in view.
+            // The list is read again as deep as it was with the row.
+            let depth = inboxItems.count
             inboxItems.removeAll { $0.id == thread.id }
             clearSelection()
-            await reload(preserveOrder: true)
+            await reload(preserveOrder: true, activation: active ? activation : nil, atLeast: depth)
         } catch { if generation == connection { report(error, draft: true) } }
     }
 
