@@ -7,7 +7,6 @@ import json
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from datetime import datetime, timedelta
-from time import monotonic
 from typing import Literal
 from uuid import UUID
 
@@ -1254,7 +1253,11 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         return seen.report(applied=apply)
 
     async def lengthen_threads(
-        self, threads: Sequence[tuple[str, str]], *, cause: str = "feedback"
+        self,
+        threads: Sequence[tuple[str, str]],
+        *,
+        cause: str = "feedback",
+        elapsed: Callable[[], float] | None = None,
     ) -> EmailRerateReport:
         """Let these threads' memories gain what stored state now gives them (ADR-0340).
 
@@ -1270,14 +1273,23 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
         thread is read only when one of its retained messages lists a memory.
         The pass runs inside the owner's request, so it takes the threads in
         the order given and starts no new one once its time is spent; a thread
-        it does not reach waits like the rest.
+        it does not reach waits like the rest. The caller supplies the timer
+        that measures that time; without one the pass has no time limit.
         """
         seen = _Rerating()
         if not self.enabled:
             return seen.report(applied=True)
-        deadline = monotonic() + _LENGTHEN_SECONDS
+        started = None if elapsed is None else elapsed()
+
+        def spent() -> bool:
+            return (
+                elapsed is not None
+                and started is not None
+                and elapsed() - started >= _LENGTHEN_SECONDS
+            )
+
         for start in range(0, len(threads), _LENGTHEN_PAGE):
-            if monotonic() >= deadline:
+            if spent():
                 break
             async with (
                 self._uow_factory() as uow,
@@ -1287,7 +1299,7 @@ class EmailPeopleFormationService(EmailSemanticFormationService):
                 seen.fresh()
                 changed: list[UUID] = []
                 for account_id, provider_thread_id in threads[start : start + _LENGTHEN_PAGE]:
-                    if monotonic() >= deadline:
+                    if spent():
                         break
                     for record in await self._thread_sources(uow, account_id, provider_thread_id):
                         changed += await self._rerate_source(

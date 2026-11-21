@@ -6185,7 +6185,7 @@ async def _compose(
 
             await EmailPeopleFormationService(
                 uow_factory, clock, ids, owner, provider="memory-rerate", model="none"
-            ).lengthen_threads(threads, cause="feedback")
+            ).lengthen_threads(threads, cause="feedback", elapsed=elapsed_time)
 
         async def cleanup_email_artifacts() -> None:
             await artifact_writers.sweep_expired()

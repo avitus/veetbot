@@ -1139,9 +1139,7 @@ async def test_the_pass_over_a_persons_other_threads_lengthens_and_promotes_and_
     assert (report.demoted, report.by_retention) == (1, {"30_days": 1})
 
 
-async def test_the_pass_over_other_threads_promotes_a_guess_the_mark_makes_first_class(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_the_pass_over_other_threads_promotes_a_guess_the_mark_makes_first_class() -> None:
     factory, service = await correspondence_stack()
     await know_alex(factory, service)
     source = await mail(factory, message_id="m-in", sender=ALEX, body=BODY, thread_id="t-2")
@@ -1158,12 +1156,13 @@ async def test_the_pass_over_other_threads_promotes_a_guess_the_mark_makes_first
     await _put(factory, "feedback", str(item.id), item.model_dump(mode="json"))
     # The pass runs inside the owner's request. Once its time is spent it starts no
     # new thread, and the thread waits for its own assessment or the command.
-    monkeypatch.setattr("agent_core.memory.email_people._LENGTHEN_SECONDS", 0.0)
-    assert (await service.lengthen_threads([("work", "t-2")])).examined == 0
+    readings = iter([0.0, 5.0, 5.0])
+    spent = await service.lengthen_threads([("work", "t-2")], elapsed=lambda: next(readings))
+    assert spent.examined == 0
     assert await stored(factory, guess) == guess
-    monkeypatch.undo()
 
-    report = await service.lengthen_threads([("work", "t-2")])
+    # Within its time the same pass reaches the thread.
+    report = await service.lengthen_threads([("work", "t-2")], elapsed=lambda: 0.0)
     assert (report.promoted, report.by_retention) == (1, {"no_expiry": 1})
     promoted = await stored(factory, guess)
     assert promoted.derivation is MemoryDerivation.DIRECT and promoted.expires_at is None
