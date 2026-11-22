@@ -52,9 +52,6 @@ class InMemorySkillPackageStore:
     async def delete(self, key: str) -> None:
         self._objects.pop(key, None)
 
-    def object_count(self) -> int:
-        return len(self._objects)
-
 
 class FilesystemSkillPackageStore:
     def __init__(self, root: Path) -> None:

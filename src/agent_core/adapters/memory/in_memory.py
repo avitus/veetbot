@@ -30,8 +30,10 @@ from agent_core.domain.knowledge import (
     fuse_passage_arms,
 )
 from agent_core.domain.memory import (
+    EMAIL_RETENTION_POLICY,
     LIFECYCLE_POLICY_VERSION,
     SENSITIVITY_ORDER,
+    TRACE_BELIEF_ID_FIELDS,
     BeliefRejection,
     BeliefType,
     ConsolidationRun,
@@ -590,7 +592,8 @@ class InMemoryMemoryStore:
                 and record.last_evidence_at <= evidence_before
                 and (
                     decay_confidence_ceiling is None
-                    or record.lifecycle_policy_version != "people-lifecycle@1"
+                    or record.lifecycle_policy_version
+                    not in {"people-lifecycle@1", EMAIL_RETENTION_POLICY}
                 )
                 and (
                     decay_confidence_ceiling is None
@@ -817,7 +820,7 @@ class InMemoryTraceStore:
                     ({item.record_id, *item.person_ids, *item.source_ids} & records)
                     for item in trace.people
                 )
-                or beliefs & set(trace.returned)
+                or any(beliefs & set(getattr(trace, field)) for field in TRACE_BELIEF_ID_FIELDS)
                 or any(
                     item.record_kind != "belief"
                     and (records | beliefs)
@@ -899,6 +902,7 @@ class InMemoryTraceStore:
                         "arm_latencies_ms": {},
                         "candidates": 0,
                         "dropped_for_budget": [],
+                        "ranked_candidates": [],
                         "dropped_for_budget_count": (
                             trace.dropped_for_budget_count + len(trace.dropped_for_budget)
                         ),

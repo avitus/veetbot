@@ -122,15 +122,32 @@ import Testing
         #expect(source.contains("private func draftWell("))
         #expect(source.contains("envelopeRow(\"From\")"))
         #expect(!source.contains("Text(\"From: \\(accountDescription("))
-        #expect(source.contains(".stroke(AppTheme.hairlineStrong)\n                .allowsHitTesting(false)"))
+        let editor = try #require(source.components(separatedBy: "private func draftWell(").last?.components(separatedBy: "private func draftActions(").first)
+        #expect(!editor.contains("RoundedRectangle"))
+        #expect(source.contains("sendUndoUntil"))
+        #expect(!source.contains("Button(\"Save & close\")"))
+        #expect(!source.contains("You can still take it back for"))
         #expect(source.contains(".menuIndicator(.hidden)"))
         for identifier in [
             "email.draft-to", "email.draft-envelope", "email.draft-history", "email.endorse-style",
-            "email.action-error", "email.draft-conflict",
+            "email.action-error", "email.draft-conflict", "email.draft-options",
         ] {
             #expect(source.contains("\"\(identifier)\")"), "\(identifier)")
         }
         #expect(source.contains(".accessibilityIdentifier(\"email.draft-\\(title.lowercased())\")"))
+    }
+
+    /// Teach Veetbot comes and goes with the reply composer and the Mac panel's tabs, so what
+    /// the owner has entered there is the thread's, kept by the model, never the card's state.
+    @Test
+    func testTeachVeetbotKeepsNoInputOfItsOwn() throws {
+        let source = try source(at: "Veetbot/Views/EmailModeView.swift")
+        let start = try #require(source.range(of: "struct EmailTeachCard: View")).upperBound
+        let end = try #require(source.range(of: "private struct EmailGistBlock", range: start..<source.endIndex)).lowerBound
+        let card = String(source[start..<end])
+        #expect(!card.contains("@State"))
+        #expect(card.contains("$model.feedbackDraft.explanation"))
+        #expect(card.contains("model.feedbackDraft.isExpanded.toggle()"))
     }
 
     @Test
@@ -220,8 +237,41 @@ import Testing
         let end = try #require(email.range(of: "private var scrollingList:")).lowerBound
         let touch = String(email[start..<end])
         // The fetch flips the task's identity; owned by the view task it would cancel itself.
-        #expect(touch.contains(".task(id: model.isLoading || model.isReadingList) { Task { await model.loadMore() } }"))
+        #expect(touch.contains(".task(id: model.canLoadMore) { if model.canLoadMore { Task { await model.loadMore() } } }"))
         #expect(touch.contains("email.list.loading-more"))
+    }
+
+    /// Every place the Email view offers or attempts a page asks the model whether it would
+    /// fetch one (`canLoadMore`, the condition More mail itself checks), so none offers a page
+    /// More mail would refuse: the touch button that retries a failed page, the touch list's
+    /// automatic fetch, and the Mac's. The labels and the identifier are as they were.
+    @Test
+    func testEveryPlaceThatOffersAPageAsksTheModelWhetherItWouldFetchOne() throws {
+        let model = try source(at: "Veetbot/ViewModels/EmailViewModel.swift")
+        #expect(model.contains("public var canLoadMore: Bool {"))
+        #expect(model.contains("guard acceptsRead(connection: connection, activation: foreground), canLoadMore,"),
+                "More mail checks the same value it publishes")
+        let email = try source(at: "Veetbot/Views/EmailModeView.swift")
+        #expect(email.components(separatedBy: "model.loadMore()").count - 1 == 3, "Three places ask for a page")
+        let touchStart = try #require(email.range(of: "private var pagedList:")).upperBound
+        let macStart = try #require(email.range(of: "private var scrollingList:"))
+        let macEnd = try #require(email.range(of: "#endif", range: macStart.upperBound..<email.endIndex)).lowerBound
+        let touch = String(email[touchStart..<macStart.lowerBound])
+        let mac = String(email[macStart.upperBound..<macEnd])
+        // The retry button's own branch, from its condition to the branch that shows progress,
+        // so the modifier is found on the button and not on the row beside it.
+        let retryStart = try #require(touch.range(of: "if model.hasMore && model.pagingFailed {")).upperBound
+        let retryEnd = try #require(touch.range(of: "} else if model.hasMore {", range: retryStart..<touch.endIndex))
+        let retry = String(touch[retryStart..<retryEnd.lowerBound])
+        let progress = String(touch[retryEnd.upperBound...])
+        #expect(retry.contains("Button(model.listView == \"priority\" ? \"More important\" : \"More mail\") {"))
+        #expect(retry.contains(".disabled(!model.canLoadMore)"), "The retry button is disabled when More mail would do nothing")
+        #expect(touch.components(separatedBy: ".disabled(").count - 1 == 1, "The retry button holds the list's only disabled state")
+        #expect(!progress.contains(".disabled("))
+        #expect(touch.contains(".task(id: model.canLoadMore) { if model.canLoadMore { Task { await model.loadMore() } } }"))
+        #expect(mac.contains(".onChange(of: nearListEnd && model.canLoadMore && !model.pagingFailed,"))
+        #expect(mac.contains("if shouldLoad { Task { await model.loadMore() } }"))
+        #expect(!email.contains("!model.isLoading && !model.isReadingList"), "No place works the condition out for itself")
     }
 
     private func source(at relativePath: String) throws -> String {

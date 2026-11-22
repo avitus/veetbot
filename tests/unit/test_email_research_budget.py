@@ -308,3 +308,82 @@ async def test_reserve_covers_verifying_the_mailbox_of_selected_files() -> None:
             hashlib.sha256(data).hexdigest() for data in documents
         }
         assert reads.count("get_profile") == 1 and reads.count("stage_attachment") == 8
+
+
+async def test_spent_source_allowance_yields_to_planning() -> None:
+    """Five matches without files must not make the next match fatal to the reply."""
+    base = await _mailbox_factory([])
+    reads: list[tuple[str, dict[str, object]]] = []
+
+    def factory(
+        config: MCPServerConfig, credential: SecretValue | None, environment: dict[str, str]
+    ) -> ScriptedMCPClient:
+        client = base(config, credential, environment)
+
+        async def call(name: str, arguments: dict[str, object]) -> MCPCallResult:
+            reads.append((name, arguments))
+            value: dict[str, Any]
+            if name == "get_profile":
+                value = {"email_address": "owner@example.com"}
+            elif name == "search_threads":
+                value = {"threads": [{"thread_id": f"match-{i}"} for i in range(6)]}
+            elif name == "get_thread_page":
+                identifier = cast(str, arguments["thread_id"])
+                value = observation(body="The Cedar board meets on January 4.")
+                value["thread_id"] = identifier
+                value["messages"][0].update(id=f"{identifier}-message", thread_id=identifier)
+            else:
+                raise AssertionError(f"Drafting must not perform {name}")
+            return MCPCallResult(content=(json.dumps(value),), structured=value)
+
+        client.call_tool = call  # type: ignore[method-assign]
+        return client
+
+    unread = hashlib.sha256(b"work:match-5").hexdigest()[:20]
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                text=json.dumps(
+                    {
+                        "mail_queries": [
+                            {
+                                "account_id": "work",
+                                "query": "Cedar board",
+                                "reason": "Find the meeting date",
+                            }
+                        ]
+                    }
+                )
+            ),
+            # The planner may still name an unread match; that read is deferred too.
+            ScriptedTurn(text=json.dumps({"source_ids": [unread]})),
+            ScriptedTurn(text=json.dumps({"body": "The Cedar board meets on January 4."})),
+        ]
+    )
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        script=script,
+        mcp_client_factory=factory,
+    ) as app:
+        service = await prepare(app)
+        thread = await service.import_thread(
+            app.principal, "work", observation(body="When does the Cedar board meet?"), uuid4()
+        )
+        operation = await service.submit_task(app.principal, kind="draft", thread_id=thread.id)
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure and run.failure.message
+        detail = cast(dict[str, Any], await service.thread(app.principal, thread.id))
+        assert detail["draft"]["body"] == "The Cedar board meets on January 4."
+        assert detail["preparation_issue"] is None
+        opened = [arguments["thread_id"] for name, arguments in reads if name == "get_thread_page"]
+        assert opened == [f"match-{i}" for i in range(5)], "the five-source cap must hold"
+        provider = app.executor._model_provider
+        assert isinstance(provider, FakeModelProvider)
+        contexts = [
+            request.model_dump_json().replace('\\"', '"').replace(" ", "")
+            for request in provider.requests
+        ]
+        assert '"sources_remaining":5' in contexts[0]
+        for later in contexts[1:]:
+            assert '"sources_remaining":0' in later
+            assert "Thesourcethreadallowanceisspent" in later

@@ -20,7 +20,7 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:941), and formation precision and
+scenarios (memory-retrieval-and-ranking.md:975), and formation precision and
 recall of consequential facts (memory-formation-and-consolidation.md:861-863).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
@@ -28,10 +28,10 @@ therefore been argued from reading the diff.
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:358-360), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:983-986),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:1017-1020),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:102), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:978), and re-derivation
+resolved at read time (memory-retrieval-and-ranking.md:1012), and re-derivation
 that is opt-in per principal (memory-formation-and-consolidation.md:888) are
 all written down, and none of them runs.
 
@@ -781,6 +781,13 @@ it inside the idle window when the sweep passes `min_unused_deliveries`, so a
 bounded page is not filled with rows the sweep would skip. Lifecycle decisions
 read the counters, never legacy utility, which stays a ranking input only.
 
+**Email memories kept by importance (ADR-0340).** A belief labelled
+`email-retention@1` is outside automatic decay in any status, as a kinship
+belief labelled `people-lifecycle@1` is. Its expiry is set from its thread's
+importance ([email-experience.md](email-experience.md), Section 6) and is the
+only thing that ends it. Both store adapters leave these rows out of the idle
+window.
+
 `MemoryStore` gains `list_idle(principal, evidence_before, limit)` — live
 beliefs last evidenced at or before an instant, least recently evidenced
 first — and the sweep reads its window through it, cut at the shortest time
@@ -851,7 +858,7 @@ first time they move; lifecycle decisions read these counters, never the legacy
 `utility`, which two months of per-run snapshot charges depressed and no wait can
 reset. The `memory.cited` payload names the delivered traces. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:983-986): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:1017-1020): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.
@@ -866,15 +873,28 @@ units of work with no external call inside a transaction.
 the store holds?" from the database alone, the way `agent run reliability`
 reports run outcomes: one read-only, repeatable-read transaction with a
 ten-second statement bound, scoped to the authenticated owner, over a window
-of at most ninety days. It reads recall traces, the `memory.recalled`,
+of at most ninety days. It reads recall-trace summaries, the `memory.recalled`,
 `memory.delivered` and `memory.cited` events, the lifecycle events, the
 memory rows and the semantic index tables, and reports counts, shares and
 latencies only: no statement, query or identifier leaves the database.
 
+The report never reads a trace document (ADR-0338). A document is tens of
+kilobytes and stored out of line, so an aggregate over documents reads the
+whole table and cannot hold the statement bound once automated sessions write
+thousands of traces a week. Each trace row instead carries a `summary` written
+with it: the recall's total time, the arms that ran, and returned and dropped
+counts by class as of the recall. The operator-field sweep removes the
+summary's timings and arms with the rest of the operator tier; the counts name
+no belief, so they stay and erasure does not rewrite them. A trace recorded
+before the summary existed has none: the report counts it in `traces`, leaves
+it out of `summarized_traces` and of every latency and class figure, and never
+falls back to its document.
+
 The report's primary signals are what reached the model and what did not:
 runs with recall, runs with a delivered block, returned and dropped-for-budget
-items by class (flagged, provisional, source-learned, owner-authority), p50
-and p95 recall latency and traces over one second, the store's composition
+items by class (flagged, provisional, source-learned, owner-authority) as they
+were classed when recall ran, p50 and p95 of the whole recall's latency and
+traces over one second, the store's composition
 (live, active, provisional, flagged, owner-authority, never used, with
 versioned counters), lifecycle events in the window by authority with the
 lowest confidence they touched, and the share of live beliefs the semantic
@@ -896,6 +916,44 @@ as People lines rather than one belief per person; the report keeps one flag
 per name, never the name. Probe files are never the frozen Milestone 16
 or 33 controls, their reports are not activation or release evidence, and the
 driver refuses production and any database not named for the purpose.
+
+The owner question set (ADR-0338) applies the same driver as a standing
+before-and-after measure. It holds real questions the owner asked and the
+stored facts each should reach, split once into a development file a change
+may be tuned against and a held-out file it may not. A change to candidate
+selection, ranking, packing or the semantic index is run against both, at its
+base revision and at the change, before it reaches `dev`. Like the probes, its
+reports are not activation or release evidence.
+
+The set lives in the database (ADR-0339): `recall_questions` holds one row per
+question and `recall_question_revisions` every state it has held, both
+owner-scoped under forced row security. A question has a key, which is its
+probe identifier, one of the probe families, the facts it should reach (text a
+memory contains, or one pinned memory, each required or optional), names the
+delivered recall must show, words the answer must or must not contain, and
+memory text that must not be recalled. A question that names none of these is
+refused, since a run of it could neither pass nor fail. Its half is chosen when
+it is created and nothing moves it: no route accepts a new half, an import
+refuses a key that exists in the other half, and the store never rewrites the
+column. A write names the revision it read; a stale write is a conflict and a
+repeated write returns what is stored. A question is retired, not deleted, and
+a retired question is left out of runs.
+
+`agent memory probe --questions development|holdout|all` runs the stored
+active questions of the database it is pointed at, which is always a clone, so
+it runs the set as it stood when the clone was taken; the report's digest
+binds it to that exact set. `agent memory questions record --report` writes
+each question's outcome back to production as its latest result: per path, the
+furthest stage each fact reached and the counts, never text. A recorded result
+is not an edit and moves no revision. Each result names a fingerprint of what
+the question measured when it ran. A result measured against content the
+question no longer holds is refused and counted as stale, and an edit that
+changes what a question measures clears its recorded result, so the page never
+shows a pass beside content that has not run. The command prints how many
+results it recorded, how many were stale and how many named no question. `agent memory questions import` and
+`export` read and write the probe file format; an export is created readable
+by its owner alone. A question is owner-written test content: it may quote a
+memory, and forgetting that memory does not rewrite the question.
 
 ## The recall delta and correction lines
 
@@ -927,7 +985,7 @@ assembles three things instead of one: the base recall, a delta recall run with
 the core profile and no query text over positions past the watermark, and the
 correction lines as a separate memory-trust user message inserted before the
 current user turn. The two recall blocks share the one in-turn recall class the
-context engine caps (context-engine.md:389): the delta is issued for what the
+context engine caps (context-engine.md:399): the delta is issued for what the
 base block left of both the token and item budgets, excluding its already
 returned belief identifiers before candidate limits. It is not issued when either
 allowance is exhausted, so a session with a frozen snapshot cannot carry twice the recall a

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -46,6 +46,9 @@ class MemoryStatus(StrEnum):
 # rather than belief; a caller that wants history names the statuses it wants.
 LIVE_MEMORY_STATUSES: tuple[MemoryStatus, ...] = (MemoryStatus.ACTIVE, MemoryStatus.PROVISIONAL)
 LIFECYCLE_POLICY_VERSION = "lifecycle@2"
+# ADR-0340: an email memory kept by its thread's importance. Its expiry alone
+# ends it, so the decay sweep leaves it out, as it does kinship beliefs.
+EMAIL_RETENTION_POLICY = "email-retention@1"
 INTEGRATED_EPISODE_MAX_SUBJECTS = 64
 # The lossless fallback episode cites every owned event of its segment on one
 # line each, and segmentation never splits an event, so this must hold the
@@ -150,6 +153,9 @@ def decay_eligible_lifecycle(record: MemoryRecord, min_unused_deliveries: int) -
     observations keep the evidence-clock rule of adaptive-memory-distillation.md.
     """
     if record.authority is MemoryAuthority.USER:
+        return False
+    if record.lifecycle_policy_version == EMAIL_RETENTION_POLICY:
+        # ADR-0340: kept for as long as its thread's importance says.
         return False
     if (
         record.authority is MemoryAuthority.AFFIRMED
@@ -1335,6 +1341,61 @@ class PeopleRecallDependencies(BaseModel):
     selection_belief_ids: tuple[UUID, ...] = Field(default=(), max_length=1000)
 
 
+# Every trace field that is a plain list of belief identifiers. The erasure
+# paths scrub exactly these, so a new identifier list belongs here or it would
+# outlive the belief it names.
+TRACE_BELIEF_ID_FIELDS: tuple[str, ...] = (
+    "returned",
+    "cited",
+    "carried_in",
+    "blocked",
+    "dropped_for_budget",
+    "ranked_candidates",
+)
+# A trace keeps at most this many ranked candidates; recall fetches fewer.
+RANKED_CANDIDATES_LIMIT = 512
+# The arms a recall can run. A trace's timings also name its stages and its
+# total, so a reader asks the trace for `arms_ran` and `recall_latency_ms`
+# instead of iterating or summing the timings.
+RECALL_ARMS: tuple[str, ...] = ("structured", "lexical", "semantic")
+
+
+class RecallClassCounts(BaseModel):
+    """How many recalled items fell into each review class when recall ran."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    total: int = Field(default=0, ge=0)
+    flagged: int = Field(default=0, ge=0)
+    provisional: int = Field(default=0, ge=0)
+    source_learned: int = Field(default=0, ge=0)
+    owner_authority: int = Field(default=0, ge=0)
+
+
+def recall_class_counts(
+    identifiers: Iterable[UUID], records: Mapping[UUID, MemoryRecord]
+) -> RecallClassCounts:
+    """Count identifiers by the class their record held when recall ran.
+
+    An identifier with no belief record (a People line, a summary) counts in
+    the total alone, which is what a join against the store would report.
+    """
+
+    listed = list(identifiers)
+    found = [records[identifier] for identifier in listed if identifier in records]
+    return RecallClassCounts(
+        total=len(listed),
+        flagged=sum(record.flagged_for_review for record in found),
+        provisional=sum(record.status is MemoryStatus.PROVISIONAL for record in found),
+        source_learned=sum(
+            record.consolidation_policy_version.startswith("owner-source-learning@")
+            for record in found
+        ),
+        owner_authority=sum(
+            record.authority in (MemoryAuthority.USER, MemoryAuthority.AFFIRMED) for record in found
+        ),
+    )
+
+
 class RecallTrace(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1358,6 +1419,15 @@ class RecallTrace(BaseModel):
     # The operator sweep nulls the identifiers above and leaves this count, so
     # the user-safe projection can still say how many beliefs were considered.
     dropped_for_budget_count: int = Field(default=0, ge=0)
+    # Operator tier: every scored candidate of a question-led recall, best
+    # first, before duplicates and the per-subject cap are collapsed. With
+    # `returned` and `dropped_for_budget` it says whether a missing belief was
+    # never a candidate, ranked too low, or lost its slot to a budget.
+    ranked_candidates: list[UUID] = Field(default_factory=list, max_length=RANKED_CANDIDATES_LIMIT)
+    # Counts by class as of the recall. They name no belief, so they survive
+    # the operator expiry and need no erasure.
+    returned_classes: RecallClassCounts | None = None
+    dropped_classes: RecallClassCounts | None = None
     blocked: list[UUID] = Field(default_factory=list)
     carried_in: list[UUID] = Field(default_factory=list)
     beliefs: list[RecalledItem] = Field(default_factory=list)
@@ -1372,7 +1442,32 @@ class RecallTrace(BaseModel):
     def has_operator_fields(self) -> bool:
         """Whether the operator tier still holds anything an expiry would null."""
 
-        return bool(self.arm_latencies_ms or self.candidates or self.dropped_for_budget)
+        return bool(
+            self.arm_latencies_ms
+            or self.candidates
+            or self.dropped_for_budget
+            or self.ranked_candidates
+        )
+
+    @property
+    def arms_ran(self) -> tuple[str, ...]:
+        """The recall arms this trace timed, without its stages or its total."""
+
+        return tuple(arm for arm in RECALL_ARMS if arm in self.arm_latencies_ms)
+
+    @property
+    def recall_latency_ms(self) -> int | None:
+        """The whole recall's time, or None once the operator tier has expired.
+
+        A trace recorded before stages were timed has no total; its arms'
+        sum is the only figure it ever held.
+        """
+
+        if not self.arm_latencies_ms:
+            return None
+        if "total" in self.arm_latencies_ms:
+            return self.arm_latencies_ms["total"]
+        return sum(self.arm_latencies_ms[arm] for arm in self.arms_ran)
 
     @property
     def considered_not_shown(self) -> int:

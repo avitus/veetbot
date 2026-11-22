@@ -42,6 +42,7 @@ from agent_core.ports.notifications import NotificationOutbox
 from agent_core.ports.people import PeopleStore
 from agent_core.ports.persistence import TransactionCallback, TransactionCallbackRegistrar
 from agent_core.ports.personas import PersonaStore
+from agent_core.ports.recall_questions import RecallQuestionStore
 from agent_core.ports.reconsolidation import ReconsolidationStore
 from agent_core.ports.records import RecordStore
 from agent_core.ports.repositories import (
@@ -131,6 +132,7 @@ class UnitOfWorkRepositories:
     calls: CallStore
     people: PeopleStore
     records: RecordStore
+    recall_questions: RecallQuestionStore
     integration_secrets: IntegrationSecretStore
     jobs: JobStore
     code_drafts: CodeDraftRepository
@@ -213,6 +215,7 @@ class MemoryUnitOfWork:
         self.calls = repositories.calls
         self.people = repositories.people
         self.records = repositories.records
+        self.recall_questions = repositories.recall_questions
         self.integration_secrets = repositories.integration_secrets
         self.jobs = repositories.jobs
         self.code_drafts = repositories.code_drafts
@@ -368,6 +371,7 @@ class PostgresUnitOfWork:
         self.calls = repositories.calls
         self.people = repositories.people
         self.records = repositories.records
+        self.recall_questions = repositories.recall_questions
         self.integration_secrets = repositories.integration_secrets
         self.jobs = repositories.jobs
         self.code_drafts = repositories.code_drafts

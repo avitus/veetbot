@@ -1043,6 +1043,40 @@ async def people_identifier_lookup_contract(store: PeopleStore) -> None:
         (row.context, row.valid_to) for row in periods if isinstance(row, PersonIdentifier)
     } == {("owner", None), ("owner", ended_at), ("email:later", None)}
 
+    # Distinct assignments page by identifier, so every detail one person has
+    # held can be listed however many there are (ADR-0336). Each assignment is
+    # listed once, by its lowest id: the cursor is applied after that choice, so
+    # a later copy of an assignment already listed never appears on a later page.
+    paged = Person(id=uuid4(), display_name="Paged correspondent", **common)
+    await store.put(paged, expected_revision=0)
+    written: dict[str, list[UUID]] = {f"{number}-{address}": [] for number in range(3)}
+    for value, ids in written.items():
+        for _ in range(2):
+            ids.append((await store.put(identifier(paged.id, value), expected_revision=0)).id)
+    for size in (1, 2):
+        listed: list[PersonIdentifier] = []
+        after = None
+        while True:
+            page = await store.query(
+                PeopleQuery(
+                    tenant_id=owner.tenant_id,
+                    principal_id=owner.principal_id,
+                    person_id=paged.id,
+                    kinds=["identifier"],
+                    assigned="attached",
+                    distinct_assignments=True,
+                    sensitivity_ceiling=Sensitivity.RESTRICTED,
+                    after=after,
+                    limit=size,
+                )
+            )
+            listed += [row for row in page[:size] if isinstance(row, PersonIdentifier)]
+            if len(page) <= size:
+                break
+            after = page[size - 1].id
+        assert sorted(row.value for row in listed) == sorted(written)
+        assert [row.id for row in listed] == sorted(min(ids) for ids in written.values())
+
 
 async def test_memory_people_identifier_lookup_contract() -> None:
     await people_identifier_lookup_contract(InMemoryPeopleStore(FixedClock(NOW)))

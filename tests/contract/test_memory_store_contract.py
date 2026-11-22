@@ -841,6 +841,54 @@ async def test_protected_people_do_not_starve_bounded_decay_pages() -> None:
     await protected_people_decay_page_contract(_store())
 
 
+async def email_retention_decay_page_contract(store: MemoryStore) -> None:
+    """ADR-0340: an email memory kept by its thread's importance ends by its
+    expiry alone, so the idle window leaves it out and a bounded sweep page is
+    not filled with rows the sweep would skip. Asserted over this case's own
+    ids: a shared database may hold other idle rows."""
+    from agent_core.domain.memory import (
+        EMAIL_RETENTION_POLICY,
+        MemoryAuthority,
+        MemoryDerivation,
+    )
+
+    def idle(belief_id: int, **update: object) -> MemoryRecord:
+        base = {
+            "subject": f"email-retention-{belief_id}",
+            "statement": f"Email retention belief {belief_id}",
+            "status": MemoryStatus.PROVISIONAL,
+            "confidence": 0.4,
+            "authority": MemoryAuthority.INFERRED,
+            "derivation": MemoryDerivation.HYPOTHESIS,
+            "last_evidence_at": NOW - timedelta(days=400),
+        }
+        return memory(belief_id=belief_id).model_copy(update={**base, **update})
+
+    kept = idle(9951, lifecycle_policy_version=EMAIL_RETENTION_POLICY)
+    ordinary = idle(9952)
+    for record in (kept, ordinary):
+        await store.upsert_belief(
+            record.model_copy(update={"store_position": await store.next_position()})
+        )
+    for arguments in ({}, {"min_unused_deliveries": 3}):
+        window = await store.list_idle(
+            principal(),
+            evidence_before=NOW - timedelta(days=50),
+            decay_confidence_ceiling=0.55,
+            limit=500,
+            **arguments,
+        )
+        mine = [row.id for row in window if row.id in {kept.id, ordinary.id}]
+        assert mine == [ordinary.id]
+    # Without a decay ceiling the window is the plain idle list and holds both.
+    plain = await store.list_idle(principal(), evidence_before=NOW - timedelta(days=50), limit=500)
+    assert {kept.id, ordinary.id} <= {row.id for row in plain}
+
+
+async def test_email_memories_kept_by_importance_stay_out_of_the_decay_page() -> None:
+    await email_retention_decay_page_contract(_store())
+
+
 async def lifecycle_exempt_decay_page_contract(store: MemoryStore) -> None:
     """ADR-0247: with ``min_unused_deliveries`` the idle window applies the
     lifecycle exemptions itself, so a bounded sweep page is not filled with

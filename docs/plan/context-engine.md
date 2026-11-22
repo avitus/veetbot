@@ -125,6 +125,15 @@ their order before the fresh rows. This makes the portable history grow without
 freezing context updates (ADR-0139). It changes neither selection nor budgets:
 active items are still never-yield inputs, not candidates for the history cut.
 
+Between two steps of a run, the only changes before the latest opaque
+continuation are whole items leaving: the previous step's fresh rows and its
+spent continuation. Nothing is inserted there and no remaining item is
+rewritten (ADR-0335). A provider that discards replayed reasoning when the
+content before it was inserted or edited, as OpenAI does from GPT-6.2, then
+keeps it ([model-gateway.md](model-gateway.md)). A history cut, a tool-result
+truncation and compaction still rewrite earlier content and can cost that
+step's reasoning.
+
 A follow-up the run reads mid-turn (ADR-0324) is an ordinary user
 message appended after a complete tool batch. It is the unanswered trailing
 user message for that step and becomes part of the completed exchanges once
@@ -277,8 +286,9 @@ markers, each naming the last conversation item its cached prefix includes
 - **The run marker** closes the longest prefix the run's next step repeats: the
   completed conversation, stopping before fresh step context or a replayed
   provider continuation. The runtime replays only the latest turn's reasoning
-  items (ADR-0007), so the next step no longer carries these, and every envelope
-  nonce after them moves with its index.
+  items (ADR-0007), so the next step no longer carries these. Their removal
+  edits nothing after them: an item read from the event log keeps its envelope
+  nonce wherever it is rendered (ADR-0335).
 
 A marker past either point would write a cache entry that no later request
 reads, paying the provider's write premium on every request for nothing. Both
@@ -914,7 +924,12 @@ Three properties matter:
 - **Content cannot close its own envelope.** The closing marker carries a
   per-item nonce, and any occurrence of the delimiter syntax inside content is
   escaped at render time. Without this, "ignore the above and " preceded by a
-  literal close tag is a one-line escape from the entire trust model.
+  literal close tag is a one-line escape from the entire trust model. The nonce
+  is a digest of the item's canonical bytes, the part's index and the item's
+  identity. An item read from the event log is identified by its event
+  sequence, so it renders the same bytes at any position and a later request
+  repeats it exactly when earlier items leave. An item rendered for one request
+  has no event and is identified by its position (ADR-0335).
 - **The label survives every transformation.** Truncation keeps the envelope and
   marks it truncated. Elision keeps the label in the pointer. Compaction does not
   touch it at all. A transformation that produces unlabeled output from labeled

@@ -5,6 +5,7 @@ from typing import Literal
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.email_signature import SIGNATURE_NAMESPACE
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.people import (
     PeopleQuery,
@@ -93,6 +94,9 @@ async def resolve_identity(
     at: datetime,
     ceiling: Sensitivity,
 ) -> IdentityResolution:
+    if namespace == SIGNATURE_NAMESPACE:
+        # ADR-0336: what a sender's signature states never identifies anyone.
+        return IdentityResolution(status="unresolved", person_ids=[])
     normalized = normalize_identifier(kind, namespace, value)
     # Exact values only, one row per distinct assignment (ADR-0121): per-message
     # identifier copies and superstring names can no longer fill the bounded

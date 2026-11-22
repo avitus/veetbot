@@ -417,8 +417,9 @@ Body line"""
 
 
 def test_signature_delimiter_does_not_turn_the_sign_off_into_a_heading() -> None:
-    result = reading_body("Thanks,\nJamie\n--\nJamie Example")
-    assert result == "Thanks,\\\nJamie\n\n--\\\nJamie Example"
+    # Text after the block means it is not a signature, so it stays as written.
+    result = reading_body("Thanks,\nJamie\n--\nJamie Example\n\nP.S. Bring the deck.")
+    assert result == "Thanks,\\\nJamie\n\n--\\\nJamie Example\n\nP.S. Bring the deck."
 
 
 def test_code_fences_keep_their_lines_untouched() -> None:
@@ -773,6 +774,24 @@ def test_image_merge_stays_quick_on_unclosed_link_delimiters() -> None:
     assert time.monotonic() - started < 1
 
 
+def test_link_destinations_are_found_in_one_pass_over_a_run_that_never_closes() -> None:
+    """A long run of link starts with no closing parenthesis is scanned once, not once
+    per start, in the merge and in the signature scan that reads a line as its reader does."""
+    from agent_core.application.email_reader import _visible, merge_image_body
+
+    hostile = "](https://a" * 40000
+    started = time.monotonic()
+    assert merge_image_body("Keep this text.", hostile, hostile).startswith("Keep this text.")
+    assert _visible(hostile).startswith("(https://a")
+    assert time.monotonic() - started < 1
+
+    # The same destinations are still found, and a run that never closes hides none after it.
+    text = "[deck](https://files.example/a_(1)) ](https://open [post](https://www.example.com/p)"
+    plain = "[www.example.com](https://www.example.com/p)"
+    assert merge_image_body(plain, text, text) == text
+    assert _visible("See [the deck](https://files.example/d) now") == "See the deck now"
+
+
 def test_images_inside_links_keep_surrounding_text_linked() -> None:
     """An image splits an anchor into linked text segments and standalone image markers."""
     urls: list[str] = []
@@ -931,6 +950,476 @@ def test_html_column_spans_preserve_financial_table_grid() -> None:
     assert "| Total | $42 |  |" in result
 
 
+# A Gmail reply as its two MIME alternatives. The HTML marks each signature; the
+# plain part marks nothing, and only a writer who set one has the `-- ` delimiter.
+GMAIL_REPLY_HTML = (
+    '<div dir="ltr">Here is the deck<div><br></div>'
+    '<div><a href="https://files.example/deck/42">https://files.example/deck/42</a></div>'
+    '<div><div><div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">'
+    '<div dir="ltr"><div>Riley Example</div>'
+    '<div>Partner, <a href="https://www.example.com/">Example</a></div>'
+    "<div>650.555.0100</div>"
+    '<div><a href="mailto:riley@example.com">riley@example.com</a></div>'
+    '<div><a href="https://www.example.com/team/riley-example">Bio</a>|'
+    '<a href="https://www.linkedin.example/in/rileyexample/">LinkedIn</a></div>'
+    "</div></div></div></div></div><br>"
+    '<div class="gmail_quote gmail_quote_container"><div dir="ltr" class="gmail_attr">'
+    "On Fri, Nov 20, 2026 at 6:13 AM Sam Example &lt;"
+    '<a href="mailto:sam@example.com">sam@example.com</a>&gt; wrote:<br></div>'
+    '<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex">'
+    '<div dir="ltr">And the summary: '
+    '<a href="https://docs.example/d/7">https://docs.example/d/7</a><div><br></div>'
+    '<span class="gmail_signature_prefix">-- </span><br>'
+    '<div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">'
+    '<div dir="ltr">Sam Example<div>Partner, <a href="https://www.example.com/">Example</a></div>'
+    '<div><a href="https://www.example.com/blog/post">Latest Post: A Framework</a></div>'
+    "</div></div></div></blockquote></div>"
+)
+GMAIL_REPLY_PLAIN = "\r\n".join(
+    [
+        "Here is the deck",
+        "",
+        "https://files.example/deck/42",
+        "Riley Example",
+        "Partner, Example <https://www.example.com/>",
+        "650.555.0100",
+        "riley@example.com",
+        "Bio <https://www.example.com/team/riley-example>|LinkedIn",
+        "<https://www.linkedin.example/in/rileyexample/>",
+        "",
+        "",
+        "On Fri, Nov 20, 2026 at 6:13 AM Sam Example <sam@example.com> wrote:",
+        "",
+        "> And the summary:",
+        "> https://docs.example/d/7",
+        ">",
+        "> -- ",
+        "> Sam Example",
+        "> Partner, Example <https://www.example.com/>",
+        "> Latest Post: A Framework",
+        "> <https://www.example.com/blog/post>",
+        ">",
+        "",
+    ]
+)
+RILEY = '"Riley Example" <riley@example.com>'
+HTML_NAMES = "<div>Sam Example</div><div>Riley Example</div><div>Jamie Example</div>"
+
+
+def test_marked_html_signature_is_omitted_at_every_quote_level() -> None:
+    result = reading_body(GMAIL_REPLY_HTML)
+    assert "Here is the deck" in result and "And the summary:" in result
+    for gone in ["Riley Example", "650.555.0100", "Partner", "Latest Post", "--"]:
+        assert gone not in result
+    # The merge still needs the whole alternative to recognize the plain copy.
+    kept = reading_body(GMAIL_REPLY_HTML, keep_signatures=True)
+    assert "650.555.0100" in kept and "Latest Post" in kept
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        'class="mail gmail_signature"',
+        'data-smartmail="gmail_signature"',
+        'id="Signature"',
+        'id="ms-outlook-mobile-signature"',
+        'id="AppleMailSignature"',
+    ],
+)
+def test_each_mailer_signature_marker_is_recognized(marker: str) -> None:
+    html = (
+        f"<div>See you there.</div><div {marker}><p>Jamie Example</p>"
+        "<p>555 0100</p></div><p>After.</p>"
+    )
+    assert reading_body(html) == "See you there.\n\nAfter."
+
+
+def test_delimited_signature_goes_when_only_history_follows_it() -> None:
+    source = (
+        "See you there.\n\n-- \nJamie Example\nDirector, Example\n555 0100\n\n"
+        "On Fri, Nov 20, 2026 at 6:13 AM Sam Example <sam@example.com> wrote:\n\n"
+        "> Are you coming?\n>\n> -- \n> Sam Example\n> Example Inc\n"
+    )
+    result = reading_body(source)
+    assert result.startswith("See you there.\n\nOn Fri, Nov 20, 2026 at 6:13 AM Sam Example")
+    assert "> Are you coming?" in result
+    for gone in ["Jamie Example", "Director", "555 0100", "Example Inc", "--"]:
+        assert gone not in result
+
+
+def test_a_delimiter_that_does_not_end_its_text_is_not_a_signature() -> None:
+    separated = "Agenda\n\n--\nFirst item\nSecond item\n\nPlease read both before Monday."
+    assert "First item" in reading_body(separated)
+    long_block = "Notes\n\n--\n" + "\n".join(f"Row {index}" for index in range(13))
+    assert "Row 12" in reading_body(long_block)
+
+
+@pytest.mark.parametrize("said", ["P.S. Bring the deck.", "*PS:* the room moved."])
+def test_only_a_postscript_under_a_signature_delimiter_stays(said: str) -> None:
+    """A postscript is written under the signature, and is still the message."""
+    assert reading_body(f"Thanks.\n\n--\nJamie Example\n{said}") == f"Thanks.\n\n{said}"
+    # The lines above it and below it are the signature, and still go.
+    around = f"Thanks.\n\n--\nJamie Example\nDirector, Example\n{said}\n555 0100"
+    assert reading_body(around) == f"Thanks.\n\n{said}"
+    # At a quote level too, and above the reply it was written over.
+    quoted = reading_body(f"Agreed.\n\n> Thanks.\n>\n> --\n> Jamie Example\n> {said}\n")
+    assert f"> {said}" in quoted and "Jamie Example" not in quoted and "--" not in quoted
+    replied = reading_body(
+        f"Thanks.\n\n--\nJamie Example\n{said}\n\n"
+        "On Fri, Nov 20, 2026 at 6:13 AM Sam Example <sam@example.com> wrote:\n\n> Coming?\n"
+    )
+    assert replied.startswith(f"Thanks.\n\n{said}\n\nOn Fri, Nov 20, 2026 at 6:13 AM Sam Example")
+    assert "Jamie Example" not in replied
+
+
+def test_a_wrapped_postscript_under_a_signature_delimiter_stays_whole() -> None:
+    first = "P.S. Bring the printed deck and the adapter for the projector in the"
+    assert len(first) + len(" second") > 70
+    result = reading_body(f"Thanks.\n\n--\nJamie Example\n{first}\nsecond floor room.")
+    assert result == f"Thanks.\n\n{first} second floor room."
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        # A short signature.
+        "Jamie Example\nDirector, Example\n555 0100",
+        # A signature with a disclaimer: under the delimiter a sentence is not the message.
+        "Jamie Example\nThis message is confidential and meant only for the person it was sent to.",
+        # A mailing-list footer.
+        'You received this message because you are subscribed to the Google Groups "Example" '
+        "group.\nTo unsubscribe from this group and stop receiving emails from it, send an email "
+        "to example+unsubscribe@googlegroups.example.",
+    ],
+)
+def test_a_delimited_block_without_a_postscript_goes_whatever_it_says(block: str) -> None:
+    assert reading_body(f"Thanks.\n\n-- \n{block}") == "Thanks."
+    quoted = "\n".join(f"> {line}" for line in ["Thanks.", "", "-- ", *block.split("\n")])
+    shown = reading_body(f"Agreed.\n\n{quoted}\n").split("\n")
+    assert [line for line in shown if line.strip("> ")] == ["Agreed.", "> Thanks."]
+
+
+def test_block_under_the_writers_own_name_goes_when_it_ends_the_message() -> None:
+    result = reading_body(GMAIL_REPLY_PLAIN, sender=RILEY)
+    assert result.startswith(
+        "Here is the deck\n\n[files.example](https://files.example/deck/42)\n\nOn Fri, Nov 20"
+    )
+    for gone in ["Riley Example", "650.555.0100", "riley@example.com", "Bio", "Latest Post"]:
+        assert gone not in result
+    # Nothing marks the block without the writer's name, so it stays.
+    assert "650.555.0100" in reading_body(GMAIL_REPLY_PLAIN)
+    # Each line of an HTML signature is its own paragraph.
+    html = (
+        "<div>Here is the deck</div><div>--</div><div><b>Riley Example</b></div><div>Partner</div>"
+        "<div>650.555.0100</div><div>On Fri, Nov 20, 2026 at 6:13 AM Sam wrote:</div>"
+        "<blockquote>Thanks.</blockquote>"
+    )
+    assert reading_body(html, sender=RILEY) == (
+        "Here is the deck\n\nOn Fri, Nov 20, 2026 at 6:13 AM Sam wrote:\n\nThanks."
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # A sign-off is the writer's own words, not a signature.
+        "See you there.\n\nRiley Example",
+        # Prose and a postscript under the name are the message.
+        "Riley Example\nwill present first, and the full discussion follows after lunch today.",
+        "Thanks.\n\nRiley Example\nPartner\n\nP.S. Bring the printed deck.",
+        # A list the name belongs to, and more lines than a signature has.
+        "Attending:\nRiley Example\nSam Example\nJamie Example",
+        # The list is still a list when a blank line or a paragraph sets it apart.
+        "Attending:\n\nRiley Example\nSam Example\nJamie Example",
+        "<p><b>Attending:</b></p><div>Riley Example</div><div>Sam Example</div>",
+        # Wherever in the list the name stands, and whatever introduces the list.
+        "Attending:\n\nSam Example\nRiley Example\nJamie Example",
+        "<p><b>Attending:</b></p>" + HTML_NAMES,
+        "<p><b>Attending</b></p>" + HTML_NAMES,
+        "<h3>Attending</h3>" + HTML_NAMES,
+        "Cc: Sam Example\nRiley Example\nJamie Example",
+        "Present\n* Sam Example\n* Riley Example\n* Jamie Example",
+        "<ul><li>Sam Example</li><li>Riley Example</li><li>Jamie Example</li></ul>",
+        "Riley Example\n" + "\n".join(f"Guest {index}" for index in range(13)),
+    ],
+)
+def test_the_writers_name_alone_does_not_make_a_signature(body: str) -> None:
+    assert reading_body(body, sender=RILEY) == reading_body(body)
+    # Another writer's name, or an address without one, names nobody.
+    signed = "See you there.\n\nRiley Example\nPartner\n650.555.0100"
+    assert "Partner" in reading_body(signed, sender="Sam Example <sam@example.com>")
+    assert "Partner" in reading_body(signed, sender="riley@example.com")
+    assert reading_body(signed, sender=RILEY) == "See you there."
+
+
+def test_a_signature_under_a_list_that_has_ended_still_goes() -> None:
+    signature = "Riley Example\nPartner\n650.555.0100"
+    for above in (
+        "The files:\n- deck.pdf\n- model.xlsx\n\nBest,",
+        "Attending:\nSam Example\nJamie Example\n\nSee you all there!",
+    ):
+        assert reading_body(f"{above}\n{signature}", sender=RILEY) == reading_body(above)
+    # Nothing ends this list, so the block stays: removing real names is the worse error.
+    kept = "The files:\n- deck.pdf\n- model.xlsx\n\n" + signature
+    assert reading_body(kept, sender=RILEY) == reading_body(kept)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # A fenced example of the writer's own signature is the message.
+        "Here is the format I mean.\n\n```\nRiley Example\nPartner\n650.555.0100\n```",
+        "Here is the format I mean.\n\n~~~\nRiley Example\nPartner\n650.555.0100\n~~~",
+        "````text\nRiley Example\nPartner\n```\n650.555.0100\n````",
+        # A fence that is never closed holds everything under it.
+        "Like this.\n\n```\nRiley Example\nPartner\n650.555.0100",
+        # An indented block is code as well: the plain text keeps its indentation.
+        "Here is the format I mean.\n\n    Riley Example\n    Partner\n    650.555.0100",
+        # A code block or a table under the name is the message as well.
+        "Thanks.\n\nRiley Example\nPartner\n```\nprint('x')\n```",
+        "Riley Example\n\n| Metric | Value |\n| --- | --- |\n| Revenue | 42 |",
+        # These never were a signature: a quoted line and a table row are not the name line.
+        "Format it like this:\n\n> Riley Example\n> Partner\n> 650.555.0100",
+        "<table><tr><th>Name</th><th>Title</th></tr>"
+        "<tr><td>Riley Example</td><td>Partner</td></tr></table>",
+    ],
+)
+def test_a_signature_shaped_example_in_a_code_block_stays(body: str) -> None:
+    result = reading_body(body, sender=RILEY)
+    assert result == reading_body(body)
+    # Nothing was taken out, so no fence is left open by the reader.
+    assert "Riley Example" in result and result.count("```") == body.count("```")
+
+
+def test_a_signature_under_a_closed_fence_still_goes() -> None:
+    signature = "\n\nRiley Example\nPartner\n650.555.0100"
+    for above in (
+        "Run this:\n\n```\nmake check\n```\n\nSee you there.",
+        # The fenced block is what the colon introduced, so no list is left open.
+        "Run this:\n\n```\nmake check\n```",
+    ):
+        assert reading_body(above + signature, sender=RILEY) == reading_body(above)
+    # Three spaces of indentation are not a code block.
+    indented = "See you there.\n\n   Riley Example\n   Partner\n   650.555.0100"
+    assert reading_body(indented, sender=RILEY) == "See you there."
+
+
+EXAMPLE = ["-- ", "Jamie Example", "Director, Example", "555 0100"]
+
+
+def _indented(indent: str, lines: list[str] = EXAMPLE) -> str:
+    return "\n".join(indent + line for line in lines)
+
+
+@pytest.mark.parametrize("indent", ["    ", "\t", "      ", "  \t"])
+@pytest.mark.parametrize("above", ["Format:\n", "Format:\n\n", "Here is the format I mean.\n\n"])
+def test_an_indented_example_of_a_delimited_signature_stays(indent: str, above: str) -> None:
+    """An indented code block is the message, though it is shaped like a signature."""
+    body = above + _indented(indent)
+    result = reading_body(body)
+    assert result == reading_body(body, keep_signatures=True)
+    assert all(line.strip() in result for line in EXAMPLE)
+
+
+def test_a_signature_below_an_indented_example_still_goes() -> None:
+    example = "Format:\n" + _indented("    ")
+    signature = "\n\n-- \nRiley Example\nPartner\n650.555.0100"
+    # An ordinary delimiter at the margin is a signature as before.
+    assert reading_body("See you there." + signature) == "See you there."
+    # The example keeps its lines and the real signature under it is left out.
+    signed = example + "\n\nSee you there." + signature
+    result = reading_body(signed)
+    assert result == reading_body(example + "\n\nSee you there.", keep_signatures=True)
+    assert "Jamie Example" in result and "Riley Example" not in result
+    # The same when the sender's own name leads the real one, with no delimiter.
+    named = example + "\n\nSee you there.\n\nRiley Example\nPartner\n650.555.0100"
+    assert reading_body(named, sender=RILEY) == result
+    # And the sender's own name in the example does not stop that.
+    own = "Format:\n" + _indented("    ", ["Riley Example", "Partner", "650.555.0100"])
+    signed = own + "\n\nSee you there.\n\nRiley Example\nPartner\n650.555.0100"
+    assert reading_body(signed, sender=RILEY) == reading_body(own + "\n\nSee you there.")
+
+
+def test_code_block_lines_keep_their_place_through_every_reflow() -> None:
+    """Which lines are code is read once, as written, and follows them as lines move."""
+    wrapped = (
+        "This is a line long enough that the mailer wrapped it at seventy columns,\n"
+        "so the reader joins it.\n\n"
+    )
+    assert len(wrapped.split("\n")[0]) + len(" so") > 70
+    example = "Format:\n" + _indented("    ", ["-- ", "Riley Example", "Partner"])
+    body = wrapped + example
+    assert reading_body(body, sender=RILEY) == reading_body(body, keep_signatures=True)
+    # A forwarded envelope collapses to fewer lines above a fenced example.
+    forwarded = (
+        "FYI\n\n---------- Forwarded message ---------\nFrom: Sam Example <sam@example.com>\n"
+        "Date: Fri, Nov 20, 2026\nSubject: Format\nTo: Riley Example <riley@example.com>\n\n"
+        "Like this.\n\n```\nRiley Example\nPartner\n650.555.0100\n```"
+    )
+    result = reading_body(forwarded, sender=RILEY)
+    assert result == reading_body(forwarded) and "650.555.0100" in result
+    # A block that repeats an earlier one is shown once, unless the repeat is code.
+    repeated = (
+        "Our footer:\n\nAcme Rocket Company\n1 Launch Way\nSuite 400\n\n"
+        "Copy it exactly.\n\n"
+        + _indented("    ", ["Acme Rocket Company", "1 Launch Way", "Suite 400"])
+    )
+    assert reading_body(repeated).count("Acme Rocket Company") == 2
+    flush = repeated.replace("    ", "")
+    assert reading_body(flush).count("Acme Rocket Company") == 1
+
+
+def test_a_code_line_stays_code_wherever_the_reader_joins_lines() -> None:
+    """Reflow joins no code line to its neighbour, and a line labelled by code is code."""
+    heading = "Copy this command exactly, including every argument shown in the example below:"
+    assert len(heading) > 70
+    # The example repeats a paragraph above it word for word, and it is code, so it stays.
+    body = f"Header\nDetails\n{heading} echo hello\n\nHeader\nDetails\n{heading}\n    echo hello"
+    result = reading_body(body)
+    assert result.count("echo hello") == 2
+    assert [line.rstrip("\\") for line in result.split("\n")][-2:] == [heading, "echo hello"]
+    # The same repeat with nothing indented is ordinary prose and is shown once.
+    assert reading_body(body.replace("    ", "")).count("echo hello") == 1
+    # A line under a long code line is not drawn up into it either.
+    command = "make-everything --with --many --flags --that --run --well --past --seventy --columns"
+    assert len(command) > 70
+    below = f"Run this:\n\n    {command}\nand tell me what it printed."
+    lines = [line.rstrip("\\") for line in reading_body(below).split("\n")]
+    assert command in lines and "and tell me what it printed." in lines
+    # A code line that is a lone address labels the line above it, as any lone
+    # address does, and the line it made is still code: its repeat of a block stays.
+    linked = "Alpha\nBeta\nGamma:\nhttps://example.com/x\n\nAlpha\nBeta\nGamma:\n"
+    assert reading_body(linked + "    https://example.com/x").count("example.com/x") == 2
+    assert reading_body(linked + "https://example.com/x").count("example.com/x") == 1
+
+
+@pytest.mark.parametrize(
+    "body, kept",
+    [
+        # Under a list item the indentation is the list's own.
+        (
+            "Next steps:\n  1. Send the deck.\n  2. Book the room.\n\n"
+            + _indented("     ", ["-- ", "Riley Example", "Partner", "650.555.0100"]),
+            "Next steps:\n  1. Send the deck.\n  2. Book the room.",
+        ),
+        (
+            "Next steps:\n    - Send the deck.\n    - Book the room.\n\n"
+            + _indented("    ", ["Riley Example", "Partner", "650.555.0100"]),
+            "Next steps:\n    - Send the deck.\n    - Book the room.",
+        ),
+        # A whole message set in from the edge has no indentation of its own.
+        (
+            _indented("    ", ["See you there.", "", "-- ", "Riley Example", "Partner"]),
+            "See you there.",
+        ),
+        (
+            _indented("\t", ["See you there.", "", "Riley Example", "Partner", "650.555.0100"]),
+            "See you there.",
+        ),
+        # An indented line that continues a paragraph is not a code block.
+        ("See you there.\n    -- \n    Riley Example\n    Partner", "See you there."),
+        ("See you there.\n\nRiley Example\n    Partner\n    650.555.0100", "See you there."),
+        # A reply quoted by indentation under its header is history, not code.
+        (
+            "Agreed.\n\nOn Fri, Nov 20, 2026 at 6:13 AM Sam Example <sam@example.com> wrote:\n\n"
+            + _indented("    ", ["Are you coming?", "", "-- ", "Sam Example", "Example Inc"]),
+            "Agreed.\n\nOn Fri, Nov 20, 2026 at 6:13 AM Sam Example <sam@example.com> wrote:\n\n"
+            "Are you coming?",
+        ),
+    ],
+)
+def test_an_indented_signature_that_is_no_code_block_still_goes(body: str, kept: str) -> None:
+    """Mailers indent real signatures: under a list, in a set-in body, in quoted history."""
+    assert reading_body(body, sender=RILEY) == reading_body(kept)
+
+
+def test_a_fence_elsewhere_no_longer_keeps_a_delimited_signature() -> None:
+    """Code is decided line by line, so one fence does not make the whole message code."""
+    above = "Thanks.\n\n```\nmake check\n```"
+    signature = "\n\n-- \nRiley\nSent from my phone"
+    assert reading_body(above + signature) == above
+    assert reading_body("Use ``` to open a fence." + signature) == "Use ``` to open a fence."
+    # A delimiter the fence holds is still an example, closed or not.
+    for fenced in ("```\n-- \nJamie Example\n```", "Thanks.\n\n```\n-- \nJamie Example"):
+        assert reading_body(fenced) == fenced.replace("-- ", "--")
+    # A fenced block under the delimiter is more of the message, so that block stays.
+    under = "Thanks.\n\n-- \nRiley\n```\nmake check\n```"
+    assert reading_body(under) == under.replace("-- ", "--")
+
+
+def test_an_indented_block_led_by_two_dashes_is_code_not_history() -> None:
+    """A comment line such as `-- get users` is not a reply or forward header."""
+    body = "The query.\n\n    -- get users\n    SELECT 1\n\nAnd the format:\n" + _indented("    ")
+    result = reading_body(body)
+    assert result == reading_body(body, keep_signatures=True)
+    assert "Jamie Example" in result and "SELECT 1" in result
+
+
+def test_reply_alternatives_are_compared_line_by_line() -> None:
+    """A link the reader labelled by host, or a repeat shown once, is not missing prose."""
+    from agent_core.application.email_reader import merge_image_body
+
+    html_text = (
+        "Here is the deck\n\n[https://files.example/deck/42](https://files.example/deck/42)\n\n"
+        "And the summary: [https://docs.example/d/7](https://docs.example/d/7)\n\n"
+        "Sam Example\n\n[Latest Post](https://www.example.com/blog/post)\n\nSam Example"
+    )
+    plain = (
+        "[files.example](https://files.example/deck/42)\n\n"
+        "> [And the summary:](https://docs.example/d/7)\n>\n> Sam Example\\\n"
+        "> Latest Post\\\n> [www.example.com](https://www.example.com/blog/post)"
+    )
+    assert merge_image_body(plain, html_text, html_text) == html_text
+    # A link only the plain part carries is still prose the HTML lacks.
+    only_plain = "[other.example](https://other.example/a)"
+    assert merge_image_body(only_plain, html_text, html_text) == only_plain + "\n\n" + html_text
+    assert merge_image_body("> Sam Example\n> Not in the HTML.", html_text, html_text).startswith(
+        "> Sam Example\n> Not in the HTML.\n\n"
+    )
+
+
+async def test_gmail_reply_reads_as_its_note_without_signature_or_duplicate() -> None:
+    """The retained body keeps the signature; only the reading text leaves it out."""
+    async with email_client() as (app, client):
+        thread, _ = await seed_mail(app)
+        async with app.uow_factory() as uow:
+            record = await uow.email.get(app.principal, "thread", str(thread.id))
+            assert record is not None
+            payload = dict(record.payload)
+            messages = [dict(item) for item in cast(list[dict[str, object]], payload["messages"])]
+            messages[0].update(sender=RILEY, body=GMAIL_REPLY_PLAIN, reader_html=GMAIL_REPLY_HTML)
+            payload["messages"] = messages
+            await uow.email.put(
+                record.model_copy(update={"revision": 2, "payload": payload}), expected_revision=1
+            )
+        message = (await client.get(f"/v1/email/threads/{thread.id}")).json()["messages"][0]
+        assert message["body"] == GMAIL_REPLY_PLAIN
+        reader = message["reader_body"]
+        assert reader.startswith(
+            "Here is the deck\n\n"
+            "[https://files.example/deck/42](https://files.example/deck/42)\n\nOn Fri, Nov 20"
+        )
+        assert reader.count("Here is the deck") == 1
+        assert reader.count("And the summary:") == 1
+        assert ">" not in reader.replace("\\<sam@example.com>", "")
+        for gone in ["Riley Example", "650.555.0100", "Partner", "Latest Post", "--"]:
+            assert gone not in reader
+
+
+async def test_reader_validator_changes_with_the_reader_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A client holding text from an older reader must not be told it is current."""
+    import agent_core.api.email as api
+
+    async with email_client() as (app, client):
+        thread, _ = await seed_mail(app)
+        path = f"/v1/email/threads/{thread.id}"
+        tag = (await client.get(path)).headers["etag"]
+        monkeypatch.setattr(api, "READER_VERSION", "email-reader@next")
+        assert (await client.get(path, headers={"If-None-Match": tag})).status_code == 200
+
+
 def test_plain_paragraphs_missing_from_html_keep_their_place_after_the_note() -> None:
     """Quoted headers and signatures the HTML words differently follow the writer's note."""
     from agent_core.application.email_reader import merge_image_body
@@ -982,6 +1471,36 @@ def test_plain_paragraphs_missing_from_html_keep_their_place_after_the_note() ->
     assert merge_image_body("make check\n\nOnly in plain.", fenced, fenced) == (
         "Run this:\n\n```\nmake check\n\nmake docs-check\n```\n\nOnly in plain.\n\nThanks."
     )
+
+
+def test_a_paragraph_matched_line_by_line_still_anchors_what_follows_it() -> None:
+    """The two rules together: a paragraph the HTML holds only line by line (its repeat
+    shown once, its link labelled by host) is not missing, and a paragraph the HTML does
+    lack is placed after it, not at the top."""
+    from agent_core.application.email_reader import merge_image_body
+
+    html_text = (
+        "Here is the deck\n\n[https://files.example/deck/42](https://files.example/deck/42)\n\n"
+        "Sam Example\n\n[Latest Post](https://www.example.com/blog/post)\n\n"
+        "On Monday Riley wrote:\n\nPlease send the deck."
+    )
+    plain = (
+        "Here is the deck\n\n"
+        "[files.example](https://files.example/deck/42)\n\n"
+        "Sam Example\\\nLatest Post\\\n[www.example.com](https://www.example.com/blog/post)\n\n"
+        "Sent from the road.\n\n"
+        "On Monday Riley wrote:\n\nPlease send the deck."
+    )
+    merged = merge_image_body(plain, html_text, html_text, require_overlap=True)
+    paragraphs = merged.split("\n\n")
+    # Nothing the HTML already shows is repeated, and the note still leads.
+    assert paragraphs[0] == "Here is the deck"
+    assert merged.count("Sam Example") == 1 and merged.count("Latest Post") == 1
+    # The one paragraph only the plain part has sits after the signature it followed
+    # and above the quoted history.
+    placed = paragraphs.index("Sent from the road.")
+    assert paragraphs.index("[Latest Post](https://www.example.com/blog/post)") < placed
+    assert placed < paragraphs.index("On Monday Riley wrote:")
 
 
 def test_outlook_reply_reads_its_note_first() -> None:

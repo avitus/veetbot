@@ -129,6 +129,11 @@ def private_response(response: Response) -> None:
     response.headers["Cache-Control"] = "private, no-store"
 
 
+# Part of the thread validator: raise it whenever the same retained source
+# would read differently, or a client keeps the text an older reader made.
+READER_VERSION = "email-reader@7"
+
+
 def prepare_reading_text(result: dict[str, object]) -> dict[str, object]:
     """Prepare inert reading text in a worker, never on the API event loop."""
     messages = cast(list[dict[str, Any]], result["messages"])
@@ -136,21 +141,30 @@ def prepare_reading_text(result: dict[str, object]) -> dict[str, object]:
         html = message.pop("reader_html", "")
         urls: list[str] = []
         subject = message["subject"] or str(result["subject"])
-        rich = reading_body(html, subject=subject, image_urls=urls)
+        sender = str(message.get("sender") or "")
+        rich = reading_body(html, subject=subject, image_urls=urls, sender=sender)
         # Image-bearing tables have different layout eligibility. Render each
         # mode once, reusing the single HTML parse when there are no images.
-        html_text = reading_body(html, subject=subject) if urls else rich
+        html_text = reading_body(html, subject=subject, sender=sender) if urls else rich
         source = reading_source(message["body"], html)
-        plain = html_text if source == html else reading_body(source, subject=subject)
+        plain = (
+            html_text if source == html else reading_body(source, subject=subject, sender=sender)
+        )
         message["reader_body"] = plain
+        represented = html_text
         if html_text:
             # An unrelated image/footer alternative must not replace the text
             # reader. Prefer HTML structure when it represents source prose.
-            message["reader_body"] = merge_image_body(
-                plain, html_text, html_text, require_overlap=True
-            )
+            merged = merge_image_body(plain, html_text, html_text, require_overlap=True)
+            if merged != html_text:
+                # A signature left out of the reading text still stands for the
+                # plain part's copy of it, which is then not missing prose.
+                represented = reading_body(html, subject=subject, keep_signatures=True)
+                if represented != html_text:
+                    merged = merge_image_body(plain, html_text, represented, require_overlap=True)
+            message["reader_body"] = merged
         if urls:
-            rich = merge_image_body(message["reader_body"], rich, html_text)
+            rich = merge_image_body(message["reader_body"], rich, represented)
         message["reader_image_body"] = rich if urls else None
     return result
 
@@ -209,7 +223,7 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
         digest = hashlib.sha256(
             json.dumps(
                 [
-                    "email-reader@2",
+                    READER_VERSION,
                     authenticated.tenant_id,
                     authenticated.principal_id,
                     sorted(authenticated.scopes),

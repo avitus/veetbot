@@ -942,23 +942,21 @@ conversation opens into the same scoped
 feedback (thread, person, kind of content; Important / Less important; reply
 need). Importance and reply need are two separate choices: each row marks the
 choice made, both can be chosen for one thread, and each reports what was
-applied with its own Undo. Topic feedback uses selectable
+applied with its own Undo. What the owner has typed and chosen there stays with the open thread: replying, closing the reply or changing the panel's tab does not clear it. Topic feedback uses selectable
 chips and still requires an explicit topic. The thread menu offers Mark handled
-and Mark not handled separately from Archive in Gmail. The reply opens with "Your reply"
-in the display face and its save state at the trailing edge. From, To and the
-folded Cc, Bcc and subject are hairline-parted rows above the body in one
-surface well behind a strong hairline, whose shapes take no clicks. Anything
+and Mark not handled separately from Archive in Gmail. On Mac, iPad and iPhone, the reply body grows inline below the conversation.
+The recipient line opens the envelope for editing. Close saves the draft
+before returning to the manual and Veetbot reply choices; a discarded or sent reply returns to them too. On iPhone and iPad the reply is brought into view above the keyboard. Anything
 the draft waits on (new mail in the thread, an unknown send status, a pending
 approval, an edit from another device) is one amber-ruled card that names the
 decision with its action beside it; a save refused because another device
 edited the draft shows only that card, never the refusal as a second error.
 Send is the filled capsule (⌘↩): one press consents to the exact reply and
-parks it for the undo window, during which the notice reads "Sending" with
-Undo beside it, then Sent (ADR-0279). Draft
-options is a quiet icon menu at the trailing edge, and Refine with Veetbot
+parks it for the undo window, during which the button becomes Undo. Its fill recedes
+toward the server deadline, and Reduce Motion keeps it static. A confirmed send reads Sent (ADR-0279). Draft
+options is a quiet icon menu beside the send action, and Refine with Veetbot
 folds its field and button into one row.
-The bottom bar keeps Discuss in Chat and the reply shortcut on the material
-edge. The Email learning, Draft history, pending-approval review and unsubscribe sheets
+The reading view keeps the reply choices at the bottom edge. The Email learning, Draft history, pending-approval review and unsubscribe sheets
 share `EmailSheetHeader` (a display-face title and a quiet way out); the
 Subscriptions census takes the same row and capsule styles.
 A compact mailbox-status disclosure retains

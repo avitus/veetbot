@@ -254,6 +254,8 @@ class ProbeObservation(BaseModel):
     probe_id: str
     incident: str
     family: str
+    # For a stored recall question: the fingerprint of the content this run tested.
+    content_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     paths: tuple[PathObservation, ...]
     save: SaveObservation | None = None
 

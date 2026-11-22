@@ -121,16 +121,21 @@ public final class EmailViewModel: ObservableObject {
     /// The owner's standing choices on the open thread. Importance and reply need are separate
     /// judgments, so each keeps its own acknowledgment and its own Undo.
     @Published public private(set) var feedbackGiven: [EmailFeedbackKind: EmailFeedbackGiven] = [:]
+    /// Teach Veetbot's unapplied input for the open thread. Held here so it outlasts the card,
+    /// which Reply hides and the Mac panel's tabs replace; it ends with the selection.
+    @Published public var feedbackDraft = EmailFeedbackDraft()
     @Published public private(set) var hasMore = false
     @Published public private(set) var selectedAccountID: String?
     @Published public private(set) var listView = "priority"
     private struct CachedMailList {
         let rows: [EmailThreadView]
-        let counts: EmailCollectionCounts?
-        let total: Int?
+        /// The numbers the list was read with, and what they held of the hidden conversations.
+        let numbers: CountsRead?
         let cursor: String?
         let seenCursors: Set<String>
         let version: String?
+        /// How deep the list was loaded (`loadedDepth`), which can be deeper than `rows` go.
+        let depth: Int
     }
     // Only the two unsearched collections, for this connection and account filter.
     private var cachedMailLists: [String: CachedMailList] = [:]
@@ -144,19 +149,332 @@ public final class EmailViewModel: ObservableObject {
         threadETag = nil
         projectionGeneration = UUID()
     }
-    @Published private var loadedCollectionCounts: EmailCollectionCounts?
-    /// A pending optimistic mailbox change makes the last confirmed counts stale.
-    public var collectionCounts: EmailCollectionCounts? {
-        archiveHiddenThreads.isEmpty ? loadedCollectionCounts : nil
+    /// One answer about the numbers Email shows: the server's sidebar counts and list total, and
+    /// what that same answer says of the conversations a pending archive keeps off the list.
+    /// The numbers are never stored, kept or brought back without it, and only `pairedNumbers`
+    /// makes one.
+    private struct CountsRead {
+        var counts: EmailCollectionCounts?
+        var total: Int?
+        /// The rows of the response that carried these numbers, as it sent them: the same moment.
+        var rows: [UUID: EmailThreadView]
+        /// Hidden conversations those rows left out: each as its own status read found it after
+        /// the numbers or, until they are read again, as the copy in hand when it was hidden.
+        var others: [UUID: EmailThreadView] = [:]
+        /// For each hide that has ended since: the numbers that held the conversation here and
+        /// that it has left. They stay taken off until the numbers are read again.
+        var settled: [UUID: Set<String>] = [:]
+
+        func held(_ id: UUID) -> EmailThreadView? { rows[id] ?? others[id] }
     }
-    @Published private var loadedListTotal: Int?
-    var listTotal: Int? { archiveHiddenThreads.isEmpty ? loadedListTotal : nil }
+    @Published private var loadedCounts: CountsRead?
+
+    /// The last confirmed counts, less each conversation a pending archive has hidden,
+    /// so the totals match the rows on screen instead of vanishing until Gmail confirms.
+    public var collectionCounts: EmailCollectionCounts? {
+        guard let read = loadedCounts, let counts = read.counts else { return nil }
+        let off = takenOff(read)
+        let less = { (count: Int, view: String) in max(0, count - off.filter { $0.contains(view) }.count) }
+        return EmailCollectionCounts(
+            inbox: less(counts.inbox, EmailCollection.inbox.rawValue),
+            needsYou: less(counts.needsYou, EmailCollection.needsYou.rawValue),
+            handled: less(counts.handled, EmailCollection.handled.rawValue),
+            priority: counts.priority.map { less($0, "priority") },
+            suspectedSpam: counts.suspectedSpam.map { less($0, "suspected_spam") })
+    }
+    var listTotal: Int? {
+        guard let read = loadedCounts, let total = read.total else { return nil }
+        return max(0, total - takenOff(read).filter { $0.contains(Self.shownList) }.count)
+    }
+
+    /// What comes off a read of the numbers, one entry for each conversation so that none is
+    /// taken off a number twice: the numbers that read held it in while a pending archive hides
+    /// it, together with what is still owed for a hide of it that has ended.
+    private func takenOff(_ read: CountsRead) -> [Set<String>] {
+        let hidden = archiveHiddenThreads.filter { archiveErrors[$0] == nil }
+        return hidden.union(read.settled.keys).map { id in
+            (hidden.contains(id) ? holdings(read.held(id)) : []).union(read.settled[id] ?? [])
+        }
+    }
+
+    private static let countedViews = [
+        "priority", "suspected_spam", EmailCollection.inbox.rawValue, EmailCollection.needsYou.rawValue,
+        EmailCollection.handled.rawValue,
+    ]
+    /// Stands for the total of the list on screen among the numbers that hold a conversation.
+    private static let shownList = "list"
+
+    /// The numbers that take in a conversation as the lists are now filtered: any of the five
+    /// sidebar counts, and `shownList` for the total of the list on screen. None for a
+    /// conversation in another account or outside the search.
+    private func holdings(_ row: EmailThreadView?) -> Set<String> {
+        guard let row, isInFilter(row) else { return [] }
+        var held = Set(Self.countedViews.filter { Self.isCounted(row, in: $0) })
+        if Self.isInTotal(row, of: queryListView) { held.insert(Self.shownList) }
+        return held
+    }
+
+    /// Whether the lists as now filtered take in a conversation: it belongs to the chosen
+    /// account and matches the search.
+    private func isInFilter(_ row: EmailThreadView) -> Bool {
+        (selectedAccountID == nil || row.accountID == selectedAccountID)
+            && Self.matchesSearch(row, text: searchText)
+    }
+
+    /// The server's search: the text, case-folded, somewhere in the subject, senders and summary
+    /// joined by spaces. Foundation's folding is the same full Unicode case folding.
+    static func matchesSearch(_ row: EmailThreadView, text: String) -> Bool {
+        guard !text.isEmpty else { return true }
+        let searched = [row.subject, row.senders.joined(separator: " "), row.summary].joined(separator: " ")
+        let folded = { (value: String) in Data(value.folding(options: .caseInsensitive, locale: nil).utf8) }
+        return folded(searched).range(of: folded(text)) != nil
+    }
+
+    /// Whether the server counts a conversation in one of the five sidebar counts: only mail in
+    /// the Inbox, by rules that mirror its own, count for count. The two thresholds are its
+    /// Important relevance threshold and Inbox relevance floor (ADR-0329). Mail that also has
+    /// messages in Spam is left out of Suspected spam only, as the server leaves it.
+    private static func isCounted(_ row: EmailThreadView, in view: String) -> Bool {
+        guard !row.isArchived else { return false }
+        switch view {
+        case "priority": return row.priority >= 0.7 && !row.isHandled
+        case EmailCollection.inbox.rawValue: return row.priority >= 0.1
+        case EmailCollection.needsYou.rawValue: return row.needsReply && !row.isHandled
+        case EmailCollection.handled.rawValue: return row.isHandled
+        case "suspected_spam": return row.isSuspectedSpam && row.spamCleared != true && !row.isInSpam
+        default: return false
+        }
+    }
+
+    /// Whether the server's total for a list takes in a conversation. Other mail is everything
+    /// that is not Important, archived mail included; a search of all mail is all that matches.
+    /// Every other list is totalled as it is counted.
+    private static func isInTotal(_ row: EmailThreadView, of view: String) -> Bool {
+        switch view {
+        case "all": return true
+        case "other": return !isCounted(row, in: "priority")
+        default: return isCounted(row, in: view)
+        }
+    }
+
+    /// What a list request answered: the rows to show, gathered over as many pages as it took,
+    /// and `counted`, the rows of the one response whose numbers are kept.
+    private struct ListAnswer {
+        let page: EmailThreadPage
+        let counted: [EmailThreadView]
+    }
+
+    /// Reads each conversation a pending archive hides that the numbers' own rows did not
+    /// return. Those numbers may still include it (another collection, another page, a row a new
+    /// arrival pushed down), and its absence says nothing either way: only its own status shows
+    /// whether it is still in the Inbox and which numbers hold it. The read also resumes
+    /// following an archive nobody was. The statuses belong to the list read that asks for them.
+    /// Once that read is no longer current (the connection or the visit changed, or another list
+    /// read replaced it) none of the rest is sent: each would name a conversation of the old
+    /// connection to whatever has taken its place.
+    private func hiddenArchiveStatuses(
+        missingFrom rows: [EmailThreadView], while isCurrent: @escaping () -> Bool
+    ) async -> [EmailThreadView] {
+        let returned = Set(rows.map(\.id))
+        let missing = archiveHiddenThreads.filter { !returned.contains($0) && archiveErrors[$0] == nil }
+        var statuses: [EmailThreadView] = []
+        for id in missing.sorted(by: { $0.uuidString < $1.uuidString }) {
+            guard isCurrent() else { break }
+            if let value = await readArchiveStatus(id, forListRead: isCurrent) { statuses.append(value) }
+        }
+        return statuses
+    }
+
+    /// The only way numbers reach the screen. They come with a list answer, and each conversation
+    /// a pending archive hides is checked against that answer: a row in the response that carried
+    /// the numbers describes the same moment, and any other conversation is read on its own
+    /// afterwards. Those are two requests, and the numbers are not read again when a
+    /// conversation changes between them. It is counted as its status says until the next
+    /// refresh, and a count may be off by one for that long.
+    private func pairedNumbers(_ answer: ListAnswer, isCurrent: @escaping () -> Bool) async -> CountsRead? {
+        let statuses = await hiddenArchiveStatuses(missingFrom: answer.counted, while: isCurrent)
+        guard isCurrent() else { return nil }
+        let byID = { (rows: [EmailThreadView]) in
+            Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+        }
+        return CountsRead(
+            counts: answer.page.collectionCounts, total: answer.page.totalCount, rows: byID(answer.counted),
+            others: byID(statuses.filter { archiveHiddenThreads.contains($0.id) }))
+    }
+
+    /// A conversation has just been hidden. Numbers on screen that already hold it, by the row
+    /// that arrived with them or a status read after them, take it off as that says. Otherwise
+    /// the copy in hand stands in, and the numbers are read again at once with its status.
+    private func noteHidden(_ copy: EmailThreadView) {
+        guard loadedCounts != nil, loadedCounts?.held(copy.id) == nil else { return }
+        loadedCounts?.others[copy.id] = copy
+        readCountsAgain()
+    }
+
+    /// Whether Gmail has confirmed the archive that hid a conversation and the list on screen
+    /// no longer holds it.
+    private func hasLeftTheList(_ row: EmailThreadView) -> Bool {
+        row.archiveOperation?.status == "completed" && !Self.staysListed(row, in: queryListView)
+    }
+
+    /// The rows of a page as they are shown. Mailbox state learnt since the page was asked for
+    /// stays on top of it, and a conversation whose archive Gmail confirmed meanwhile is not put
+    /// back in a list that no longer holds it, although the older page still returns it.
+    private func shown(_ rows: [EmailThreadView], since versions: [UUID: UUID]) -> [EmailThreadView] {
+        rows.compactMap { row in
+            let known = preservingArchiveState(row, since: versions)
+            return archiveVersions[row.id] != versions[row.id] && hasLeftTheList(known) ? nil : known
+        }
+    }
+
+    /// Ends a hide, with the conversation as the server now holds it. An archive Gmail confirmed
+    /// first leaves the list if the list no longer holds it, so lifting the hide cannot show it
+    /// again, whether or not the list can be read afterwards. The numbers on screen keep taken
+    /// off whatever they held of the conversation that it has left, until they are read again.
+    /// A confirmed archive so stays out of the Inbox and its counts, and comes back in Other
+    /// mail and search, which still list it. A failed archive comes back as it was.
+    private func liftHide(_ value: EmailThreadView) {
+        guard archiveHiddenThreads.remove(value.id) != nil else { return }
+        hiddenAccounts[value.id] = nil
+        // A kept list's numbers were adjusted for the conversations hidden when it was read.
+        cachedMailLists = [:]
+        if hasLeftTheList(value) { inboxItems.removeAll { $0.id == value.id } }
+        guard let read = loadedCounts else { return }
+        loadedCounts?.settled[value.id] = holdings(read.held(value.id)).subtracting(holdings(value))
+    }
+
+    /// The account of each conversation a pending archive hides, noted when it was hidden. It
+    /// outlasts the rows and numbers a refusal clears, so a second archive of a refused account
+    /// is still known to be that account's.
+    private var hiddenAccounts: [UUID: String] = [:]
+
+    /// The message of a refusal that is still waiting for the list. From a refusal until a list
+    /// read asked after it has answered, nothing has confirmed which accounts can still be read.
+    ///
+    /// A refused conversation follows one rule, whichever read was refused:
+    /// 1. Its account is whatever any part of the model knows of it (`knownAccount`).
+    /// 2. Everything of that account is retired at once: its rows, the kept lists and the
+    ///    numbers, its archives with their requests, polls and status reads, and the reader if
+    ///    it shows one of its conversations (`forgetDeniedAccount`).
+    /// 3. An answer for something retired changes nothing and reports nothing.
+    /// 4. The list read that answers the refusal takes the list's request in that same step,
+    ///    which retires every list read in flight: those were asked before the refusal and are
+    ///    never shown. The latest list read asked after the refusal decides, by the way it ends:
+    ///    - It answers: nothing more is cleared, the visit goes on, and the refusal's message
+    ///      is shown with the list.
+    ///    - It is refused, or fails in any way but the next: everything is cleared and the
+    ///      refusal's message is shown. If Email is on screen its visit goes on, so Refresh
+    ///      still works.
+    ///    - It needs the owner to sign in again: that takes its usual route, which clears
+    ///      everything, ends the visit and tells the connection.
+    ///    - Another list read replaced it: nothing. The newer read decides.
+    ///    - It cannot start because there is no connection to ask through: as when it fails.
+    ///    - The owner leaves Email first: everything is cleared and the visit ends.
+    /// 5. A caller that no longer counts is none of these. A list read asked from a cancelled
+    ///    task, or for a visit that has ended, asks nothing, replaces nothing and clears
+    ///    nothing, and the read that is out still decides. A refusal is never left waiting on
+    ///    such a caller: ending the visit or the connection clears it at once, and while Email
+    ///    stays on screen each regular refresh asks the list first for as long as it waits.
+    /// It is published because `canLoadMore` depends on it.
+    @Published private var refusalAwaitingList: String?
+
+    /// The account of a conversation, from every place the model can know it: the note made
+    /// when it was hidden, its row, the reader, the numbers, its archive request, and the
+    /// read of it that is still out.
+    private func knownAccount(of id: UUID) -> String? {
+        if let noted = hiddenAccounts[id] { return noted }
+        let copy = inboxItems.first { $0.id == id } ?? (thread?.id == id ? thread : nil)
+            ?? loadedCounts?.held(id) ?? archiveRequests[id]?.thread
+        return copy?.accountID ?? (threadRead?.id == id ? threadRead?.account : nil)
+    }
+
+    /// The server refused to show this conversation, so its account can no longer be read. What
+    /// is held from that account goes at once.
+    private func forgetDeniedAccount(holding id: UUID) {
+        let account = knownAccount(of: id)
+        let gone = { (row: EmailThreadView) in row.id == id || row.accountID == account }
+        if let selected = selectedThreadID {
+            let selectedAccount = knownAccount(of: selected)
+            let refused = selected == id || (account != nil && selectedAccount == account)
+            // The owner's unsaved words go only with a conversation known to be the refused
+            // account's. Any other edit waits with its draft.
+            if refused, let draft { edits[draft.id] = nil }
+            // The reader closes for that conversation, and also when nothing says whose the
+            // open conversation or the refused one is. An answer still on its way was asked
+            // for before the refusal; its request is retired with the selection.
+            if refused || account == nil || selectedAccount == nil { clearSelection() }
+        }
+        // Every archive known to be that account's is retired with this one: those hidden,
+        // those still waiting to be admitted, and any status read still out for one of them.
+        // None of them can come back as another refusal with nothing left to say whose it was.
+        let retiring = Set(hiddenAccounts.filter { $0.value == account }.keys)
+            .union(archiveRequests.filter { $0.value.thread.accountID == account }.keys).union([id])
+        for retired in retiring {
+            archiveHiddenThreads.remove(retired)
+            hiddenAccounts[retired] = nil
+            archiveRequests[retired] = nil
+            archiveErrors[retired] = nil
+            archiveReadErrors.remove(retired)
+            archiveStates[retired] = nil
+            archiveVersions[retired] = UUID()
+            archiveTasks.removeValue(forKey: retired)?.task.cancel()
+        }
+        invalidateMailSnapshots()
+        EmailConversationCache.shared.removeAll()
+        loadedCounts = nil
+        inboxItems.removeAll(where: gone)
+    }
+
+    /// A list read asked after a refusal has answered, so what it returned may be read.
+    private func listAnsweredAfterRefusal() {
+        guard let message = refusalAwaitingList else { return }
+        refusalAwaitingList = nil
+        errorMessage = message
+    }
+
+    /// Nothing confirmed what may still be read after a refusal, so everything is cleared, as
+    /// after every refusal, and every request still out is retired. Email may still be on
+    /// screen: its visit then goes on, so Refresh works and the regular refreshes resume.
+    /// Nothing is read at once, and the refusal's message stays until the next read.
+    private func clearAfterRefusal(leaving: Bool = false) {
+        let message = refusalAwaitingList
+        let onScreen = active && !leaving
+        resetConnection()
+        errorMessage = message
+        if onScreen {
+            active = true
+            startVisit(readingAtOnce: false)
+        }
+    }
+
+    /// The numbers on screen were read before a conversation was hidden, without its status and
+    /// perhaps before the copy of it in hand. Asking for them again reads the two together.
+    private func readCountsAgain() {
+        guard loadedCounts != nil else { return }
+        let foreground = active ? activation : nil
+        let query = listRequest
+        Task { [weak self] in
+            guard let self, self.listRequest == query else { return }
+            await self.reload(preserveOrder: true, activation: foreground)
+        }
+    }
     @Published private(set) var pagingFailed = false
     /// The visible Mac row, independent of the conversation open in the reader.
     var scrollAnchor: UUID?
     let restoreScrollAnchor = PassthroughSubject<UUID, Never>()
     /// Every list on every device loads 100 rows a page and scrolls (ADR-0303, ADR-0326).
     private let pageSize = 100
+    /// How deep the list on screen is loaded: the number of rows the server has returned for
+    /// it, counted as they arrive. A list read sets it and More mail adds to it. The rows on
+    /// screen are not the measure, because rows leave the screen ahead of the read that
+    /// follows: a confirmed archive, a refused account, an opened conversation that has left
+    /// the list, an exclusion. Every list read that keeps the rows on screen reads at least
+    /// this deep, and at least as deep as those rows go, whichever caller asks: the read asked
+    /// for the row that left, a regular refresh that replaces it, Try again. Nothing else
+    /// holds a depth, and no caller passes one. It belongs to the list on screen: with another
+    /// account, collection or search it starts again from nothing, and a list kept for coming
+    /// back to keeps its depth with its rows and cursor.
+    private var loadedDepth = 0
 
     /// Do not search later pages for a row already confirmed absent from the current list.
     private var eligibleScrollAnchor: UUID? {
@@ -221,9 +539,27 @@ public final class EmailViewModel: ObservableObject {
     private var active = false
     private var activation = UUID()
     private var generation = UUID()
+    /// The list's request names the one list read whose answer may be shown. What a list
+    /// answer brings is published together and only under it: the rows, the numbers
+    /// (`loadedCounts`), the cursor (`nextCursor`, `seenCursors`, `hasMore`), the depth
+    /// (`loadedDepth`), the version, the kept copy of the list, and the answer to a refusal
+    /// that waits for the list (`refusalAwaitingList`).
+    /// 1. A list read takes the request as it starts. A refusal takes it for the read it asks
+    ///    for, in the same step as the refusal. Taking it retires every list read and every
+    ///    page still out: whatever they answer is dropped.
+    /// 2. Only the read the request was taken for publishes under it, and only while it is
+    ///    still the list's request. A change of account, collection or search, and an opened
+    ///    conversation that changed the list, put a request that no read holds in its place.
+    /// 3. More mail takes no request. It adds a page to the list the last finished read has
+    ///    shown, under that read's request. It starts only when no list read is out and no
+    ///    refusal waits for the list: a waiting refusal has taken the request for a read that
+    ///    may not have started yet, and nothing else may publish under that. A page is shown
+    ///    only if the request has not changed since the page was asked for.
     private var listRequest = UUID()
     private var selectionRequest = UUID()
-    private var threadRead: (id: UUID, activation: UUID?)?
+    /// The conversation being read for the reader, with its account when a row or the reader
+    /// already told it. A refusal of that account retires the read before it can answer.
+    private var threadRead: (id: UUID, activation: UUID?, account: String?)?
     private var nextCursor: String?
     private var seenCursors: Set<String> = []
     private var refreshTask: Task<Void, Never>?
@@ -254,7 +590,14 @@ public final class EmailViewModel: ObservableObject {
         var operationID: UUID?
     }
     private var archiveRequests: [UUID: ArchiveRequest] = [:]
-    private var archiveTasks: [UUID: Task<Void, Never>] = [:]
+    /// The poll that follows one conversation's pending archive. The token is its own: a poll
+    /// that ends removes the entry only while the entry is still that poll's, since a newer
+    /// archive of the same conversation may have started a poll under the same key.
+    private struct ArchivePoll {
+        let token: UUID
+        let task: Task<Void, Never>
+    }
+    private var archiveTasks: [UUID: ArchivePoll] = [:]
     private struct ArchiveMailboxState {
         var inInbox: Bool?
         var operation: EmailArchiveOperation?
@@ -312,7 +655,7 @@ public final class EmailViewModel: ObservableObject {
         operationTask?.cancel()
         autosaveTask?.cancel()
         searchTask?.cancel()
-        archiveTasks.values.forEach { $0.cancel() }
+        archiveTasks.values.forEach { $0.task.cancel() }
     }
 
     /// The rows as the list shows them: newest first by each conversation's latest
@@ -405,21 +748,42 @@ public final class EmailViewModel: ObservableObject {
     /// Starts foreground refreshes for a new visit or invalidates reads when Email is hidden.
     public func setActive(_ value: Bool) {
         guard active != value else { return }
+        // Leaving Email leaves no list read to answer a refusal that is still waiting for one.
+        if !value, refusalAwaitingList != nil {
+            clearAfterRefusal(leaving: true)
+            return
+        }
         active = value
         activation = UUID()
         isRefreshing = false
         refreshTask?.cancel()
         operationTask?.cancel()
-        archiveTasks.values.forEach { $0.cancel() }
+        archiveTasks.values.forEach { $0.task.cancel() }
         archiveTasks = [:]
         guard value else { return }
+        startVisit(readingAtOnce: true)
+    }
+
+    /// Runs the refreshes of the visit that has just begun. A visit that goes on after Email
+    /// was cleared reads nothing at once: it waits for Refresh or for the next regular refresh.
+    private func startVisit(readingAtOnce: Bool) {
         let foreground = activation
         let connection = generation
         refreshTask = Task { [weak self] in
             guard let self else { return }
-            // Rows already on screen stay and refresh in place; only an empty list loads from nothing.
-            await self.reload(preserveOrder: !self.inboxItems.isEmpty, activation: foreground)
+            if readingAtOnce {
+                // Rows already on screen stay and refresh in place; only an empty list loads from nothing.
+                await self.reload(preserveOrder: !self.inboxItems.isEmpty, activation: foreground)
+            } else {
+                do { try await Task.sleep(nanoseconds: self.refreshNanoseconds) } catch { return }
+            }
             while self.acceptsRead(connection: connection, activation: foreground) {
+                // A refusal still waiting when a regular refresh comes round is asked about
+                // first. A refresh reads the list only once the server has admitted it, and
+                // the refusal does not wait on that.
+                if self.refusalAwaitingList != nil {
+                    await self.reload(preserveOrder: true, activation: foreground)
+                }
                 await self.refresh(activation: foreground)
                 do { try await Task.sleep(nanoseconds: self.refreshNanoseconds) }
                 catch { return }
@@ -446,7 +810,7 @@ public final class EmailViewModel: ObservableObject {
         sendWatchTask?.cancel()
         sendWatchTask = nil
         searchTask?.cancel()
-        archiveTasks.values.forEach { $0.cancel() }
+        archiveTasks.values.forEach { $0.task.cancel() }
         archiveTasks = [:]
         archiveRequests = [:]
         archiveErrors = [:]
@@ -455,6 +819,8 @@ public final class EmailViewModel: ObservableObject {
         // admitted must not become a second copy. A finished save removes its own entry.
         archiveSubmitting = []
         archiveHiddenThreads = []
+        hiddenAccounts = [:]
+        refusalAwaitingList = nil
         archiveUnsupportedAccounts = []
         archiveUnavailableThreads = []
         archiveReadErrors = []
@@ -488,6 +854,7 @@ public final class EmailViewModel: ObservableObject {
         styleExampleMessage = nil
         feedbackID = nil
         feedbackGiven = [:]
+        feedbackDraft = EmailFeedbackDraft()
         learning = nil
         revisions = []
         refreshKey = nil
@@ -527,11 +894,13 @@ public final class EmailViewModel: ObservableObject {
         resetListQuery()
         let cached = searchText.isEmpty ? cachedMailLists[value] : nil
         inboxItems = cached?.rows ?? []
-        loadedCollectionCounts = cached?.counts
-        loadedListTotal = cached?.total
+        // A kept list comes back with its numbers and what they held of the hidden conversations
+        // as one value. What a later page learned belongs to that page's numbers.
+        loadedCounts = cached?.numbers
         loadedListVersion = cached?.version
         nextCursor = cached?.cursor
         seenCursors = cached?.seenCursors ?? []
+        loadedDepth = cached?.depth ?? 0
         hasMore = nextCursor != nil
         arrivedThreadIDs = []
         isLoading = false
@@ -564,10 +933,10 @@ public final class EmailViewModel: ObservableObject {
         listRequest = UUID()
         // The abandoned read can no longer clear its own flag.
         isReadingList = false
-        loadedCollectionCounts = nil
-        loadedListTotal = nil
+        loadedCounts = nil
         scrollAnchor = nil
         nextCursor = nil
+        loadedDepth = 0
         hasMore = false
         pagingFailed = false
     }
@@ -579,8 +948,8 @@ public final class EmailViewModel: ObservableObject {
             cachedMailLists[listView] = nil
             return
         }
-        cachedMailLists[listView] = CachedMailList(rows: inboxItems, counts: loadedCollectionCounts,
-            total: loadedListTotal, cursor: nextCursor, seenCursors: seenCursors, version: loadedListVersion)
+        cachedMailLists[listView] = CachedMailList(rows: inboxItems, numbers: loadedCounts,
+            cursor: nextCursor, seenCursors: seenCursors, version: loadedListVersion, depth: loadedDepth)
     }
 
     /// Allows explicit inactive reads while binding visible inbox work to its current foreground visit.
@@ -589,19 +958,34 @@ public final class EmailViewModel: ObservableObject {
     }
 
     /// Retains the initiating visit through every asynchronous projection read and error path.
-    private func reload(preserveOrder: Bool = false, activation foreground: UUID?) async {
+    /// A refusal takes the list's request for the read it asks for, and passes it as `claimed`.
+    private func reload(preserveOrder: Bool = false, activation foreground: UUID?, as claimed: UUID? = nil) async {
         let connection = generation
         let projection = projectionGeneration
         let mailboxVersions = archiveVersions
-        guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
-        let requestID = UUID()
+        // A caller that no longer counts (its task was cancelled, or its visit has ended) asks
+        // nothing, and says nothing about whether the list can be read. Nothing changes for it,
+        // and whatever list read is out still decides for a refusal that is waiting.
+        guard acceptsRead(connection: connection, activation: foreground) else { return }
+        // The request taken for this read has since been taken over by another list read.
+        // That newer read decides, and this one asks nothing.
+        if let claimed, listRequest != claimed { return }
+        guard let api = makeAPIClient() else {
+            // A refusal is waiting for the list, and there is no connection to ask it through.
+            // That stops every other list read too, so none is left to answer.
+            if refusalAwaitingList != nil { clearAfterRefusal() }
+            return
+        }
+        let requestID = claimed ?? UUID()
         listRequest = requestID
         if !preserveOrder {
             loadedListVersion = nil
-            loadedCollectionCounts = nil
-            loadedListTotal = nil
+            loadedCounts = nil
         }
-        let visibleCount = preserveOrder ? max(pageSize, inboxItems.count) : pageSize
+        let visibleCount = preserveOrder ? max(pageSize, inboxItems.count, loadedDepth) : pageSize
+        // An unchanged page says nothing new about a hidden conversation it does not hold.
+        let listed = Set(inboxItems.map(\.id))
+        let reusable = preserveOrder && archiveHiddenThreads.isSubset(of: listed)
         isLoading = !preserveOrder
         isReadingList = true
         if !preserveOrder {
@@ -616,18 +1000,22 @@ public final class EmailViewModel: ObservableObject {
         }
         do {
             async let accountPage = api.emailAccounts()
-            let page = try await readInbox(api: api,
+            let answer = try await readInbox(api: api,
                 accountID: selectedAccountID, view: queryListView,
                 text: searchText, count: visibleCount, requestID: requestID, anchor: preserveOrder ? eligibleScrollAnchor : nil,
                 connection: connection, activation: foreground,
-                knownVersion: preserveOrder ? loadedListVersion : nil
+                knownVersion: reusable ? loadedListVersion : nil
             )
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
             unavailable = false
-            if let page {
-                let loadedThreads = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
-                loadedCollectionCounts = page.collectionCounts
-                loadedListTotal = page.totalCount
+            if let read = answer {
+                guard let numbers = await pairedNumbers(read, isCurrent: {
+                    self.acceptsRead(connection: connection, activation: foreground) && self.listRequest == requestID
+                }) else { return }
+                let page = read.page
+                let loadedThreads = shown(page.items, since: mailboxVersions)
+                loadedCounts = numbers
+                loadedDepth = page.items.count
                 pagingFailed = false
                 seenCursors = []
                 nextCursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
@@ -658,6 +1046,7 @@ public final class EmailViewModel: ObservableObject {
                 // the server's mailbox snapshot has not changed.
                 for value in inboxItems { observeArchive(value) }
             }
+            listAnsweredAfterRefusal()
             isLoading = false
             isReadingList = false
             listFinished = true
@@ -667,12 +1056,18 @@ public final class EmailViewModel: ObservableObject {
             recordAccountFreshness(loadedAccounts.items)
         } catch {
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
+            // The list read that was to say what still reads after a refusal has failed.
+            // Needing to sign in again takes its usual route, which clears everything too.
+            if refusalAwaitingList != nil {
+                if case HTTPTransportError.reauthenticationRequired = error { report(error, readAccess: true) }
+                else { clearAfterRefusal() }
+                return
+            }
             if isUnavailable(error) {
                 invalidateMailSnapshots()
                 resetListQuery()
                 isLoading = false
                 unavailable = true
-                loadedListTotal = nil
                 inboxItems = []
                 accounts = []
             } else { report(error, readAccess: true) }
@@ -686,8 +1081,10 @@ public final class EmailViewModel: ObservableObject {
     /// Stops paging when the original connection or foreground visit no longer owns the read.
     private func readInbox(api: VeetbotAPIClient, accountID: String?, view: String, text: String, count: Int,
                            requestID: UUID, anchor: UUID?, connection: UUID, activation foreground: UUID?,
-                           knownVersion: String?) async throws -> EmailThreadPage? {
+                           knownVersion: String?) async throws -> ListAnswer? {
         var rows: [EmailThreadView] = []
+        // Each page brings numbers of its own. The last page's are kept, with its rows.
+        var counted: [EmailThreadView] = []
         var counts: EmailCollectionCounts?
         var total: Int?
         var ids: Set<UUID> = []
@@ -711,20 +1108,34 @@ public final class EmailViewModel: ObservableObject {
             } else if page.snapshotVersion != version { version = nil }
             counts = page.collectionCounts
             total = page.totalCount
+            counted = page.items
             rows.append(contentsOf: page.items.filter { ids.insert($0.id).inserted })
             cursor = try nextPageCursor(page.nextCursor, seen: &cursors)
             pages += 1
         } while cursor != nil
             && ((count > 100 && rows.count < count) || (anchor.map { !ids.contains($0) } == true && pages < pageLimit))
-        return EmailThreadPage(items: rows, nextCursor: cursor, collectionCounts: counts, totalCount: total, snapshotVersion: version)
+        return ListAnswer(page: EmailThreadPage(items: rows, nextCursor: cursor, collectionCounts: counts,
+            totalCount: total, snapshotVersion: version), counted: counted)
+    }
+
+    /// Whether More mail would ask for a page now: the list has more, no list read or page is
+    /// out, and no refusal waits for the list (rule 3 beside `listRequest`). `loadMore` checks
+    /// this same value before it asks, so a control that offers a page and the model that
+    /// fetches it cannot disagree. Every part of it is published, so a view that reads it is
+    /// told when it changes. Two things it cannot say are left to `loadMore`: that the caller's
+    /// own task was cancelled, and that there is no connection to ask through.
+    public var canLoadMore: Bool {
+        hasMore && !isLoading && !isReadingList && refusalAwaitingList == nil
     }
 
     /// Applies a page only while the requesting connection, list and foreground visit remain current.
+    /// More mail takes no request of its own (see `listRequest`): it does nothing unless
+    /// `canLoadMore` says it would ask.
     public func loadMore() async {
         let connection = generation
         let mailboxVersions = archiveVersions
         let foreground = active ? activation : nil
-        guard acceptsRead(connection: connection, activation: foreground), !isLoading, !isReadingList,
+        guard acceptsRead(connection: connection, activation: foreground), canLoadMore,
               let cursor = nextCursor, let api = makeAPIClient() else { return }
         isLoading = true
         let requestID = listRequest
@@ -735,12 +1146,15 @@ public final class EmailViewModel: ObservableObject {
                 text: searchText, limit: pageSize, cursor: cursor
             )
             guard acceptsRead(connection: connection, activation: foreground), listRequest == requestID else { return }
+            guard let numbers = await pairedNumbers(ListAnswer(page: page, counted: page.items), isCurrent: {
+                self.acceptsRead(connection: connection, activation: foreground) && self.listRequest == requestID
+            }) else { return }
             if loadedListVersion != page.snapshotVersion { loadedListVersion = nil }
-            loadedCollectionCounts = page.collectionCounts
-            loadedListTotal = page.totalCount
+            loadedCounts = numbers
             var ids = Set(inboxItems.map(\.id))
-            let loaded = page.items.map { preservingArchiveState($0, since: mailboxVersions) }
+            let loaded = shown(page.items, since: mailboxVersions)
             inboxItems.append(contentsOf: loaded.filter { ids.insert($0.id).inserted })
+            loadedDepth += page.items.count
             for value in loaded { observeArchive(value) }
             nextCursor = nil
             hasMore = false
@@ -962,6 +1376,7 @@ public final class EmailViewModel: ObservableObject {
         styleExampleMessage = nil
         feedbackID = nil
         feedbackGiven = [:]
+        feedbackDraft = EmailFeedbackDraft()
     }
 
     /// Refreshes a thread without overwriting local edits or clearing unrelated action failures.
@@ -998,7 +1413,8 @@ public final class EmailViewModel: ObservableObject {
         guard selectedThreadID == id else { return }
         let requestID = UUID()
         selectionRequest = requestID
-        threadRead = (id, foreground)
+        threadRead = (id, foreground,
+            thread?.id == id ? thread?.accountID : inboxItems.first { $0.id == id }?.accountID)
         isLoadingThread = thread == nil
         let projection = projectionGeneration
         defer {
@@ -1024,7 +1440,10 @@ public final class EmailViewModel: ObservableObject {
                 || previousMailbox.dismissedRevision != result.dismissedRevision
                 || previousMailbox.isHandled != result.isHandled {
                 invalidateMailSnapshots()
+                // The list is the same list, read again for what changed: it keeps its depth.
+                let depth = loadedDepth
                 resetListQuery()
+                loadedDepth = depth
                 isLoading = false
                 if let index = inboxItems.firstIndex(where: { $0.id == id }) {
                     if Self.staysListed(result, in: queryListView) {
@@ -1126,10 +1545,14 @@ public final class EmailViewModel: ObservableObject {
 
     public func loadDraftAttachment(_ id: UUID) async throws -> LoadedArtifact {
         guard let api = makeAPIClient() else { throw HTTPTransportError.notConfigured }
+        // Both requests, and the file handed back, belong to the connection the press was made on.
+        let connection = generation
         let metadata = try await api.getArtifact(id)
+        guard generation == connection else { throw CancellationError() }
         guard case .content(let data, _) = try await api.getArtifactContent(id) else {
             throw HTTPTransportError.invalidResponse
         }
+        guard generation == connection else { throw CancellationError() }
         return LoadedArtifact(metadata: metadata, data: data)
     }
 
@@ -1235,6 +1658,8 @@ public final class EmailViewModel: ObservableObject {
                 // refused save's own text would only repeat it as a second error.
                 if conflict?.id == id { return false }
             }
+            // The draft was read again above. A connection that changed meanwhile is not told.
+            guard generation == connection else { return false }
             report(error, draft: true)
             return false
         }
@@ -1766,7 +2191,11 @@ public final class EmailViewModel: ObservableObject {
         let visible = items
         // Advancing clears the detail, which may hold newer confirmed mailbox state than its row.
         let detail = self.thread?.id == thread.id ? self.thread : nil
-        if request.archived { archiveHiddenThreads.insert(thread.id) }
+        if request.archived {
+            archiveHiddenThreads.insert(thread.id)
+            hiddenAccounts[thread.id] = thread.accountID
+            noteHidden(inboxItems.first(where: { $0.id == thread.id }) ?? detail ?? thread)
+        }
         if request.archived, selectedThreadID == thread.id {
             let next: EmailThreadView?
             if let index = visible.firstIndex(where: { $0.id == thread.id }) {
@@ -1791,6 +2220,9 @@ public final class EmailViewModel: ObservableObject {
                 ? try await api.reportEmailThreadSpam(request.thread, spam: request.archived, idempotencyKey: request.key)
                 : try await api.archiveEmailThread(request.thread, archived: request.archived, idempotencyKey: request.key)
             guard generation == connection else { return }
+            // The request was retired meanwhile: its account was refused, or its outcome is
+            // already known. Its answer is for nothing that is still followed.
+            guard archiveRequests[thread.id]?.key == request.key else { return }
             archiveRequests[thread.id]?.operationID = operation.operationID
             let pending = EmailArchiveOperation(operationID: operation.operationID, runID: operation.runID,
                 targetArchived: request.archived, targetSpam: request.spam ? true : nil, status: "pending", error: nil)
@@ -1805,6 +2237,7 @@ public final class EmailViewModel: ObservableObject {
             await checkArchiveStatus(thread.id)
         } catch {
             guard generation == connection, !(error is CancellationError), !Task.isCancelled else { return }
+            guard archiveRequests[thread.id]?.key == request.key else { return }
             if isUnavailable(error), request.spam {
                 // A missing spam route means this server or account cannot report; never archive instead.
                 spamUnsupportedAccounts.insert(thread.accountID)
@@ -1830,26 +2263,81 @@ public final class EmailViewModel: ObservableObject {
 
     /// Reads durable action state without admitting a replacement Gmail mutation.
     public func checkArchiveStatus(_ threadID: UUID) async {
+        await readArchiveStatus(threadID)
+    }
+
+    /// One status read, applied as the outcome of the pending action when it still answers the
+    /// latest request. Returns the conversation as the server holds it whether or not it was
+    /// applied: a read a newer gesture overtook still shows where the numbers hold it.
+    /// When the read shows that Gmail confirmed the archive, its outcome is applied first, so
+    /// what the screen shows never depends on a later read succeeding. The list is then read
+    /// again, unless a list read asked for this status: that read shows its own answer, which
+    /// nothing replaces. When the server refuses the read, that account's mail goes at once,
+    /// and the rest stays only if the list then answers.
+    /// A list read that asks passes `forListRead`, which says whether it is still the read on
+    /// screen. Once another list read has replaced it, the answer may be older than what that
+    /// read has shown, and nothing is changed for it, whether it succeeded or failed.
+    @discardableResult
+    private func readArchiveStatus(
+        _ threadID: UUID, forListRead owner: (() -> Bool)? = nil
+    ) async -> EmailThreadView? {
         let connection = generation
         let foreground = active ? activation : nil
         let mailboxVersions = archiveVersions
-        guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return }
+        guard acceptsRead(connection: connection, activation: foreground), let api = makeAPIClient() else { return nil }
+        let isCurrent = { self.acceptsRead(connection: connection, activation: foreground) && owner?() != false }
         do {
             let value = try await api.emailThread(threadID)
-            guard acceptsRead(connection: connection, activation: foreground), archiveVersions[threadID] == mailboxVersions[threadID] else { return }
-            if archiveReadErrors.remove(threadID) != nil { archiveErrors[threadID] = nil }
-            guard acceptsArchiveOperation(value) else { return }
-            mergeArchive(value)
-            if value.archiveOperation?.status == "completed" {
-                await reload(preserveOrder: true, activation: foreground)
+            guard isCurrent() else { return nil }
+            guard archiveVersions[threadID] == mailboxVersions[threadID] else { return value }
+            if archiveReadErrors.remove(threadID) != nil {
+                archiveErrors[threadID] = nil
+                // Its row is off the list again, so the numbers have to answer for it again.
+                if archiveHiddenThreads.contains(threadID) { noteHidden(value) }
             }
+            guard acceptsArchiveOperation(value) else { return value }
+            mergeArchive(value)
+            // The outcome is applied before the list is read. A newer archive of the same
+            // conversation that the list then shows is that read's to follow.
             observeArchive(value)
+            if value.archiveOperation?.status == "completed", owner == nil {
+                // Applying the outcome ended this conversation's poll, which may be the task
+                // running this. The list is read in a task of its own, so that it still runs.
+                await Task { [weak self] in
+                    await self?.reload(preserveOrder: true, activation: foreground)
+                }.value
+            }
+            return value
         } catch {
-            guard acceptsRead(connection: connection, activation: foreground), archiveVersions[threadID] == mailboxVersions[threadID] else { return }
+            guard isCurrent(), archiveVersions[threadID] == mailboxVersions[threadID] else { return nil }
+            if case HTTPTransportError.authorizationDenied = error {
+                // One refused conversation does not say that all of Email was revoked. Its
+                // account's mail goes at once, and the list is asked what still reads.
+                forgetDeniedAccount(holding: threadID)
+                refusalAwaitingList = error.localizedDescription
+                // The list read that answers the refusal takes the list's request here, in the
+                // same step as the refusal. Every list read in flight was asked before the
+                // refusal and is retired by that. The read starts a moment later, from another
+                // task, under the request taken here and no other, so no earlier answer can be
+                // shown, or taken for the list's answer, in between.
+                let request = UUID()
+                listRequest = request
+                // The refused conversation's poll was retired with it, and may be the task
+                // running this. The list is read in a task of its own, so that it still runs,
+                // and whatever poll that read starts is left alone afterwards.
+                // The caller waits for that read, as a visit waits for every read it asks: its
+                // regular refreshes run one after another. A read the server leaves unanswered
+                // ends by the transport's request limit (60 seconds) and is then a failed read.
+                // With no network a read waits for it, and a newer read would wait just the same.
+                await Task { [weak self] in
+                    await self?.reload(preserveOrder: true, activation: foreground, as: request)
+                }.value
+                return nil
+            }
             archiveReadErrors.insert(threadID)
             archiveErrors[threadID] = error.localizedDescription
             if case HTTPTransportError.reauthenticationRequired = error { report(error) }
-            if case HTTPTransportError.authorizationDenied = error { report(error, readAccess: true) }
+            return nil
         }
     }
 
@@ -1904,27 +2392,35 @@ public final class EmailViewModel: ObservableObject {
     private func observeArchive(_ value: EmailThreadView) {
         guard acceptsArchiveOperation(value), let operation = value.archiveOperation else { return }
         if operation.status == "completed" || operation.status == "failed" || operation.status == "uncertain" {
-            archiveHiddenThreads.remove(value.id)
+            liftHide(value)
             archiveRequests[value.id] = nil
             archiveErrors[value.id] = nil
             archiveReadErrors.remove(value.id)
-            archiveTasks[value.id]?.cancel()
-            archiveTasks[value.id] = nil
+            archiveTasks.removeValue(forKey: value.id)?.task.cancel()
         } else {
-            if operation.targetArchived { archiveHiddenThreads.insert(value.id) }
+            if operation.targetArchived, archiveHiddenThreads.insert(value.id).inserted {
+                // An archive begun on another device and first seen here. A kept list's numbers
+                // were adjusted for the conversations hidden when it was read.
+                cachedMailLists = [:]
+                hiddenAccounts[value.id] = value.accountID
+                noteHidden(value)
+            }
             guard active, archiveTasks[value.id] == nil else { return }
             let connection = generation
             let foreground = activation
-            archiveTasks[value.id] = Task { [weak self] in
+            let token = UUID()
+            archiveTasks[value.id] = ArchivePoll(token: token, task: Task { [weak self] in
                 guard let self else { return }
-                defer { if self.activation == foreground, self.generation == connection { self.archiveTasks[value.id] = nil } }
+                // Only its own entry: the outcome it applied may have let a newer archive of
+                // this conversation start a poll under the same key.
+                defer { if self.archiveTasks[value.id]?.token == token { self.archiveTasks[value.id] = nil } }
                 for _ in 0..<60 {
                     do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
                     guard self.acceptsRead(connection: connection, activation: foreground) else { return }
                     await self.checkArchiveStatus(value.id)
                     if self.archiveErrors[value.id] != nil { return }
                 }
-            }
+            })
         }
     }
 
@@ -2196,9 +2692,12 @@ public final class EmailViewModel: ObservableObject {
             guard generation == connection else { return }
             // A lost response or another device may have resolved this action.
             // Read the same approval and draft; never create a new send here.
-            if let latest = try? await api.getApproval(review.id), !latest.status.isPending {
+            let latest = try? await api.getApproval(review.id)
+            guard generation == connection else { return }
+            if let latest, !latest.status.isPending {
                 closeReview()
                 await openThread(draft.threadID, refreshOnly: true)
+                guard generation == connection else { return }
             }
             report(error, draft: true)
         }

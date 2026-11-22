@@ -92,10 +92,12 @@ from agent_core.domain.knowledge import (
     fuse_passage_arms,
 )
 from agent_core.domain.memory import (
+    EMAIL_RETENTION_POLICY,
     HOME_LOCATION_PATTERN,
     LIFECYCLE_POLICY_VERSION,
     OWNED_RESOURCE_PATTERN,
     SENSITIVITY_ORDER,
+    TRACE_BELIEF_ID_FIELDS,
     BeliefRejection,
     BeliefType,
     ConsolidationRun,
@@ -110,6 +112,7 @@ from agent_core.domain.memory import (
     MemoryStatus,
     Polarity,
     Portability,
+    RecallClassCounts,
     RecallQuery,
     RecallTrace,
     RecallTraceView,
@@ -202,21 +205,30 @@ _DROPPED_LENGTH = (
     "CASE WHEN jsonb_typeof({trace} -> 'dropped_for_budget') = 'array' "
     "THEN jsonb_array_length({trace} -> 'dropped_for_budget') ELSE 0 END"
 )
+_RANKED_LENGTH = (
+    "CASE WHEN jsonb_typeof(trace -> 'ranked_candidates') = 'array' "
+    "THEN jsonb_array_length(trace -> 'ranked_candidates') ELSE 0 END"
+)
 _OPERATOR_FIELDS_PRESENT = (
     "COALESCE(trace ->> 'arm_latencies_ms', '{}') <> '{}' "
     "OR COALESCE((trace ->> 'candidates')::int, 0) <> 0 "
-    f"OR {_DROPPED_LENGTH.format(trace='trace')} <> 0"
+    f"OR {_DROPPED_LENGTH.format(trace='trace')} <> 0 "
+    f"OR {_RANKED_LENGTH} <> 0"
 )
+# The summary column repeats the operator tier's timings for the health report,
+# so the same sweep removes them; its class counts name no belief and stay.
 _EXPIRE_OPERATOR_FIELDS = f"""
 UPDATE recall_traces AS expiring
 SET trace = expiring.trace || jsonb_build_object(
         'arm_latencies_ms', '{{}}'::jsonb,
         'candidates', 0,
         'dropped_for_budget', '[]'::jsonb,
+        'ranked_candidates', '[]'::jsonb,
         'dropped_for_budget_count',
         COALESCE((expiring.trace ->> 'dropped_for_budget_count')::int, 0)
         + {_DROPPED_LENGTH.format(trace="expiring.trace")}
-    )
+    ),
+    summary = expiring.summary - 'latency_ms' - 'arms'
 WHERE expiring.id IN (
     SELECT id
     FROM recall_traces
@@ -226,6 +238,30 @@ WHERE expiring.id IN (
     FOR UPDATE SKIP LOCKED
 )
 """
+
+
+def trace_summary(trace: RecallTrace) -> dict[str, Any]:
+    """The identifier-free figures the health report reads instead of the trace.
+
+    A trace document is tens of kilobytes and stored out of line, so an
+    aggregate over documents reads the whole table. This row-local summary is
+    a few hundred bytes: total recall time, the arms that ran, and how many
+    items were returned and dropped in each review class.
+    """
+
+    returned = trace.returned_classes or RecallClassCounts(total=len(trace.returned))
+    dropped = trace.dropped_classes or RecallClassCounts(
+        total=len(trace.dropped_for_budget) or trace.dropped_for_budget_count
+    )
+    summary: dict[str, Any] = {
+        "returned": returned.model_dump(mode="json"),
+        "dropped": dropped.model_dump(mode="json"),
+    }
+    if trace.arms_ran:
+        summary["arms"] = list(trace.arms_ran)
+    if "total" in trace.arm_latencies_ms:
+        summary["latency_ms"] = trace.arm_latencies_ms["total"]
+    return summary
 
 
 def _review_reason_predicate(reason: str) -> ColumnElement[bool]:
@@ -1175,7 +1211,12 @@ class PostgresMemoryStore:
             MemoryRow.last_evidence_at <= evidence_before,
         ]
         if decay_confidence_ceiling is not None:
-            predicates.append(MemoryRow.lifecycle_policy_version != "people-lifecycle@1")
+            # ADR-0340: an email memory kept by importance ends by its expiry alone.
+            predicates.append(
+                MemoryRow.lifecycle_policy_version.notin_(
+                    ("people-lifecycle@1", EMAIL_RETENTION_POLICY)
+                )
+            )
             predicates.append(
                 or_(
                     MemoryRow.status == MemoryStatus.PROVISIONAL.value,
@@ -1480,8 +1521,11 @@ class PostgresTraceStore:
             )
         ]
         predicates.extend(
-            RecallTraceRow.trace.contains({"returned": [str(belief_id)]})
+            RecallTraceRow.trace.contains({field: [str(belief_id)]})
             for belief_id in belief_ids
+            # Every list of belief identifiers, so one that was ranked or cut
+            # for the budget and never returned does not outlive its erasure.
+            for field in TRACE_BELIEF_ID_FIELDS
         )
         predicates.extend(
             RecallTraceRow.trace.contains({"query": {"people_scope": [str(record_id)]}})
@@ -1524,6 +1568,7 @@ class PostgresTraceStore:
                 session_id=trace.session_id,
                 turn_id=trace.turn_id,
                 trace=trace.model_dump(mode="json"),
+                summary=trace_summary(trace),
                 created_at=trace.created_at,
                 operator_fields_expire_at=trace.operator_fields_expire_at,
             )

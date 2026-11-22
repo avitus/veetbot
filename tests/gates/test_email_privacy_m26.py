@@ -47,6 +47,7 @@ from tests.gates.test_email_chat_m26 import context
 from tests.gates.test_email_experience_m26 import email_client, seed_mail
 from tests.gates.test_email_m18 import _credential, _email_settings
 from tests.gates.test_email_runtime_m26 import (
+    MAIL_NOW,
     _current_mail_factory,
     _mailbox_factory,
     _page,
@@ -115,6 +116,7 @@ async def _hostile_mail(*, failure: str | None = None) -> None:
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=script,
         mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         persona = PersonaDocument(
             tenant_id=app.principal.tenant_id,

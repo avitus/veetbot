@@ -41,6 +41,9 @@ setup, all sizes and both paths ran again; partial measurements were not folded
 into the completed report. An earlier import-path launch failed before any report
 or database access. These were fixture errors, not red regression tests.
 
+The historical runner is available at Git revision `54e4cc24275a56afbcaaa4eb493c703983b50d77`.
+Run the commands below from a checkout of that revision.
+
 To reproduce from the repository root, use a migrated scratch template with no
 other connections. Set `DATABASE_URL` to that scratch database and
 `VEETBOT_TEST_DATABASE_DISPOSABLE=1`, then run:

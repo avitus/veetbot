@@ -255,6 +255,18 @@ async def test_postgres_empty_check_query_finds_only_old_settled_free_checks() -
         )
 
 
+async def test_postgres_pending_rerating_query_returns_only_marked_assessments() -> None:
+    from tests.contract.test_email_store_contract import (
+        assert_pending_rerating_query_returns_only_marked_assessments,
+    )
+
+    async with database() as engine, create_session_factory(engine)() as session:
+        await configure(session)
+        await assert_pending_rerating_query_returns_only_marked_assessments(
+            PostgresEmailStore(session)
+        )
+
+
 @pytest.mark.parametrize(
     "timestamp", ["invalid", "2026-01-01T00:00:00", None, "2026-02-30T00:00:00Z"]
 )

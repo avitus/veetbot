@@ -23,6 +23,7 @@ from agent_core.runtime.worker import MaintenanceWorker
 from tests.gates.test_email_experience_m26 import email_client, seed_mail
 from tests.gates.test_email_m18 import _email_settings
 from tests.gates.test_email_runtime_m26 import (
+    MAIL_NOW,
     _assessment_turn,
     _current_mail_factory,
     _page,
@@ -176,6 +177,7 @@ async def test_draft_generation_never_receives_an_expired_body(
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[ScriptedTurn(text='{"body": "Reply"}')]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         thread, _ = await _seed_draft(app)
         expired_body = "Expired cache content must never reach drafting."
@@ -206,6 +208,7 @@ async def test_refresh_refetches_an_expired_body_before_maintenance_runs(
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[_assessment_turn(), _assessment_turn()]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         await app.services.email.submit_task(app.principal, kind="refresh")
         async with app.uow_factory() as uow:

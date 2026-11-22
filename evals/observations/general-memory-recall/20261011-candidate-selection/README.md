@@ -77,6 +77,9 @@ This offline helper is not a production embedding adapter or a budget certificat
 
 ## Reproduction and verification
 
+The historical runner is available at Git revision `8a703a183d978424d8a4e9e010878fd9dd93f211`.
+Run the commands below from a checkout of that revision.
+
 ```sh
 uv run python -m agent_core.evals.general_memory_recall_driver --noise 1000 --output test-results/memory/general-recall-1000.json
 # Uses the repository provider credential; writes a new run, never overwrites one.

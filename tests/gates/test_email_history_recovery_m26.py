@@ -16,6 +16,7 @@ from agent_core.domain.messages import FakeModelScript
 from agent_core.domain.runs import RunStatus
 from tests.gates.test_email_m18 import _email_settings
 from tests.gates.test_email_runtime_m26 import (
+    MAIL_NOW,
     _assessment_turn,
     _mailbox_factory,
     _page,
@@ -136,6 +137,7 @@ async def test_history_lookahead_ceiling_restarts_sync_without_discarding_cached
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=factory,
         script=FakeModelScript(turns=[_assessment_turn()]),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         await _seed_draft(app)
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
@@ -265,6 +267,7 @@ async def test_vanished_threads_complete_instead_of_blocking_newer_mail() -> Non
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=factory,
         script=FakeModelScript(turns=[_assessment_turn() for _ in range(4)]),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         await _seed_draft(app)
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
@@ -290,6 +293,7 @@ async def test_history_backlog_is_coalesced_and_read_within_one_slice() -> None:
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=factory,
         script=FakeModelScript(turns=[_assessment_turn() for _ in range(4)]),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
@@ -316,6 +320,7 @@ async def test_history_backlog_past_the_page_ceiling_resynchronizes_from_the_inb
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=factory,
         script=FakeModelScript(turns=[_assessment_turn() for _ in range(4)]),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
@@ -343,6 +348,7 @@ async def test_refresh_discovers_new_mail_before_draining_older_change_reads() -
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=factory,
         script=FakeModelScript(turns=[_assessment_turn() for _ in range(20)]),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         first = await app.services.email.submit_task(app.principal, kind="refresh")
         assert (await app.runs.get(first.run_id)).status is RunStatus.COMPLETED

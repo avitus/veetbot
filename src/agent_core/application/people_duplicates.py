@@ -30,6 +30,7 @@ from agent_core.application.authorization import require_scope
 from agent_core.application.people_identity import PeopleIdentityService
 from agent_core.application.people_self import owner_references
 from agent_core.domain.agents import Principal
+from agent_core.domain.email_signature import SIGNATURE_NAMESPACE
 from agent_core.domain.errors import ConflictError, NotFoundError, ToolValidationError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import SENSITIVITY_ORDER, Sensitivity
@@ -255,6 +256,9 @@ class PeopleDeduplicator:
             if row.identifier_kind == "name":
                 if not is_group_or_service_name(row.value):
                     names[row.person_id].append(name_tokens(row.value))
+            elif row.namespace == SIGNATURE_NAMESPACE:
+                # ADR-0336: a number two people sign with is not a shared endpoint.
+                continue
             elif row.identifier_kind in _ENDPOINT_KINDS:
                 try:
                     value = normalize_identifier(row.identifier_kind, row.namespace, row.value)

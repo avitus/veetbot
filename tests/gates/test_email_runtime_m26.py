@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections import deque
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import UUID
@@ -205,7 +207,23 @@ def _profile() -> dict[str, Any]:
     }
 
 
-def _page(*, changed: bool = False) -> dict[str, Any]:
+# When the fixture's received message was sent, and the clock its readers pin.
+# Automatic assessment, learning and memory formation ignore mail older than
+# ninety days (ADR-0096). On the system clock this message leaves that window on
+# 2026-12-10, so a test in which that check sees the message composes with
+# `fixed_clock_at=MAIL_NOW`. A test that has to run on today's date instead dates
+# its mail with `sent_at=_recently()`.
+MAIL_SENT_AT = datetime(2026, 9, 11, 12, tzinfo=UTC)
+MAIL_NOW = MAIL_SENT_AT + timedelta(days=3)
+
+
+def _recently() -> datetime:
+    """A send time three days before the system clock, for a test bound to today's date."""
+    return datetime.now(UTC).replace(microsecond=0) - timedelta(days=3)
+
+
+def _page(*, changed: bool = False, sent_at: datetime = MAIL_SENT_AT) -> dict[str, Any]:
+    internal_date = int(sent_at.timestamp() * 1000)
     message = {
         "id": "m1",
         "thread_id": "thread-1",
@@ -214,8 +232,8 @@ def _page(*, changed: bool = False) -> dict[str, Any]:
         "cc": "board@example.test",
         "reply_to": "reply@example.test",
         "subject": "Decision",
-        "date": "Fri, 11 Sep 2026 12:00:00 +0000",
-        "internal_date": 1789128000000,
+        "date": format_datetime(sent_at),
+        "internal_date": internal_date,
         "history_id": "100",
         "body": "Please approve the board materials.",
         "body_complete": True,
@@ -236,7 +254,7 @@ def _page(*, changed: bool = False) -> dict[str, Any]:
                 "from": "owner@example.test",
                 "direction": "sent",
                 "label_ids": ["SENT"],
-                "internal_date": 1789128001000,
+                "internal_date": internal_date + 1000,
                 "body": "Already replied elsewhere.",
             }
         )
@@ -301,7 +319,9 @@ async def test_send_freezes_exact_value_and_rechecks_source_after_approval(
         ]
     )
     async with build(
-        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         _thread, draft = await _seed_draft(app)
         operation = await app.services.email.submit_task(
@@ -355,7 +375,9 @@ async def test_external_reply_after_approval_invalidates_send_without_dispatch()
         [("get_profile", _profile()), ("get_thread_page", _page(changed=True))]
     )
     async with build(
-        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         _, draft = await _seed_draft(app)
         operation = await app.services.email.submit_task(
@@ -394,7 +416,9 @@ async def test_uncertain_send_is_preserved_and_cannot_be_resubmitted() -> None:
         [("get_profile", _profile()), ("get_thread_page", _page())], send_uncertain=True
     )
     async with build(
-        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         _, draft = await _seed_draft(app)
         operation = await app.services.email.submit_task(
@@ -505,6 +529,7 @@ async def test_refresh_reserves_history_progress_and_bounds_full_reads_per_accou
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=factory,
         script=FakeModelScript(turns=[_assessment_turn() for _ in range(4)]),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
@@ -585,6 +610,7 @@ async def test_changed_mail_is_assessed_and_drafted_once_through_metered_model()
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=script,
         mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         first = await app.services.email.submit_task(app.principal, kind="refresh")
         first_run = await app.runs.get(first.run_id)
@@ -610,7 +636,7 @@ async def test_changed_mail_is_assessed_and_drafted_once_through_metered_model()
         assert not any(event.event_type == "user.message.received" for event in events)
 
 
-async def _current_mail_factory() -> MailboxFactory:
+async def _current_mail_factory(*, sent_at: datetime = MAIL_SENT_AT) -> MailboxFactory:
     import json
 
     from agent_core.domain.mcp import MCPCallResult
@@ -626,7 +652,7 @@ async def _current_mail_factory() -> MailboxFactory:
             if name == "get_profile":
                 value = _profile()
             elif name == "get_thread_page":
-                value = _page()
+                value = _page(sent_at=sent_at)
             elif name == "search_threads":
                 value = {
                     "threads": [{"thread_id": "thread-1"}]
@@ -671,6 +697,7 @@ async def test_email_schema_rejection_releases_automatic_reservation() -> None:
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[ScriptedTurn(fail_with=rejected)]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         run = await app.runs.get(operation.run_id)
@@ -703,6 +730,7 @@ async def test_email_unknown_model_failure_is_recorded_without_automatic_retry()
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[ScriptedTurn(fail_with=failure), _assessment_turn()]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         run = await app.runs.get(operation.run_id)
@@ -756,6 +784,7 @@ async def test_email_model_requests_require_every_nested_response_property() -> 
             ]
         ),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         assert (await app.runs.get(operation.run_id)).status is RunStatus.COMPLETED
@@ -792,6 +821,7 @@ async def test_refresh_releases_operational_connections_after_each_poll(model_fa
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[] if model_fails else [_assessment_turn()]),
         mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         first = await app.services.email.submit_task(app.principal, kind="refresh")
         first_run = await app.runs.get(first.run_id)
@@ -874,6 +904,7 @@ async def test_real_stdio_refresh_reopens_read_servers_and_recovers_one_failed_a
             settings=settings,
             mcp_client_factory=factory,
             script=FakeModelScript(turns=[_assessment_turn(), _assessment_turn()]),
+            fixed_clock_at=MAIL_NOW,
         ) as app,
     ):
         first = await app.services.email.submit_task(app.principal, kind="refresh")
@@ -938,6 +969,7 @@ async def test_no_reply_feedback_prevents_automatic_draft_after_reassessment() -
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=script,
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         await app.services.email.submit_task(app.principal, kind="refresh")
         [thread] = _items(await app.services.email.threads(app.principal))
@@ -963,6 +995,7 @@ async def test_expired_cached_body_is_refetched_despite_unchanged_provider_curso
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=script,
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         await app.services.email.submit_task(app.principal, kind="refresh")
         async with app.uow_factory() as uow, uow.email.lock(app.principal):
@@ -1050,6 +1083,7 @@ async def test_deleted_last_message_updates_projection_before_history_cursor_adv
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         await app.services.email.submit_task(app.principal, kind="refresh")
         second = await app.services.email.submit_task(app.principal, kind="refresh")
@@ -1097,6 +1131,7 @@ async def test_large_body_analysis_advances_in_bounded_passages_without_repeatin
             ]
         ),
         mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         await app.services.email.submit_task(app.principal, kind="refresh")
         async with app.uow_factory() as uow:
@@ -1167,6 +1202,7 @@ async def test_body_continuation_keeps_header_provenance_across_refresh_sessions
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=script,
         mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         first = await app.services.email.submit_task(app.principal, kind="refresh")
         second = await app.services.email.submit_task(app.principal, kind="refresh")
@@ -1238,7 +1274,9 @@ async def test_editing_pending_send_cancels_old_approval_and_allows_new_exact_pr
 
     factory = await _mailbox_factory([("get_profile", _profile()), ("get_thread_page", _page())])
     async with build(
-        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         _, draft = await _seed_draft(app)
         first = await app.services.email.submit_task(
@@ -1303,6 +1341,7 @@ async def test_unsupported_ranking_quotes_cannot_create_attention_or_auto_drafts
                 ScriptedTurn(text='{"body":"Unrequested draft."}'),
             ]
         ),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         task = await app.services.email.submit_task(app.principal, kind="refresh")
         assert (await app.runs.get(task.run_id)).status is RunStatus.COMPLETED
@@ -1408,6 +1447,7 @@ async def test_refresh_defers_stale_assessment_and_continues(
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[_assessment_turn() for _ in range(3)]),
         mcp_client_factory=await _two_thread_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         run = await app.runs.get(operation.run_id)
@@ -1447,6 +1487,7 @@ async def test_refresh_does_not_hide_unrelated_assessment_conflicts(
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         run = await app.runs.get(operation.run_id)
@@ -1477,6 +1518,7 @@ async def test_rejected_assessment_abstains_for_its_thread_and_refresh_continues
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[rejected, _assessment_turn(), rejected]),
         mcp_client_factory=await _two_thread_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         run = await app.runs.get(operation.run_id)
@@ -1533,6 +1575,7 @@ async def test_rejected_assessment_is_replaced_by_a_valid_retry() -> None:
         settings=replace(_email_settings(), email_mode_enabled=True),
         script=FakeModelScript(turns=[rejected, _assessment_turn(), _assessment_turn()]),
         mcp_client_factory=await _two_thread_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         first = await app.services.email.submit_task(app.principal, kind="refresh")
         assert (await app.runs.get(first.run_id)).status is RunStatus.COMPLETED
@@ -1564,6 +1607,7 @@ async def test_rejected_automatic_draft_leaves_thread_undrafted_and_refresh_comp
             turns=[_assessment_turn(needs_reply=True), ScriptedTurn(text='{"body": ""}')]
         ),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         run = await app.runs.get(operation.run_id)
@@ -1621,6 +1665,7 @@ async def test_refresh_recovery_accounts_completed_pending_read_before_new_work(
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=await _current_mail_factory(),
         script=FakeModelScript(turns=[_assessment_turn()]),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         original_dispatch = app.executor._dispatch_tools
 
@@ -1661,7 +1706,9 @@ async def test_send_recovery_accounts_confirmed_outcome_without_redispatch() -> 
 
     factory = await _mailbox_factory([("get_profile", _profile()), ("get_thread_page", _page())])
     async with build(
-        settings=replace(_email_settings(), email_mode_enabled=True), mcp_client_factory=factory
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        mcp_client_factory=factory,
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         _, draft = await _seed_draft(app)
         task = await app.services.email.submit_task(
@@ -1739,6 +1786,7 @@ async def test_rolling_history_waits_for_analysis_then_reaches_later_source_wind
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=factory,
         script=FakeModelScript(turns=[_assessment_turn(evidence="Passage") for _ in range(15)]),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         for _ in range(3):
             task = await app.services.email.submit_task(app.principal, kind="refresh")
@@ -1815,6 +1863,7 @@ async def test_rolling_body_window_preserves_original_byte_offset_and_final_pass
                 _assessment_turn(evidence="FINAL_PASSAGE"),
             ]
         ),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         for _ in range(18):
             task = await app.services.email.submit_task(app.principal, kind="refresh")
@@ -1863,6 +1912,7 @@ async def test_rejected_assessment_holds_its_body_window_until_the_retry(
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=await _current_mail_factory(),
         script=FakeModelScript(turns=[_assessment_turn()]),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         task = await app.services.email.submit_task(app.principal, kind="refresh")
         current = await app.runs.get(task.run_id)
@@ -1926,6 +1976,7 @@ async def test_partial_large_thread_does_not_block_other_current_mail() -> None:
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=factory,
         script=FakeModelScript(turns=[_assessment_turn(), _assessment_turn()]),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         task = await app.services.email.submit_task(app.principal, kind="refresh")
         assert (await app.runs.get(task.run_id)).status is RunStatus.COMPLETED
@@ -2056,6 +2107,7 @@ async def test_send_resumed_by_a_fresh_worker_starts_only_read_and_send_servers(
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=_counting(base, started),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         _thread, draft = await _seed_draft(app)
         operation = await app.services.email.submit_task(

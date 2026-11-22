@@ -50,6 +50,8 @@ async def mail(
     days_ago: float = 3,
     thread_id: str = "t-mail",
     body: str = "Thanks for the update on the board materials.",
+    sender_check: str | None = None,
+    body_complete: bool = True,
 ) -> Any:
     """Append one first-party thread read to the mailbox session and return its source."""
     import json
@@ -67,13 +69,19 @@ async def mail(
         "thread_id": thread_id,
         "from": sender,
         "body": body,
-        "body_complete": True,
+        "body_complete": body_complete,
         "headers_complete": True,
         "internal_date": str(int(sent_at.timestamp() * 1000)),
         "label_ids": labels or ["INBOX"],
     }
     if to is not None:
         message["to"] = to
+    if not body_complete:
+        # The first page of a longer body: more of it is available past this offset.
+        message.update(body_available=True, next_body_offset=len(body.encode()))
+    if sender_check is not None:
+        # Gmail's own DMARC verdict, as the read server reports it (ADR-0165).
+        message["sender_check"] = sender_check
     async with factory() as uow:
         event = await uow.events.append(
             NewEvent(

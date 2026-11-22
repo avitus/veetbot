@@ -1219,10 +1219,37 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     /// Reply opens a blank owner-written draft, without asking Veetbot to write.
+    /// Discarding it brings the reply choices back for another.
     func testEmailReplyCreatesAMissingDraft() {
         app.launchArguments.append("--ui-testing-email-no-draft")
         app.launch()
-        checkEmailReadingFlow()
+        checkEmailReadingFlow(beforeLeavingEmail: checkDiscardingTheReplyRestoresTheReplyChoices)
+    }
+
+    /// The composer hides the reply choices while the owner writes. A discarded reply keeps
+    /// its place on the thread, so the choices must return without opening another thread.
+    private func checkDiscardingTheReplyRestoresTheReplyChoices() {
+        #if os(macOS)
+        // Folding the envelope puts the actions row back where Send was hittable.
+        activate(app.buttons["email.draft-envelope"])
+        let options = element("email.draft-options").firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 5), app.debugDescription)
+        activate(options)
+        let discard = app.menuItems["Discard draft"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 5), app.debugDescription)
+        activate(discard)
+        let confirm = app.sheets.buttons["Discard draft"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
+        activate(confirm)
+        let reply = app.buttons["email.jump-to-reply"]
+        XCTAssertTrue(reply.waitForExistence(timeout: 5), "Discarding a reply must bring the reply choices back")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "enabled == true"), object: reply)], timeout: 5), .completed)
+        activate(reply)
+        let editor = app.textViews["email.draft-body"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertEqual(editor.value as? String, "", "A discarded reply's text must not carry into the next one")
+        #endif
     }
 
     func testClosedEmailComposerKeepsSendUndoVisible() {
@@ -1243,8 +1270,15 @@ final class ConversationNavigationUITests: XCTestCase {
         #if os(iOS)
         activate(app.buttons["email.keyboard-done"])
         #endif
+        // The fixture holds the save that parks the send for eight seconds, so the composer is
+        // closed around it whether autosave or this press asked for it.
         activate(app.buttons["email.save-close"])
-        XCTAssertTrue(app.buttons["email.send-undo"].waitForExistence(timeout: 5))
+        let undo = app.buttons["email.send-undo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 20))
+        XCTAssertEqual(undo.label, "Undo")
+        activate(undo)
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertEqual(editor.value as? String, "My reply.")
     }
 
     /// Exercises the same native controls with a deterministic dark appearance.
@@ -1255,7 +1289,8 @@ final class ConversationNavigationUITests: XCTestCase {
     }
 
     /// Checks inbox discovery, optional feedback, direct reply access and toolbar isolation.
-    private func checkEmailReadingFlow() {
+    /// A journey with more to prove about the open reply does so before the flow leaves Email.
+    private func checkEmailReadingFlow(beforeLeavingEmail: (() -> Void)? = nil) {
         let emailMode = app.buttons["mode.email"]
         XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
         #if os(macOS)
@@ -1314,6 +1349,10 @@ final class ConversationNavigationUITests: XCTestCase {
         if app.launchArguments.contains("--ui-testing-email-no-draft") {
             XCTAssertFalse(app.textViews["email.draft-body"].exists, "The regression starts without a draft")
         }
+        let aiDraft = app.buttons["email.draft-with-veetbot"]
+        XCTAssertTrue(aiDraft.isHittable, "The two composition choices stay side by side")
+        XCTAssertLessThan(aiDraft.frame.height, 80)
+        XCTAssertEqual(reply.frame.midY, aiDraft.frame.midY, accuracy: 2)
         activate(reply)
         let editor = app.textViews["email.draft-body"]
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
@@ -1321,10 +1360,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(editor.value as? String, "", "Reply must never insert an AI suggestion")
         attachEmailScreenshot("Reply composer")
         XCTAssertFalse(app.buttons["email.send"].isEnabled, "An empty reply cannot be sent")
-        let aiDraft = app.buttons["email.draft-with-veetbot"]
-        XCTAssertTrue(aiDraft.isHittable, "The two composition choices stay side by side")
-        XCTAssertLessThan(aiDraft.frame.height, 80)
-        XCTAssertEqual(reply.frame.midY, aiDraft.frame.midY, accuracy: 2)
+        XCTAssertFalse(aiDraft.exists)
         // Reply focuses the body: typing goes straight into the manual composer.
         app.typeText("My own reply.")
         XCTAssertEqual(editor.value as? String, "My own reply.")
@@ -1332,9 +1368,13 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(app.buttons["email.keyboard-done"])
         #endif
         XCTAssertTrue(app.buttons["email.send"].isHittable)
+        activate(app.buttons["email.save-close"])
+        XCTAssertTrue(aiDraft.waitForExistence(timeout: 5))
         activate(aiDraft)
-        XCTAssertTrue(app.staticTexts["Veetbot draft"].waitForExistence(timeout: 5))
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
         XCTAssertEqual(editor.value as? String, "Thanks, Alex. I'll review the agenda.")
+        activate(app.buttons["email.save-close"])
+        XCTAssertTrue(reply.waitForExistence(timeout: 5))
         XCTAssertTrue(NSPredicate(format: "enabled == true").evaluate(with: reply)
             || XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: reply)], timeout: 5) == .completed)
         activate(reply)
@@ -1345,6 +1385,7 @@ final class ConversationNavigationUITests: XCTestCase {
         activate(app.buttons["email.keyboard-done"])
         #endif
         let saveClose = app.buttons["email.save-close"]
+        XCTAssertEqual(saveClose.label, "Close draft")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "enabled == true"), object: saveClose)], timeout: 5), .completed)
         activate(saveClose)
@@ -1363,6 +1404,7 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.textFields["email.draft-cc"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.textFields["email.draft-bcc"].exists)
         XCTAssertTrue(app.textFields["email.draft-subject"].exists)
+        beforeLeavingEmail?()
         activate(app.buttons["mode.chat"])
         XCTAssertFalse(app.textFields["email.search"].isHittable, "Mail search belongs to Email mode")
         #if os(macOS)
@@ -3144,6 +3186,41 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["email.send-undo"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertFalse(app.buttons["email.approve-send"].exists)
         XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 15))
+    }
+
+    /// Reply hides Teach Veetbot while the owner writes. What they had entered there and not
+    /// yet applied must be waiting, still open, when the reply is closed.
+    func testTeachVeetbotKeepsUnsentFeedbackWhileReplying() {
+        app.launch()
+        let emailMode = app.buttons["mode.email"]
+        XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
+        emailMode.tap()
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        XCTAssertTrue(app.staticTexts["Please review the agenda before Friday."].waitForExistence(timeout: 5))
+        let teach = app.buttons["email.feedback"]
+        XCTAssertTrue(teach.waitForExistence(timeout: 5))
+        teach.tap()
+        let explanation = app.textFields["Explain what matters (optional)"]
+        XCTAssertTrue(explanation.waitForExistence(timeout: 5))
+        explanation.tap()
+        explanation.typeText("Board mail comes first")
+        let keyboardDone = app.buttons["email.keyboard-done"]
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        keyboardDone.tap()
+
+        app.buttons["email.jump-to-reply"].tap()
+        XCTAssertTrue(app.textViews["email.draft-body"].waitForExistence(timeout: 5))
+        XCTAssertTrue(teach.waitForNonExistence(timeout: 5), "Reply hides Teach Veetbot while the owner writes")
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        keyboardDone.tap()
+        app.buttons["email.save-close"].tap()
+
+        XCTAssertTrue(teach.waitForExistence(timeout: 5))
+        XCTAssertEqual(teach.value as? String, "Expanded", "Closing the reply must not fold away unsent feedback")
+        XCTAssertTrue(explanation.waitForExistence(timeout: 5))
+        XCTAssertEqual(explanation.value as? String, "Board mail comes first")
     }
 
     func testEmailModePreservesAnUnsentChatMessage() {

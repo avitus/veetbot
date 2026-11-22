@@ -7,6 +7,13 @@ title: Architecture Decisions
 - [ADR-0332: Email refresh reuses unchanged projections (Accepted)](0332-email-refresh-reuses-unchanged-projections.md)
 - [ADR-0333: Readiness checks before reviewed browser actions (Accepted)](0333-browser-workflow-action-readiness.md)
 - [ADR-0334: Explicit evidence requirements for workflow extraction (Accepted)](0334-browser-workflow-extraction-requirements.md)
+- [ADR-0335: An item read from the event log keeps its envelope nonce at any position (Proposed)](0335-event-sourced-envelope-nonces.md)
+- [ADR-0336: A sender's own signature updates their contact details in People (Accepted)](0336-sender-signatures-update-people-contact-details.md)
+- [ADR-0337: The owner's own synced reply keeps an Inbox gesture current (Accepted)](0337-own-reply-keeps-an-inbox-gesture-current.md)
+- [ADR-0338: The recall health report reads a per-trace summary; traces time every stage and keep the candidate ranking (Proposed)](0338-recall-trace-summary-and-stage-timings.md)
+- [ADR-0339: The owner keeps the recall question set on a signed-in page, stored in the database (Proposed)](0339-recall-question-page.md)
+- [ADR-0340: Email memories are kept by the thread's importance, and mail from people the owner knows forms first-class memories (Accepted)](0340-email-memories-keep-by-importance.md)
+- [ADR-0341: One fact in an email thread forms one memory (Accepted)](0341-one-memory-per-email-fact.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the
@@ -339,7 +346,7 @@ implementation without one.
 - [ADR-0286: The server checks for new mail while Email is closed (Accepted)](0286-server-checks-for-new-mail.md)
 - [ADR-0287: The device sign-in window asks before a new website adds another address (Proposed)](0287-device-sign-in-allows-another-address.md)
 - [ADR-0288: A saved login can sign in again through the remote browser (Accepted)](0288-saved-login-signs-in-through-the-remote-browser.md)
-- [ADR-0289: The knowledge semantic arm is built, measured, and off by default (Proposed)](0289-knowledge-semantic-arm.md)
+- [ADR-0289: The knowledge semantic arm is built, measured, and off by default (Accepted)](0289-knowledge-semantic-arm.md)
 - [ADR-0290: Semantic retrieval activates on the owner's standing decision (Accepted)](0290-standing-semantic-activation.md)
 - [ADR-0291: A schedule names its MCP servers, and a saved job may read them (Accepted)](0291-mcp-servers-for-schedules-and-jobs.md)
 - [ADR-0292: The OpenAI knowledge route windows long chunks, and a superseded space is pruned once the active one is full (Accepted)](0292-knowledge-windows-and-prune.md)

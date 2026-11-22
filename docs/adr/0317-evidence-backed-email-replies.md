@@ -291,6 +291,24 @@ reliability estimate or proof of a deployed repair. Correspondence, filenames, r
 outside the repository. This follow-up is for dev delivery only; it neither sends
 mail nor updates the production draft, and it moves no milestone gate.
 
+## Refused-draft repairs (2026-11-20)
+
+Production plans from 2026-11-13 to 2026-11-20 showed two ways a reply ended as a
+preparation error without a missing file. The planner reported a decision only
+the owner could give as a preparation issue, and any reported issue failed the
+draft, including beside a finished reply. Separately, discovery opens every match
+of a search until one carries files, so five matches without files spent the
+source allowance and the next match failed preparation outright.
+
+Both repairs keep every cap. A preparation issue now names only a required file
+or source, and a missing owner decision is drafted around without inventing it.
+Reaching the five-source cap ends that round's mail discovery and returns to
+planning with explicit incomplete evidence and the remaining allowance. Fabricated
+regressions in `tests/unit/test_email_researched_replies.py` and
+`tests/unit/test_email_research_budget.py` failed first and pass after the change.
+Neither repair has been checked against the production model; both are for dev
+delivery and move no milestone gate.
+
 ## Protected transport
 
 Two application-only Gmail capabilities keep file bytes outside recorded tool

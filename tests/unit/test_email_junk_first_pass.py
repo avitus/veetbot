@@ -30,7 +30,13 @@ from agent_core.domain.judgment import (
 from agent_core.domain.messages import FakeModelScript, ModelUsage
 from agent_core.domain.runs import RunStatus
 from tests.gates.test_email_m18 import _email_settings
-from tests.gates.test_email_runtime_m26 import _assessment_turn, _current_mail_factory
+from tests.gates.test_email_runtime_m26 import (
+    MAIL_NOW,
+    _assessment_turn,
+    _current_mail_factory,
+    _page,
+    _recently,
+)
 from tests.gates.test_email_spam_m31 import _seed
 from tests.unit.test_config import base_environment
 
@@ -86,6 +92,7 @@ async def test_shadow_screens_before_assessment_and_accounts_both_calls() -> Non
         judgment_provider_override=judge,
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         run = await app.runs.get(operation.run_id)
@@ -159,6 +166,7 @@ async def test_only_failed_filter_evidence_warns(
         judgment_provider_override=FakeJudgmentProvider([decision()]),
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         await app.services.email.submit_task(app.principal, kind="refresh")
     assert ("email_junk_evidence_unavailable" in caplog.text) is (
@@ -214,6 +222,7 @@ async def test_deadline_expiring_after_budget_check_does_not_reserve_or_dispatch
         judgment_provider_override=judge,
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         run = await app.runs.get(operation.run_id)
@@ -233,6 +242,7 @@ async def test_evidenced_filter_skips_generation_without_moving_mail_and_caches(
         judgment_provider_override=judge,
         script=FakeModelScript(turns=[]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         run = await app.runs.get(operation.run_id)
@@ -265,6 +275,7 @@ async def test_provider_failure_preserves_assessment_and_uncertain_cost(
         judgment_provider_override=judge,
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         run = await app.runs.get(operation.run_id)
@@ -307,6 +318,7 @@ async def test_uncertain_or_wrong_model_keeps_normal_assessment(
         judgment_provider_override=FakeJudgmentProvider([result]),
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         run = await app.runs.get(operation.run_id)
@@ -324,6 +336,7 @@ async def test_off_and_missing_evidence_never_bypass(
         judgment_provider_override=judge,
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         assert (await app.runs.get(operation.run_id)).usage.model_calls == 1
@@ -339,6 +352,7 @@ async def test_revoked_evidence_restores_normal_assessment(tmp_path: Path) -> No
         judgment_provider_override=judge,
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         first = await app.services.email.submit_task(app.principal, kind="refresh")
         assert (await app.runs.get(first.run_id)).usage.model_calls == 0
@@ -371,6 +385,7 @@ async def test_protection_precedes_egress(protection: str) -> None:
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         thread = await _seed(app)
         learning: dict[str, Any] = {}
@@ -448,6 +463,7 @@ async def test_important_restores_priority_and_normal_assessment(tmp_path: Path)
         judgment_provider_override=judge,
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         await app.services.email.submit_task(app.principal, kind="refresh")
         async with app.uow_factory() as uow:
@@ -486,6 +502,7 @@ async def test_owner_override_during_judgment_prevents_bypass(tmp_path: Path) ->
         judgment_provider_override=judge,
         script=FakeModelScript(turns=[]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         pending = asyncio.create_task(app.services.email.submit_task(app.principal, kind="refresh"))
         await asyncio.wait_for(started.wait(), 10)
@@ -515,6 +532,7 @@ async def test_new_relationship_memory_rechecks_cached_junk_without_profile_chan
         judgment_provider_override=judge,
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         await app.services.email.submit_task(app.principal, kind="refresh")
         service = app.services.email
@@ -560,6 +578,7 @@ async def test_crash_after_reservation_is_not_replayed_and_remains_charged(
         settings=filter_settings(tmp_path),
         judgment_provider_override=judge,
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         operation = await app.services.email.submit_task(app.principal, kind="refresh")
         task = await app.services.email.get_task(app.principal, operation.run_id)
@@ -583,6 +602,7 @@ async def test_shadow_does_not_reassess_already_current_mail(tmp_path: Path) -> 
         judgment_provider_override=judge,
         script=FakeModelScript(turns=[_assessment_turn()]),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         first = await app.services.email.submit_task(app.principal, kind="refresh")
         assert (await app.runs.get(first.run_id)).usage.model_calls == 1
@@ -635,7 +655,8 @@ async def test_private_replay_keeps_labels_empty_and_journals_before_dispatch(
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=await _current_mail_factory(),
     ) as app:
-        thread: EmailThread = await _seed(app)
+        # The replay script reads the system clock, so its mail is dated against today.
+        thread: EmailThread = await _seed(app, _page(sent_at=_recently()))
     source, output = tmp_path / "snapshot.json", tmp_path / "results.json"
     source.write_text(
         json.dumps({"items": [{"thread": thread.model_dump(mode="json"), "learning": {}}]})
@@ -670,7 +691,8 @@ async def test_interrupted_replay_preserves_outstanding_cost(
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=await _current_mail_factory(),
     ) as app:
-        thread = await _seed(app)
+        # The replay script reads the system clock, so its mail is dated against today.
+        thread = await _seed(app, _page(sent_at=_recently()))
     source, output = tmp_path / "snapshot.json", tmp_path / "results.json"
     source.write_text(json.dumps({"items": [{"thread": thread.model_dump(mode="json")}]}))
 
@@ -699,6 +721,7 @@ async def test_protected_topics_must_be_clearly_unrelated(relevance: float, expe
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         thread = await _seed(app)
         request = junk_request(thread, {"junk_protected_topics": ["board"]}, app.clock.now())
@@ -748,6 +771,7 @@ async def test_kept_subscription_protects_mail_when_subscription_ui_is_disabled(
     async with build(
         settings=replace(_email_settings(), email_mode_enabled=True),
         mcp_client_factory=await _current_mail_factory(),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         thread = await _seed(app)
         now = app.clock.now()

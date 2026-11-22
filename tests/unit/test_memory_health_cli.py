@@ -34,6 +34,7 @@ def _report() -> MemoryHealthReport:
         charged_beliefs=90,
         ambiguous_citations=1,
         traces=55,
+        summarized_traces=50,
         traces_with_lexical=55,
         traces_with_structured=55,
         traces_with_semantic=0,
@@ -74,6 +75,7 @@ def test_render_reports_shares_rates_and_coverage_without_belief_text() -> None:
     assert "536 of 622 live beliefs vectorised (86.2%)" in rendered
     assert "memory.retired x2 (affirmed, lowest 0.15)" in rendered
     assert "p95 480ms; 1 over 1s" in rendered
+    assert "Traces: 55, 50 with a summary (lexical 55" in rendered
     assert "Without recall: 3 runs went without automatic recall at some step" in rendered
     assert "(4 exhausted and 1 timed-out limitation events)" in rendered
     assert "[m:" not in rendered

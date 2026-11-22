@@ -32,6 +32,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 from agent_core.domain.agents import Principal
 from agent_core.domain.artifacts import EMAIL_SOURCE_METADATA_KEY, outlives_source_erasure
 from agent_core.domain.errors import ConflictError
+from agent_core.domain.memory import TRACE_BELIEF_ID_FIELDS
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.domain.sessions import SESSION_EMAIL_ACCOUNT_SERVERS_METADATA_KEY
 from agent_core.mcp.configuration import is_email_attachment_tool
@@ -202,6 +203,11 @@ def source_belief_ids(
     return identifiers
 
 
+# Identifier lists whose members were scored or cut and never rendered: erasing
+# one of them removes the identifier and leaves what was rendered standing.
+_NEVER_RENDERED = ("ranked_candidates", "dropped_for_budget")
+
+
 def erase_trace(value: dict[str, Any], belief_ids: set[str]) -> dict[str, Any] | None:
     beliefs = value.get("beliefs", [])
     doomed = belief_ids | {
@@ -211,15 +217,23 @@ def erase_trace(value: dict[str, Any], belief_ids: set[str]) -> dict[str, Any] |
         and item.get("record_kind") in {"summary", "hypothesis"}
         and belief_ids.intersection(item.get("support_ids", []))
     }
-    if not any(str(item.get("belief_id")) in doomed for item in beliefs if isinstance(item, dict)):
+    rendered = any(
+        str(item.get("belief_id")) in doomed for item in beliefs if isinstance(item, dict)
+    ) or any(
+        str(item) in doomed
+        for field in TRACE_BELIEF_ID_FIELDS
+        if field not in _NEVER_RENDERED
+        for item in value.get(field, [])
+    )
+    listed = any(str(item) in doomed for field in _NEVER_RENDERED for item in value.get(field, []))
+    if not rendered and not listed:
         return None
-    result = {
-        **value,
-        "beliefs": [item for item in beliefs if str(item.get("belief_id")) not in doomed],
-        "rendered": "",
-        "rendered_sha256": hashlib.sha256(b"").hexdigest(),
-    }
-    for field in ("returned", "cited", "carried_in", "blocked", "dropped_for_budget"):
+    result = dict(value)
+    if rendered:
+        result["beliefs"] = [item for item in beliefs if str(item.get("belief_id")) not in doomed]
+        result["rendered"] = ""
+        result["rendered_sha256"] = hashlib.sha256(b"").hexdigest()
+    for field in TRACE_BELIEF_ID_FIELDS:
         result[field] = [item for item in result.get(field, []) if str(item) not in doomed]
     return result
 

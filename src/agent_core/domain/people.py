@@ -11,6 +11,7 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
+from agent_core.domain.email_signature import SIGNATURE_CONTEXT, SIGNATURE_NAMESPACE
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.people_imports import (
     ImportState,
@@ -77,6 +78,13 @@ class PersonIdentifier(PeopleEntity):
     def valid_assignment(self) -> PersonIdentifier:
         if self.valid_to is not None and self.valid_to <= self.valid_from:
             raise ValueError("identifier assignment interval must be positive")
+        if self.namespace == SIGNATURE_NAMESPACE and (
+            self.identifier_kind not in {"phone", "role"}
+            or self.verification != "contextual"
+            or self.context != SIGNATURE_CONTEXT
+        ):
+            # ADR-0336: the namespace holds only what a sender's signature states.
+            raise ValueError("the signature namespace holds only a sender's stated details")
         return self
 
 
@@ -546,7 +554,8 @@ class PeopleQuery(PeopleValue):
     # ADR-0121 identity lookup: an exact (case-insensitive) identifier or name
     # value, whether identifiers must be attached to a person, the instant an
     # identifier must be valid at, and one row per distinct assignment so
-    # per-message copies of one address cannot crowd out a match.
+    # per-message copies of one address cannot crowd out a match. That row is
+    # the assignment's lowest id, and `after` pages over those rows only.
     identifier_value: str | None = Field(default=None, min_length=1, max_length=512)
     assigned: Literal["any", "attached", "unattached"] = "any"
     valid_at: AwareDatetime | None = None
@@ -793,6 +802,13 @@ def normalize_identifier(kind: str, namespace: str, value: str) -> str:
         if not separator or not local or not domain or any(c.isspace() for c in cleaned):
             raise ValueError("invalid email identifier")
         return local + "@" + domain.casefold()
+    if kind == "phone" and namespace == SIGNATURE_NAMESPACE:
+        # ADR-0336: a signature gives no country, so its numbers are kept as
+        # written and compared by their digits, never as E.164 values.
+        digits = re.sub(r"[ ().-]", "", cleaned)
+        if not re.fullmatch(r"\+?[0-9]{7,15}", digits):
+            raise ValueError("signature phone is not a written number")
+        return digits
     if kind == "phone" and (
         not cleaned.startswith("+") or not cleaned[1:].isdigit() or not 8 <= len(cleaned) <= 16
     ):

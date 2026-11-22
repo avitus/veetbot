@@ -27,7 +27,13 @@ from tests.gates.test_email_m18 import (
     _email_settings,
     _generated_gmail_discovery,
 )
-from tests.gates.test_email_runtime_m26 import MailboxFactory, _page, _profile, _seed_draft
+from tests.gates.test_email_runtime_m26 import (
+    MAIL_NOW,
+    MailboxFactory,
+    _page,
+    _profile,
+    _seed_draft,
+)
 
 
 def _named_settings(tmp_path: Path) -> Settings:
@@ -120,7 +126,9 @@ async def test_archive_routes_overlapping_provider_ids_to_each_originating_accou
     """Identical Gmail thread IDs in two mailboxes never collapse or select the default account."""
     writes: list[tuple[str, dict[str, Any]]] = []
     async with build(
-        settings=_named_settings(tmp_path), mcp_client_factory=await _named_factory(writes)
+        settings=_named_settings(tmp_path),
+        mcp_client_factory=await _named_factory(writes),
+        fixed_clock_at=MAIL_NOW,
     ) as app:
         threads = [await _seed_named(app, account) for account in ("personal", "work")]
         assert threads[0].id != threads[1].id

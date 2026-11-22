@@ -210,6 +210,10 @@ from agent_core.adapters.persistence.projections import (
     PostgresTrajectoryProjectionRepository,
 )
 from agent_core.adapters.persistence.queue import PostgresRunQueue
+from agent_core.adapters.persistence.recall_questions import (
+    InMemoryRecallQuestionStore,
+    PostgresRecallQuestionStore,
+)
 from agent_core.adapters.persistence.reconsolidation import PostgresReconsolidationStore
 from agent_core.adapters.persistence.records import InMemoryRecordStore, PostgresRecordStore
 from agent_core.adapters.persistence.reliability_monitor import check_reliability
@@ -394,6 +398,7 @@ from agent_core.application.public_services import (
     PublicRunService,
     PublicSessionService,
 )
+from agent_core.application.recall_questions import PublicRecallQuestionService
 from agent_core.application.reconsolidation import PublicReconsolidationService
 from agent_core.application.records import RecordsService
 from agent_core.application.run_service import RunService
@@ -436,6 +441,9 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     PersonaService as PublicPersonaServiceContract,
+)
+from agent_core.application.services import (
+    RecallQuestionService as PublicRecallQuestionServiceContract,
 )
 from agent_core.application.services import (
     ReconsolidationService,
@@ -532,6 +540,7 @@ from agent_core.domain.credentials import CredentialRef
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.email import EmailBudgetLimits, EmailRecord
+from agent_core.domain.email_memory import EmailMergeReport, EmailRerateReport
 from agent_core.domain.email_subscriptions import SUBSCRIPTIONS_TOOL_NAME, UNSUBSCRIBE_TOOL_NAME
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
@@ -937,6 +946,36 @@ def _correspondence_reprojector(
     return reproject
 
 
+def _email_memory_rerating(
+    uow_factory: UnitOfWorkFactory, clock: Clock, ids: IdFactory
+) -> Callable[[Principal, bool], Awaitable[EmailRerateReport]]:
+    """Re-rate every live email memory by its thread's importance (ADR-0340); no model."""
+
+    async def rerate(owner: Principal, confirm: bool) -> EmailRerateReport:
+        from agent_core.memory.email_people import EmailPeopleFormationService
+
+        return await EmailPeopleFormationService(
+            uow_factory, clock, ids, owner, provider="memory-rerate", model="none"
+        ).rerate_all(apply=confirm)
+
+    return rerate
+
+
+def _email_memory_merge(
+    uow_factory: UnitOfWorkFactory, clock: Clock, ids: IdFactory
+) -> Callable[[Principal, bool], Awaitable[EmailMergeReport]]:
+    """Keep one memory per fact in each email thread (ADR-0341); no model."""
+
+    async def merge(owner: Principal, confirm: bool) -> EmailMergeReport:
+        from agent_core.memory.email_people import EmailPeopleFormationService
+
+        return await EmailPeopleFormationService(
+            uow_factory, clock, ids, owner, provider="memory-merge", model="none"
+        ).merge_duplicates(apply=confirm)
+
+    return merge
+
+
 def _retained_email_reader(
     uow_factory: UnitOfWorkFactory, clock: Clock, ids: IdFactory
 ) -> Callable[[Principal], RetainedEmailReader]:
@@ -973,6 +1012,8 @@ class ApplicationServices:
     calls: CallService | None = None
     people: PublicPeopleServiceContract | None = None
     model_settings: PublicModelSettingsServiceContract | None = None
+    # ADR-0339: present only when AGENT_RECALL_QUESTIONS_ENABLED is set.
+    recall_questions: PublicRecallQuestionServiceContract | None = None
     # ADR-0129: present only when BROWSER_TASK_GRANTS_ENABLED is set.
     browser_task_grants: PublicBrowserTaskGrantServiceContract | None = None
     # ADR-0225 part B: absent when drafts are off or titles use no routed model.
@@ -1192,6 +1233,10 @@ class Composition:
     judgment_provider: JudgmentProvider | None = None
     attachment_resolver: AttachmentResolver | None = None
     people_repair: PeopleDirectoryRepair | None = None
+    # ADR-0340: the owner-run re-rating of live email memories; None without People.
+    email_memory_rerating: Callable[[Principal, bool], Awaitable[EmailRerateReport]] | None = None
+    # ADR-0341: the owner-run merge of repeated email facts; None without People.
+    email_memory_merge: Callable[[Principal, bool], Awaitable[EmailMergeReport]] | None = None
     call_plans: CallPlanSweep | None = None
     call_follow_ups: CallResultFollowUps | None = None
     # The Cockpit builder and its own sandbox manager, only behind the flag (M35).
@@ -1907,6 +1952,7 @@ def _memory_uow_repositories(
     artifacts = InMemoryArtifactRepository()
     browser_task_grants = InMemoryBrowserTaskGrantRepository()
     records = InMemoryRecordStore()
+    recall_questions = InMemoryRecallQuestionStore(memories._transaction)
     session_deletions = InMemorySessionDeletionRepository(
         sessions=sessions,
         runs=runs,
@@ -1969,6 +2015,7 @@ def _memory_uow_repositories(
         calls=InMemoryCallStore(),
         people=people,
         records=records,
+        recall_questions=recall_questions,
         integration_secrets=InMemoryIntegrationSecretStore(),
         jobs=InMemoryJobStore(),
         code_drafts=InMemoryCodeDraftRepository(),
@@ -2023,6 +2070,7 @@ def _postgres_repository_factory(
         episodes = PostgresIntegratedEpisodeStore(session)
         people = PostgresPeopleStore(session, clock)
         records = PostgresRecordStore(session, clock)
+        recall_questions = PostgresRecallQuestionStore(session)
         memories.bind_people(people)
         reconsolidation = PostgresReconsolidationStore(
             session,
@@ -2080,6 +2128,7 @@ def _postgres_repository_factory(
             calls=PostgresCallStore(session),
             people=people,
             records=records,
+            recall_questions=recall_questions,
             integration_secrets=PostgresIntegrationSecretStore(session),
             jobs=PostgresJobStore(session),
             code_drafts=PostgresCodeDraftRepository(session),
@@ -6120,6 +6169,24 @@ async def _compose(
             for message_id in message_ids:
                 await service.exclude_source(account_id, thread_id, message_id)
 
+        async def rerate_email_memories(owner: Principal, account_id: str, thread_id: str) -> None:
+            """Owner feedback reaches the thread's email memories at once (ADR-0340)."""
+            from agent_core.memory.email_people import EmailPeopleFormationService
+
+            await EmailPeopleFormationService(
+                uow_factory, clock, ids, owner, provider="memory-rerate", model="none"
+            ).rerate_thread(account_id, thread_id, cause="feedback")
+
+        async def lengthen_email_memories(
+            owner: Principal, threads: Sequence[tuple[str, str]]
+        ) -> None:
+            """Person or topic feedback lengthens memories in the other threads it rates."""
+            from agent_core.memory.email_people import EmailPeopleFormationService
+
+            await EmailPeopleFormationService(
+                uow_factory, clock, ids, owner, provider="memory-rerate", model="none"
+            ).lengthen_threads(threads, cause="feedback", elapsed=elapsed_time)
+
         async def cleanup_email_artifacts() -> None:
             await artifact_writers.sweep_expired()
             await trajectory_service.sweep_once()
@@ -6273,6 +6340,11 @@ async def _compose(
                 uow_factory=uow_factory, clock=clock, ids=ids, catalog=model_settings_catalog
             ),
             folders=PublicFolderService(uow_factory=uow_factory, clock=clock, ids=ids),
+            recall_questions=(
+                PublicRecallQuestionService(uow_factory=uow_factory, clock=clock, ids=ids)
+                if settings.recall_questions_enabled
+                else None
+            ),
             browser_task_grants=(
                 PublicBrowserTaskGrantService(uow_factory=uow_factory, clock=clock)
                 if task_grants_enabled
@@ -6299,6 +6371,8 @@ async def _compose(
                 close_session=close_session,
                 release_session_transports=mcp_runtime.release_session_transports,
                 forget_source=forget_email_source,
+                rerate_memories=rerate_email_memories if settings.people_enabled else None,
+                lengthen_memories=lengthen_email_memories if settings.people_enabled else None,
                 cleanup_artifacts=cleanup_email_artifacts,
                 cancel_parked_run=executor.cancel_parked_run,
                 resolve_archive_approval=resolve_email_archive_approval,
@@ -6543,6 +6617,12 @@ async def _compose(
                 local_import_tasks=local_import_tasks,
                 judgment_provider=judgment_provider,
                 people_repair=people_repair,
+                email_memory_rerating=_email_memory_rerating(uow_factory, clock, ids)
+                if settings.people_enabled
+                else None,
+                email_memory_merge=_email_memory_merge(uow_factory, clock, ids)
+                if settings.people_enabled
+                else None,
                 call_plans=call_plan_sweep,
                 call_follow_ups=call_follow_ups,
             ),

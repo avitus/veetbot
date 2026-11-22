@@ -323,12 +323,17 @@ def envelope_item(item: ConversationItem, index: int) -> ConversationItem:
         return item.model_copy(deep=True)
     canonical = canonical_json_bytes(item.model_dump(mode="json"))
     source = escape(_source(item), quote=True)
+    # An item read from the event log keeps one nonce wherever it is rendered, so
+    # a later request repeats its bytes when earlier items leave (ADR-0335). An
+    # item rendered for one request has no event and keeps its position.
+    sequence = item.source_event_sequence
+    identity = str(index) if sequence is None else f"event-{sequence}"
     rendered_content: list[ContentPart] = []
     for part_index, part in enumerate(item.content):
         if not isinstance(part, TextPart):
             rendered_content.append(part.model_copy(deep=True))
             continue
-        nonce = hashlib.sha256(f"{index}:{part_index}:".encode("ascii") + canonical).hexdigest()[
+        nonce = hashlib.sha256(f"{identity}:{part_index}:".encode("ascii") + canonical).hexdigest()[
             :12
         ]
         opening = f'<untrusted trust="{trust.value}" source="{source}" nonce="{nonce}">'

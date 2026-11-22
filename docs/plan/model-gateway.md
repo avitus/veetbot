@@ -664,7 +664,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:1283-1285`). The gateway translates those hints into
+(`context-engine.md:1298-1300`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -709,13 +709,24 @@ provider default. Parse `input_tokens_details.cache_write_tokens` into the
 normalized write class and charge it instead of ordinary input, never in
 addition. Missing write usage retains the legacy zero default.
 
+GPT-6.2 Astra shares that profile, at its own prices. From GPT-6.2 the
+Responses API also removes a replayed reasoning item from the input when
+content before it was inserted or edited since the request that produced it;
+deleting whole earlier items and appending after it are allowed. The adapter
+sends system text as input items, never top-level `instructions`, sends no
+`safety_identifier`, and replays the latest turn's reasoning items unchanged
+and in order. The context engine supplies the rest: an unchanged prefix before
+that reasoning ([context-engine.md](context-engine.md), ADR-0335). The API
+reports a removal in the response's `input_transformations`, whose shape
+OpenAI had not documented on 2026-11-20; the adapter does not read it yet.
+
 The breakpoint budget is where the two providers force a real decision. Four
 breakpoints, three natural boundaries (`after_system`, `after_tools`,
 `after_history_prefix`), and a fourth that goes to the history window's second
 marker: the context engine places `after_history_prefix` after the history a
 run carries in and again after its completed exchanges, stopping before fresh
 step context or the latest opaque reasoning that the next step replaces
-(`context-engine.md:273-281`). Each history hint names the conversation item it
+(`context-engine.md:282-291`). Each history hint names the conversation item it
 closes in `through_item`; the Anthropic adapter marks that item's last content
 block, or the nearest earlier one when the item renders no message block, and
 never a thinking block. A history hint without `through_item` marks the final
@@ -753,14 +764,14 @@ they move every step, and a shorter entry after a longer one is valid.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:1257-1259` and the
+The cached-prefix ratio is defined in `context-engine.md:1272-1274` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
 `model.response.completed` event. The context engine's metric reads those.
 Below roughly 90 per cent on a session that should be stable, the invariant is
 leaking, and the diagnosis is a prefix diff, which is why `prefix_sha256` is
-recorded on `model.request.started` (`context-engine.md:175-183`). Two
+recorded on `model.request.started` (`context-engine.md:184-192`). Two
 consecutive requests in one session with different prefix hashes and no
 intervening epoch bump is the signature of the bug.
 
@@ -772,7 +783,7 @@ the events section, because the gateway is what emits them.
 `ModelRequest.model_policy` is a bare string in the plan (Section 10.1) and
 several documents need things that a string cannot answer: whether the model
 supports images, what its context window is, what it costs, whether it does
-native tool calling, how much output to reserve. `context-engine.md:393`
+native tool calling, how much output to reserve. `context-engine.md:403`
 wants "8,192 or the model's default" and has no carrier for the second half.
 Section 10.5's YAML defines only a `balanced` policy. There is no port that
 turns a policy name into any of this.
@@ -831,7 +842,7 @@ what an implementer holding the plan open should read.
 class ModelLimits(BaseModel):
     context_window_tokens: int
     max_output_tokens: int       # the model's own cap
-    default_output_reserve: int  # context-engine.md:356's second half
+    default_output_reserve: int  # context-engine.md:366's second half
     max_cache_breakpoints: int   # 4 on Anthropic, 3 on shipped OpenAI profiles
     max_tool_count: int | None
 ```
@@ -1250,7 +1261,7 @@ model_calls                          -- one row per attempt
                                      -- because the stability gate asserts
                                      -- exactly one distinct value per session
                                      -- and a NULL cannot participate
-                                     -- (`context-engine.md:175-183`)
+                                     -- (`context-engine.md:184-192`)
   input_tokens          INTEGER NOT NULL
   cached_input_tokens   INTEGER NOT NULL
   cache_write_tokens    INTEGER NOT NULL
@@ -1693,7 +1704,7 @@ one, still gets the request without a summary.
 Section 10.4 specifies the turn shape and does not say what the gateway
 rejects. Several other documents depend on it rejecting things.
 `policy-and-approvals.md`'s denial-as-tool-result requires that every tool call
-be answerable by a tool result; `context-engine.md:758-762` requires that a
+be answerable by a tool result; `context-engine.md:768-772` requires that a
 call and its result never be separated by compaction. Both assume a pairing
 invariant that no document states. The gateway states and enforces it, because
 it is the last thing to touch the message list before it becomes a provider
@@ -1735,8 +1746,8 @@ class ModelRequestStarted(BaseModel):
     model: str
     model_policy: str
     registry_version: str
-    prefix_sha256: str | None    # context-engine.md:175-183
-    prefix_epoch: int            # context-engine.md:251-256
+    prefix_sha256: str | None    # context-engine.md:184-192
+    prefix_epoch: int            # context-engine.md:260-265
     input_token_estimate: int    # the plan's estimate, pre-call
     cache_breakpoints_sent: int
     cache_breakpoints_dropped: int
