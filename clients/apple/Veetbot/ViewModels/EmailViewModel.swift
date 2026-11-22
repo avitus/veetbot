@@ -375,7 +375,8 @@ public final class EmailViewModel: ObservableObject {
     ///    nothing, and the read that is out still decides. A refusal is never left waiting on
     ///    such a caller: ending the visit or the connection clears it at once, and while Email
     ///    stays on screen each regular refresh asks the list first for as long as it waits.
-    private var refusalAwaitingList: String?
+    /// It is published because `canLoadMore` depends on it.
+    @Published private var refusalAwaitingList: String?
 
     /// The account of a conversation, from every place the model can know it: the note made
     /// when it was hidden, its row, the reader, the numbers, its archive request, and the
@@ -1117,15 +1118,25 @@ public final class EmailViewModel: ObservableObject {
             totalCount: total, snapshotVersion: version), counted: counted)
     }
 
+    /// Whether More mail would ask for a page now: the list has more, no list read or page is
+    /// out, and no refusal waits for the list (rule 3 beside `listRequest`). `loadMore` checks
+    /// this same value before it asks, so a control that offers a page and the model that
+    /// fetches it cannot disagree. Every part of it is published, so a view that reads it is
+    /// told when it changes. Two things it cannot say are left to `loadMore`: that the caller's
+    /// own task was cancelled, and that there is no connection to ask through.
+    public var canLoadMore: Bool {
+        hasMore && !isLoading && !isReadingList && refusalAwaitingList == nil
+    }
+
     /// Applies a page only while the requesting connection, list and foreground visit remain current.
-    /// More mail takes no request of its own (see `listRequest`): it does nothing while a list
-    /// read is out or a refusal waits for the list.
+    /// More mail takes no request of its own (see `listRequest`): it does nothing unless
+    /// `canLoadMore` says it would ask.
     public func loadMore() async {
         let connection = generation
         let mailboxVersions = archiveVersions
         let foreground = active ? activation : nil
-        guard acceptsRead(connection: connection, activation: foreground), !isLoading, !isReadingList,
-              refusalAwaitingList == nil, let cursor = nextCursor, let api = makeAPIClient() else { return }
+        guard acceptsRead(connection: connection, activation: foreground), canLoadMore,
+              let cursor = nextCursor, let api = makeAPIClient() else { return }
         isLoading = true
         let requestID = listRequest
         defer { if listRequest == requestID { isLoading = false } }

@@ -237,8 +237,34 @@ import Testing
         let end = try #require(email.range(of: "private var scrollingList:")).lowerBound
         let touch = String(email[start..<end])
         // The fetch flips the task's identity; owned by the view task it would cancel itself.
-        #expect(touch.contains(".task(id: model.isLoading || model.isReadingList) { Task { await model.loadMore() } }"))
+        #expect(touch.contains(".task(id: model.canLoadMore) { if model.canLoadMore { Task { await model.loadMore() } } }"))
         #expect(touch.contains("email.list.loading-more"))
+    }
+
+    /// Every place the Email view offers or attempts a page asks the model whether it would
+    /// fetch one (`canLoadMore`, the condition More mail itself checks), so none offers a page
+    /// More mail would refuse: the touch button that retries a failed page, the touch list's
+    /// automatic fetch, and the Mac's. The labels and the identifier are as they were.
+    @Test
+    func testEveryPlaceThatOffersAPageAsksTheModelWhetherItWouldFetchOne() throws {
+        let model = try source(at: "Veetbot/ViewModels/EmailViewModel.swift")
+        #expect(model.contains("public var canLoadMore: Bool {"))
+        #expect(model.contains("guard acceptsRead(connection: connection, activation: foreground), canLoadMore,"),
+                "More mail checks the same value it publishes")
+        let email = try source(at: "Veetbot/Views/EmailModeView.swift")
+        #expect(email.components(separatedBy: "model.loadMore()").count - 1 == 3, "Three places ask for a page")
+        let touchStart = try #require(email.range(of: "private var pagedList:")).upperBound
+        let macStart = try #require(email.range(of: "private var scrollingList:"))
+        let macEnd = try #require(email.range(of: "#endif", range: macStart.upperBound..<email.endIndex)).lowerBound
+        let touch = String(email[touchStart..<macStart.lowerBound])
+        let mac = String(email[macStart.upperBound..<macEnd])
+        #expect(touch.contains("Button(model.listView == \"priority\" ? \"More important\" : \"More mail\") {"))
+        #expect(touch.contains(".disabled(!model.canLoadMore)"), "The retry button is disabled when More mail would do nothing")
+        #expect(!touch.contains(".disabled(model.isLoading)"))
+        #expect(touch.contains(".task(id: model.canLoadMore) { if model.canLoadMore { Task { await model.loadMore() } } }"))
+        #expect(mac.contains(".onChange(of: nearListEnd && model.canLoadMore && !model.pagingFailed,"))
+        #expect(mac.contains("if shouldLoad { Task { await model.loadMore() } }"))
+        #expect(!email.contains("!model.isLoading && !model.isReadingList"), "No place works the condition out for itself")
     }
 
     private func source(at relativePath: String) throws -> String {

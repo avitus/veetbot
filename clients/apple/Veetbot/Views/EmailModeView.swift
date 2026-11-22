@@ -560,15 +560,17 @@ public struct EmailModeView: View {
                     Task { await model.loadMore() }
                 }
                 .buttonStyle(QuietCapsuleButtonStyle())
-                .disabled(model.isLoading).padding(.vertical, 8)
+                // Disabled whenever More mail would do nothing: a read is out, or a refusal waits.
+                .disabled(!model.canLoadMore).padding(.vertical, 8)
                 .emailHideSeparator()
             } else if model.hasMore {
                 ProgressView()
                     .frame(maxWidth: .infinity).padding(.vertical, 8)
-                    // Re-runs once a read in flight ends, so a skipped fetch is not lost. The fetch
-                    // runs in its own task: it flips this identity itself, and a fetch owned by the
-                    // view task would be cancelled by its own start and never apply its page.
-                    .task(id: model.isLoading || model.isReadingList) { Task { await model.loadMore() } }
+                    // Re-runs whenever More mail becomes able to ask, so a skipped fetch is not
+                    // lost. The fetch runs in its own task: it flips this identity itself, and a
+                    // fetch owned by the view task would be cancelled by its own start and never
+                    // apply its page.
+                    .task(id: model.canLoadMore) { if model.canLoadMore { Task { await model.loadMore() } } }
                     .accessibilityIdentifier("email.list.loading-more")
                     .emailHideSeparator()
             }
@@ -601,7 +603,7 @@ public struct EmailModeView: View {
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.visibleRect.maxY + 180 >= geometry.contentSize.height
             } action: { _, nearEnd in nearListEnd = nearEnd }
-            .onChange(of: nearListEnd && model.hasMore && !model.isLoading && !model.isReadingList && !model.pagingFailed,
+            .onChange(of: nearListEnd && model.canLoadMore && !model.pagingFailed,
                       initial: true) { _, shouldLoad in
                 if shouldLoad { Task { await model.loadMore() } }
             }
