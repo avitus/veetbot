@@ -4,6 +4,13 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-21 — Refine draft shows that Veetbot is working
+
+- Pressing Refine draft in the Email reply now shows a spinner and
+  "Refining…" on the button, with the current preparation step beneath it,
+  until the rewritten draft arrives. The press used to look as if nothing
+  had happened, although the refinement ran.
+
 ## 2026-11-21 — A recall question may name only what must stay out (ADR-0339)
 
 - A recall question that names only memory text that must not be recalled, or
