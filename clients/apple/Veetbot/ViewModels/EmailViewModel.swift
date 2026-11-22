@@ -2325,6 +2325,10 @@ public final class EmailViewModel: ObservableObject {
                 // The refused conversation's poll was retired with it, and may be the task
                 // running this. The list is read in a task of its own, so that it still runs,
                 // and whatever poll that read starts is left alone afterwards.
+                // The caller waits for that read, as a visit waits for every read it asks: its
+                // regular refreshes run one after another. A read the server leaves unanswered
+                // ends by the transport's request limit (60 seconds) and is then a failed read.
+                // With no network a read waits for it, and a newer read would wait just the same.
                 await Task { [weak self] in
                     await self?.reload(preserveOrder: true, activation: foreground, as: request)
                 }.value

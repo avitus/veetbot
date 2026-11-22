@@ -415,7 +415,12 @@ list read asked after the refusal decides, by the way it ends:
 A visit that goes on after a clear keeps Refresh and the regular refreshes
 working; nothing is read at once, and the refusal's message stays until the
 next read. A refused read of the conversation open in the reader, or of the
-list itself with no refusal waiting, clears everything as before.
+list itself with no refusal waiting, clears everything as before. A visit's
+regular refreshes run one after another, each waiting for the reads it asked,
+the list read after a refusal among them. A read the server leaves unanswered
+ends by the connection's 60-second request limit and then counts as failed, so
+a stalled read delays the next regular refresh by at most that long. With no
+network a read waits for it to return, as a newer read would.
 
 An empty inbox does not restart its initial loading indicator on each projection
 poll. A failed refresh remains visible across successful reads of cached
