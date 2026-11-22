@@ -258,9 +258,16 @@ import Testing
         let macEnd = try #require(email.range(of: "#endif", range: macStart.upperBound..<email.endIndex)).lowerBound
         let touch = String(email[touchStart..<macStart.lowerBound])
         let mac = String(email[macStart.upperBound..<macEnd])
-        #expect(touch.contains("Button(model.listView == \"priority\" ? \"More important\" : \"More mail\") {"))
-        #expect(touch.contains(".disabled(!model.canLoadMore)"), "The retry button is disabled when More mail would do nothing")
-        #expect(!touch.contains(".disabled(model.isLoading)"))
+        // The retry button's own branch, from its condition to the branch that shows progress,
+        // so the modifier is found on the button and not on the row beside it.
+        let retryStart = try #require(touch.range(of: "if model.hasMore && model.pagingFailed {")).upperBound
+        let retryEnd = try #require(touch.range(of: "} else if model.hasMore {", range: retryStart..<touch.endIndex))
+        let retry = String(touch[retryStart..<retryEnd.lowerBound])
+        let progress = String(touch[retryEnd.upperBound...])
+        #expect(retry.contains("Button(model.listView == \"priority\" ? \"More important\" : \"More mail\") {"))
+        #expect(retry.contains(".disabled(!model.canLoadMore)"), "The retry button is disabled when More mail would do nothing")
+        #expect(touch.components(separatedBy: ".disabled(").count - 1 == 1, "The retry button holds the list's only disabled state")
+        #expect(!progress.contains(".disabled("))
         #expect(touch.contains(".task(id: model.canLoadMore) { if model.canLoadMore { Task { await model.loadMore() } } }"))
         #expect(mac.contains(".onChange(of: nearListEnd && model.canLoadMore && !model.pagingFailed,"))
         #expect(mac.contains("if shouldLoad { Task { await model.loadMore() } }"))
