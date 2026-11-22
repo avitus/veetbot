@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-21 — Erasing a message takes back what its signature ended (ADR-0336)
+
+- When the message that carried someone's newest signature is erased, the
+  earlier title or number it had ended is current again in People, or ends at
+  the next remaining signature that leaves it out. Before, the earlier detail
+  stayed ended with no current one until that person's next signed mail.
+- This holds for every way a message is erased: excluding it, erasing its
+  mailbox data or its session, and People forget. A detail the owner ended
+  stays ended.
+
 ## 2026-11-20 — Email memory, signature and Email screen repairs from review (ADR-0336, ADR-0340, ADR-0341)
 
 - An email memory is now shortened or returned to a guess only on a known
