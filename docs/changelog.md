@@ -126,7 +126,8 @@ title: Changelog
 - Email on Mac, iPad and iPhone: the mail list stays as deep as you had loaded
   it when a row leaves it, so a conversation further down does not drop out
   when new mail arrives after an archive is confirmed, whichever refresh
-  reads the list next. A second archive of the
+  reads the list next, and a list you come back to is read again as deep as
+  it was loaded. A second archive of the
   same conversation keeps being followed when the first one's check ends.
   While Email is checking which accounts can still be read, a request you
   have already left behind no longer clears your other accounts' mail, mail
