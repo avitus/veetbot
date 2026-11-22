@@ -137,6 +137,22 @@ import Testing
         #expect(source.contains(".accessibilityIdentifier(\"email.draft-\\(title.lowercased())\")"))
     }
 
+    /// A refinement runs for many seconds; the button that asked for it must say so until the
+    /// new revision lands, or the press reads as having done nothing.
+    @Test
+    func testRefineDraftShowsProgressWhileVeetbotRewrites() throws {
+        let source = try source(at: "Veetbot/Views/EmailModeView.swift")
+        let start = try #require(source.range(of: "TextField(\"How should the reply change?\"")).lowerBound
+        let end = try #require(source.range(of: "Label(\"Refine with Veetbot\"", range: start..<source.endIndex)).lowerBound
+        let refine = String(source[start..<end])
+        #expect(refine.contains("if model.isGeneratingDraft {"))
+        #expect(refine.contains("Text(\"Refining…\")"))
+        #expect(refine.contains("Text(model.draftPreparationMessage)"))
+        #expect(refine.contains(".accessibilityIdentifier(\"email.refine-progress\")"))
+        #expect(refine.contains(".accessibilityIdentifier(\"email.refine-draft\")"))
+        #expect(refine.contains(".disabled(model.isGeneratingDraft)"))
+    }
+
     /// Teach Veetbot comes and goes with the reply composer and the Mac panel's tabs, so what
     /// the owner has entered there is the thread's, kept by the model, never the card's state.
     @Test
