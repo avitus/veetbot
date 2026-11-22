@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-22 — A model change no longer turns semantic recall off (ADR-0343)
+
+- Semantic recall stays on when a model is added to the model list, when you
+  choose another chat model, and when you change its reasoning effort. The
+  release of 2026-11-21 added a model, and every chat since had answered from
+  word-match recall alone, with no error and nothing in the logs. On the
+  stored question set that was 72 of 114 questions passed against 81.
+- The standing decision to keep semantic recall on now binds no chat model.
+  A trial still binds the one model its evidence was measured with, and the
+  run workers' journal now says when a changed model withholds recall.
+- `agent memory probe` labels its scripted runs as the chat model
+  (`--model-policy`, the default chat model if omitted), so a question run
+  measures the recall a chat gets. No model is called.
+
 ## 2026-11-21 — Refine draft shows that Veetbot is working
 
 - Pressing Refine draft in the Email reply now shows a spinner and
