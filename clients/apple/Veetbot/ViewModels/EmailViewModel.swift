@@ -134,6 +134,8 @@ public final class EmailViewModel: ObservableObject {
         let cursor: String?
         let seenCursors: Set<String>
         let version: String?
+        /// How deep the list was loaded (`loadedDepth`), which can be deeper than `rows` go.
+        let depth: Int
     }
     // Only the two unsearched collections, for this connection and account filter.
     private var cachedMailLists: [String: CachedMailList] = [:]
@@ -469,7 +471,8 @@ public final class EmailViewModel: ObservableObject {
     /// this deep, and at least as deep as those rows go, whichever caller asks: the read asked
     /// for the row that left, a regular refresh that replaces it, Try again. Nothing else
     /// holds a depth, and no caller passes one. It belongs to the list on screen: with another
-    /// account, collection or search it starts again from nothing.
+    /// account, collection or search it starts again from nothing, and a list kept for coming
+    /// back to keeps its depth with its rows and cursor.
     private var loadedDepth = 0
 
     /// Do not search later pages for a row already confirmed absent from the current list.
@@ -535,6 +538,22 @@ public final class EmailViewModel: ObservableObject {
     private var active = false
     private var activation = UUID()
     private var generation = UUID()
+    /// The list's request names the one list read whose answer may be shown. What a list
+    /// answer brings is published together and only under it: the rows, the numbers
+    /// (`loadedCounts`), the cursor (`nextCursor`, `seenCursors`, `hasMore`), the depth
+    /// (`loadedDepth`), the version, the kept copy of the list, and the answer to a refusal
+    /// that waits for the list (`refusalAwaitingList`).
+    /// 1. A list read takes the request as it starts. A refusal takes it for the read it asks
+    ///    for, in the same step as the refusal. Taking it retires every list read and every
+    ///    page still out: whatever they answer is dropped.
+    /// 2. Only the read the request was taken for publishes under it, and only while it is
+    ///    still the list's request. A change of account, collection or search, and an opened
+    ///    conversation that changed the list, put a request that no read holds in its place.
+    /// 3. More mail takes no request. It adds a page to the list the last finished read has
+    ///    shown, under that read's request. It starts only when no list read is out and no
+    ///    refusal waits for the list: a waiting refusal has taken the request for a read that
+    ///    may not have started yet, and nothing else may publish under that. A page is shown
+    ///    only if the request has not changed since the page was asked for.
     private var listRequest = UUID()
     private var selectionRequest = UUID()
     /// The conversation being read for the reader, with its account when a row or the reader
@@ -880,6 +899,7 @@ public final class EmailViewModel: ObservableObject {
         loadedListVersion = cached?.version
         nextCursor = cached?.cursor
         seenCursors = cached?.seenCursors ?? []
+        loadedDepth = cached?.depth ?? 0
         hasMore = nextCursor != nil
         arrivedThreadIDs = []
         isLoading = false
@@ -928,7 +948,7 @@ public final class EmailViewModel: ObservableObject {
             return
         }
         cachedMailLists[listView] = CachedMailList(rows: inboxItems, numbers: loadedCounts,
-            cursor: nextCursor, seenCursors: seenCursors, version: loadedListVersion)
+            cursor: nextCursor, seenCursors: seenCursors, version: loadedListVersion, depth: loadedDepth)
     }
 
     /// Allows explicit inactive reads while binding visible inbox work to its current foreground visit.
@@ -1098,12 +1118,14 @@ public final class EmailViewModel: ObservableObject {
     }
 
     /// Applies a page only while the requesting connection, list and foreground visit remain current.
+    /// More mail takes no request of its own (see `listRequest`): it does nothing while a list
+    /// read is out or a refusal waits for the list.
     public func loadMore() async {
         let connection = generation
         let mailboxVersions = archiveVersions
         let foreground = active ? activation : nil
         guard acceptsRead(connection: connection, activation: foreground), !isLoading, !isReadingList,
-              let cursor = nextCursor, let api = makeAPIClient() else { return }
+              refusalAwaitingList == nil, let cursor = nextCursor, let api = makeAPIClient() else { return }
         isLoading = true
         let requestID = listRequest
         defer { if listRequest == requestID { isLoading = false } }

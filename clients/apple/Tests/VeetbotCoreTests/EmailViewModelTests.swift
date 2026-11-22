@@ -2785,6 +2785,176 @@ import SwiftUI
         await refusal.value
     }
 
+    /// A kept list keeps its depth. A list read can return a hundred and one rows and show a
+    /// hundred, because Gmail confirmed an archive while it was out: the list is then loaded
+    /// one row deeper than the rows on screen go. The owner turns to another collection and
+    /// comes back to the kept list. The read that follows goes as deep as the list was
+    /// loaded, so once new mail has arrived, the row loaded from the second page is still listed.
+    @Test func testKeptListComesBackAsDeepAsItWasLoaded() async throws {
+        let confirmed = EmailTestFlag()
+        let arrived = EmailTestFlag()
+        let arrivalID = UUID(uuidString: "00000000-0000-0000-0000-000000000898")!
+        let tailID = UUID(uuidString: "00000000-0000-0000-0000-000000002099")!
+        let row = { (id: String) in
+            self.archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(self.threadID)", with: id)
+        }
+        let fillers = (0..<100).map { row(String(format: "00000000-0000-0000-0000-%012d", 2000 + $0)) }
+        let model = try makeModel { request in
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON) }
+            guard path.hasSuffix("threads") else {
+                return (200, self.archiveThreadJSON(
+                    inInbox: !confirmed.isSet, status: confirmed.isSet ? "completed" : "pending"))
+            }
+            // Page one holds a hundred rows, led by the conversation being archived. The list
+            // still returns it for a while after Gmail has confirmed; then new mail leads.
+            // Page two holds the last row.
+            let second = request.url?.query?.contains("cursor=100") == true
+            let lead = arrived.isSet ? row("\(arrivalID)") : self.archiveThreadJSON(inInbox: true, status: "pending")
+            let first = ([lead] + fillers.prefix(99)).joined(separator: ",")
+            return (200, "{\"items\":[\(second ? fillers[99] : first)],\"next_cursor\":\(second ? "null" : "\"100\"")}")
+        }
+        defer { model.resetConnection() }
+        await model.reload()
+        await model.loadMore()
+        #expect(model.items.count == 100, "A hundred and one rows are loaded, one of them hidden by its pending archive")
+        // Gmail confirms while the list is read again: the read returns the conversation on page
+        // one, learns of the confirmation from its status, and leaves it out.
+        confirmed.set()
+        await model.reload(preserveOrder: true)
+        #expect(model.items.count == 100, "A hundred and one rows came back, and a hundred are shown")
+        #expect(!model.items.contains { $0.id == self.threadID })
+        #expect(model.items.contains { $0.id == tailID })
+        arrived.set()
+        model.setCollection(.inbox)
+        try await waitForEmailTestCondition { model.items.contains { $0.id == arrivalID } && !model.isReadingList }
+        // Important was kept. It comes back with its rows and is read again in place.
+        model.setListView("priority")
+        #expect(model.items.count == 100, "The kept list is shown at once")
+        try await waitForEmailTestCondition { model.items.contains { $0.id == arrivalID } && !model.isReadingList }
+        #expect(model.items.contains { $0.id == tailID }, "The row loaded from the second page is still listed")
+    }
+
+    /// More mail does nothing while a refusal waits for the list. The refusal has taken the
+    /// list for the read it asks for, and until a list read asked after the refusal has
+    /// answered, the cursor on screen belongs to a list that is still being decided. Here the
+    /// read asked for the refusal is replaced by one whose caller is then cancelled, so no list
+    /// read is out, and More mail still asks nothing. Once a list read has answered, it works.
+    @Test func testMoreMailDoesNothingWhileARefusalWaitsForTheList() async throws {
+        let requests = EmailRequestRecorder()
+        let afterRefusal = EmailRequestRecorder()
+        let recovery = EmailArchiveResponseGate()
+        let replacement = EmailArchiveResponseGate()
+        let revoked = EmailTestFlag()
+        let arrivalID = UUID(uuidString: "00000000-0000-0000-0000-000000000898")!
+        let tailID = UUID(uuidString: "00000000-0000-0000-0000-000000002099")!
+        let row = { (id: String) in
+            self.archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(self.threadID)", with: id)
+        }
+        let fillers = (0..<100).map { row(String(format: "00000000-0000-0000-0000-%012d", 2000 + $0)) }
+        let work = archiveThreadJSON(account: "work", inInbox: true, status: "pending")
+        let pages = { requests.snapshot.filter { $0.url?.query?.contains("cursor=") == true }.count }
+        let model = try makeArchiveRaceModel { request in
+            requests.append(request)
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            guard path.hasSuffix("threads") else {
+                return revoked.isSet
+                    ? (403, Self.error("permission_denied", "Work mail can no longer be read."), nil)
+                    : (200, work, nil)
+            }
+            // The list has more: a hundred rows, then one more.
+            let second = request.url?.query?.contains("cursor=100") == true
+            let first = ([revoked.isSet ? row("\(arrivalID)") : work] + fillers.prefix(99)).joined(separator: ",")
+            let body = "{\"items\":[\(second ? fillers[99] : first)],\"next_cursor\":\(second ? "null" : "\"100\"")}"
+            guard revoked.isSet, !second else { return (200, body, nil) }
+            afterRefusal.append(request)
+            // The list read the refusal asks for is held, and so is the one that replaces it.
+            switch afterRefusal.snapshot.count {
+            case 1: return (200, body, recovery)
+            case 2: return (200, body, replacement)
+            default: return (200, body, nil)
+            }
+        }
+        defer { recovery.release(); replacement.release(); model.resetConnection() }
+        await model.reload()
+        #expect(model.items.count == 99, "A hundred rows are loaded, one of them hidden by its pending archive")
+        #expect(model.hasMore)
+        revoked.set()
+        let refusal = Task { await model.checkArchiveStatus(threadID) }
+        try await waitForEmailTestCondition { recovery.isWaiting }
+        let replacing = Task { await model.reload(preserveOrder: true) }
+        try await waitForEmailTestCondition { replacement.isWaiting }
+        // Its caller no longer counts, so it changes nothing: the refusal still waits, and no list read is out.
+        replacing.cancel()
+        await replacing.value
+        #expect(!model.isReadingList)
+        #expect(model.hasMore)
+        let before = pages()
+        await model.loadMore()
+        #expect(pages() == before, "More mail asks nothing while the refusal waits")
+        #expect(!model.items.contains { $0.id == tailID })
+        // A list read asked after the refusal answers, and More mail works again.
+        await model.reload(preserveOrder: true)
+        #expect(model.items.contains { $0.id == arrivalID })
+        await model.loadMore()
+        #expect(pages() == before + 1)
+        #expect(model.items.contains { $0.id == tailID })
+        recovery.release()
+        replacement.release()
+        await refusal.value
+    }
+
+    /// A page asked for before a refusal can answer after it, as a list read can. The refusal
+    /// took the list's request, which retires the page: its row is not added, and its cursor
+    /// does not replace the one the list read after the refusal brings.
+    @Test func testPageAskedBeforeARefusalIsNotShownAfterIt() async throws {
+        let afterRefusal = EmailRequestRecorder()
+        let page = EmailArchiveResponseGate()
+        let recovery = EmailArchiveResponseGate()
+        let revoked = EmailTestFlag()
+        let tailID = UUID(uuidString: "00000000-0000-0000-0000-000000002099")!
+        let row = { (id: String) in
+            self.archiveThreadJSON(inInbox: true).replacingOccurrences(of: "\(self.threadID)", with: id)
+        }
+        let fillers = (0..<100).map { row(String(format: "00000000-0000-0000-0000-%012d", 2000 + $0)) }
+        let work = archiveThreadJSON(account: "work", inInbox: true, status: "pending")
+        let model = try makeArchiveRaceModel { request in
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.archiveAccountsJSON, nil) }
+            guard path.hasSuffix("threads") else {
+                return (403, Self.error("permission_denied", "Work mail can no longer be read."), nil)
+            }
+            // The second page, asked for before the refusal, is held: one last row, and no more.
+            if request.url?.query?.contains("cursor=100") == true {
+                return (200, "{\"items\":[\(fillers[99])],\"next_cursor\":null}", page)
+            }
+            let first = ([work] + fillers.prefix(99)).joined(separator: ",")
+            guard revoked.isSet else { return (200, "{\"items\":[\(first)],\"next_cursor\":\"100\"}", nil) }
+            afterRefusal.append(request)
+            // The list read the refusal asks for is held too. Work is gone from it, and it has more.
+            return (200, "{\"items\":[\(fillers.prefix(99).joined(separator: ","))],\"next_cursor\":\"99\"}",
+                    afterRefusal.snapshot.count == 1 ? recovery : nil)
+        }
+        defer { page.release(); recovery.release(); model.resetConnection() }
+        await model.reload()
+        #expect(model.items.count == 99, "A hundred rows are loaded, one of them hidden by its pending archive")
+        let paging = Task { await model.loadMore() }
+        try await waitForEmailTestCondition { page.isWaiting }
+        revoked.set()
+        let refusal = Task { await model.checkArchiveStatus(threadID) }
+        try await waitForEmailTestCondition { recovery.isWaiting }
+        // The page answers now, and ends, while the list read asked after the refusal is still out.
+        page.release()
+        await paging.value
+        #expect(!model.items.contains { $0.id == tailID }, "The page asked before the refusal is not added")
+        recovery.release()
+        await refusal.value
+        #expect(model.items.count == 99)
+        #expect(!model.items.contains { $0.id == tailID })
+        #expect(model.hasMore, "The cursor is the one the list read after the refusal brought")
+    }
+
     /// The one-second poll is usually the first to learn that Gmail confirmed an archive.
     /// Applying that outcome ends the poll, and the list is still read afterwards, so the mail
     /// that has arrived meanwhile is shown.
