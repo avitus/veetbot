@@ -1,5 +1,5 @@
 {
-  "title": "Daily funding signal collector",
+  "title": "Time-budgeted funding signal collector",
   "input_schema": {
     "type": "object",
     "required": [
@@ -7,6 +7,9 @@
     ],
     "properties": {
       "config": {
+        "type": "object"
+      },
+      "fixture": {
         "type": "object"
       }
     },
