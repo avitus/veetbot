@@ -10,9 +10,11 @@ from uuid import UUID
 
 from agent_core.bootstrap import build
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+from agent_core.evals.owner_recall_probe_driver import scripted_chat
 from agent_core.runtime.worker import DurableWorker
 from tests.contract.owner_recall_probe_cases import (
     FakeWebProvider,
+    chat_model_case,
     delivery_case,
     family_names_case,
     post_snapshot_home_case,
@@ -62,3 +64,11 @@ async def test_a_residence_stated_after_the_snapshot_reaches_a_garden_task_postg
     script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
     async with build(settings=_settings(tmp_path), storage="postgres", script=script) as app:
         await post_snapshot_home_case(app, finish=_finish)
+
+
+async def test_a_scripted_probe_runs_as_the_chat_model_postgres(tmp_path: Path) -> None:
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with scripted_chat(
+        script, model_policy="astra", settings=_settings(tmp_path), storage="postgres"
+    ) as (app, stand_in):
+        await chat_model_case(app, script, stand_in, model_policy="astra", finish=_finish)

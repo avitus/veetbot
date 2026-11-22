@@ -37,7 +37,12 @@ from agent_core.domain.recall_questions import (
     RecallQuestionContent,
 )
 from agent_core.evals import owner_recall_probe_driver as driver
-from agent_core.evals.owner_recall_probe_driver import _resolve, _StoreSnapshot, observe_probes
+from agent_core.evals.owner_recall_probe_driver import (
+    _resolve,
+    _StoreSnapshot,
+    observe_probes,
+    scripted_chat,
+)
 from agent_core.evals.owner_recall_probes import (
     ExpectedEvidence,
     Probe,
@@ -47,6 +52,7 @@ from agent_core.evals.owner_recall_probes import (
 from agent_core.evals.owner_recall_questions import loaded_from_questions
 from tests.contract.owner_recall_probe_cases import (
     FakeWebProvider,
+    chat_model_case,
     delivery_case,
     home_city_case,
     post_snapshot_home_case,
@@ -134,6 +140,20 @@ async def test_probes_report_delivery_retirement_and_latency_through_the_run_loo
         clock=clock,
     ) as app:
         await delivery_case(app, script)
+
+
+async def test_a_scripted_probe_runs_as_the_chat_model_a_real_chat_uses(tmp_path: Path) -> None:
+    """A scripted run labelled as a fake model measures recall no real chat gets (ADR-0343)."""
+
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with scripted_chat(
+        script,
+        model_policy="astra",
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        clock=FixedClock(_START),
+    ) as (app, stand_in):
+        await chat_model_case(app, script, stand_in, model_policy="astra")
 
 
 async def test_home_city_probe_delivers_the_address_beside_same_subject_noise(

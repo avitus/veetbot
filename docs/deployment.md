@@ -2039,6 +2039,12 @@ remote profile or a profile without query preparation, writes
 `standing-evidence.json` and `standing-admission.json`, and prints their
 digests and the embedding space key. It never prints the instruction back.
 
+The standing admission binds no reader (ADR-0343). `reader_sha256` in the
+operator's `memory/semantic-index.yaml` is not read under it and none is
+required; the line may stay or be removed. Adding a model to the model list,
+choosing another chat model or changing the reasoning effort needs no action on
+the server. A bounded trial still binds the one reviewed reader named there.
+
 **Install as root.** Move both files to `/etc/veetbot/recall/standing/`
 (directory `root:veetbot 0750`, files `0640`), then in `/etc/veetbot/veetbot.env`
 set:
@@ -2066,6 +2072,16 @@ takes seven rounds, about 2,300 windows) and, after the last round,
 `knowledge_vectors_pruned` for a previous space; and `knowledge.search` in a fresh chat
 returns a passage that paraphrases the question. Readiness alone still proves
 nothing about semantic activation.
+
+**When recall quality drops after a release or a model change,** check that
+semantic recall is still running before anything else. A private owner chat's
+`memory.recalled` event that carries no binding digest, and a recall trace whose
+retrieval policy version has no `+semantic@` part, mean the run answered from
+sparse recall. Under a bounded trial the run workers' journal then shows
+`semantic_recall_withheld_reader_changed`, with the reviewed reader and the
+reader the run selected: the chat model, its effort or the model list is no
+longer the one the trial's evidence was measured with. Under the standing
+admission no reader is bound, so look at the flag and the two installed files.
 
 **Withdraw.** Set `AGENT_MEMORY_SEMANTIC_INDEX_ENABLED=0` and
 `AGENT_KNOWLEDGE_SEMANTIC_ENABLED=0` and restart, or change or remove the
@@ -2144,7 +2160,7 @@ form, and a dropped-for-budget share dominated by one class names the ranking
 lever to look at.
 
 `agent memory probe --probes PATH --output PATH [--paths automatic,deliberate]
-[--live-model]` replays incident probes through the run loop. It refuses
+[--model-policy NAME] [--live-model]` replays incident probes through the run loop. It refuses
 production and any database not named `veetbot_recall_probe_<name>`: restore an
 owner-authorized `pg_dump --no-owner` of production into such a clone first.
 The owner-private probe file lives at
@@ -2153,6 +2169,18 @@ never in Git; the report it writes holds identifiers, stages, ranks and
 latencies only. Without `--live-model` the answer is scripted, so the Used stage
 and answer correctness are not judged; with it the configured model answers and
 costs apply.
+
+A scripted run is still on a chat model (ADR-0343). It is routed to the policy
+`--model-policy` names, or to the default chat model, and takes that model's
+limits, provider pin and reader, while the scripted provider answers in its
+place. No model is called and no provider key is needed. Name the policy the
+owner's chats use, as Settings shows it, when a measurement depends on the
+model. For the run to measure semantic recall the clone's environment must also
+carry what production's does: the three `AGENT_MEMORY_SEMANTIC_INDEX_*`
+settings, `AGENT_CONFIG_DIR`, the operator's configuration directory, the two
+admission files and the local encoder's model directory, copied from the host
+with the owner's approval and deleted with the clone. Every path of the report
+lists the arms that ran; a run that measured semantic recall lists `semantic`.
 
 The owner question set (ADR-0338, ADR-0339) is the standing measure for a recall
 change: questions the owner asked, each with the stored facts it should reach,
@@ -2183,7 +2211,7 @@ set on a clone and record the outcome on production, where the page then shows
 each question as passed or missed:
 
 ```sh
-agent memory probe --questions all --output /var/tmp/question-run.json   # on the clone
+agent memory probe --questions all --model-policy <chat model policy> --output /var/tmp/question-run.json   # on the clone
 agent memory questions record --report /var/tmp/question-run.json         # on production
 ```
 

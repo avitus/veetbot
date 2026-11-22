@@ -42,7 +42,22 @@ def test_probe_runs_the_stored_set_it_is_asked_for(
         main.app, ["memory", "probe", "--output", str(output), "--questions", "holdout"]
     )
     assert result.exit_code == 0, result.output
-    assert calls == [(None, output, ["automatic", "deliberate"], False, "holdout")]
+    assert calls == [(None, output, ["automatic", "deliberate"], False, "holdout", None)]
+    named = CliRunner().invoke(
+        main.app,
+        [
+            "memory",
+            "probe",
+            "--output",
+            str(output),
+            "--questions",
+            "all",
+            "--model-policy",
+            "astra-6-2",
+        ],
+    )
+    assert named.exit_code == 0, named.output
+    assert calls[1] == (None, output, ["automatic", "deliberate"], False, "all", "astra-6-2")
 
 
 def test_import_names_the_half_and_reports_what_it_did(

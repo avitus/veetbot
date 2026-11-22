@@ -169,13 +169,46 @@ def test_standing_admission_writes_binding_files_from_the_live_digests(
     assert again.exit_code == 1 and "already exist" in again.output
 
 
-@pytest.mark.parametrize("reason", ["remote", "query_disabled", "no_reader", "reconsolidation"])
+def test_standing_admission_needs_no_reviewed_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The standing decision binds no reader, so none has to be configured (ADR-0343)."""
+
+    settings, _ = _overlay(tmp_path, local=True, reader=False)
+    monkeypatch.setattr("agent_core.bootstrap.load_settings", lambda: settings)
+    _fake_build(monkeypatch, _inputs())
+    words = tmp_path / "owner.txt"
+    words.write_text(INSTRUCTION)
+    out = tmp_path / "standing"
+    result = CliRunner().invoke(
+        app,
+        [
+            "memory",
+            "standing-admission",
+            "--instruction-file",
+            str(words),
+            "--reference",
+            "owner-chat-message",
+            "--rollback-build-ref",
+            "b" * 40,
+            "--out",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert sorted(path.name for path in out.iterdir()) == [
+        "standing-admission.json",
+        "standing-evidence.json",
+    ]
+
+
+@pytest.mark.parametrize("reason", ["remote", "query_disabled", "reconsolidation"])
 def test_standing_admission_refuses_a_remote_or_query_disabled_index(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
 ) -> None:
     """Every condition composition would refuse is refused before a file is written."""
 
-    settings, _ = _overlay(tmp_path, local=reason != "remote", reader=reason != "no_reader")
+    settings, _ = _overlay(tmp_path, local=reason != "remote")
     if reason == "reconsolidation":
         settings = replace(settings, memory_reconsolidation_enabled=True)
     monkeypatch.setattr("agent_core.bootstrap.load_settings", lambda: settings)
@@ -201,7 +234,6 @@ def test_standing_admission_refuses_a_remote_or_query_disabled_index(
     expected = {
         "remote": "local encoder",
         "query_disabled": "semantic_enabled",
-        "no_reader": "reviewed reader",
         "reconsolidation": "reconsolidation",
     }[reason]
     assert expected in result.output

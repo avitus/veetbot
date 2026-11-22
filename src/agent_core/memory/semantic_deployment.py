@@ -36,6 +36,7 @@ from agent_core.memory.semantic_runtime import RunSemanticQueries
 from agent_core.memory.source_recovery import BoundedSourceRecovery
 from agent_core.memory.standing_recall_admission import (
     STANDING_ADMISSION_VERSION,
+    StandingAdmission,
     bind_standing_recall,
 )
 from agent_core.ports.credentials import CredentialResolver
@@ -289,10 +290,8 @@ async def compose_indexing(
         )
         if source_enabled and (not query_enabled or profile.local is None):
             raise ValueError("Source recovery requires local runtime reader authority")
-        if profile.local is not None and (
-            local_provider_factory is None or (query_enabled and profile.reader_sha256 is None)
-        ):
-            raise ValueError("Local semantic recall needs its adapter and reviewed reader")
+        if profile.local is not None and local_provider_factory is None:
+            raise ValueError("Local semantic recall needs its adapter")
         dependencies = active_index_dependencies(
             profile,
             configuration=configuration,
@@ -314,6 +313,17 @@ async def compose_indexing(
             raise ValueError(
                 "Bounded recall requires local interactive recall without unattended application"
             )
+        # Quality evidence certifies the reader it was measured with. The
+        # owner's standing decision makes no such claim, so it binds no reader
+        # and a configured one is not read (ADR-0343).
+        standing = isinstance(admitted, StandingAdmission)
+        if (
+            profile.local is not None
+            and query_enabled
+            and not standing
+            and profile.reader_sha256 is None
+        ):
+            raise ValueError("Evidence-bound local semantic recall needs its reviewed reader")
     except (OSError, ValueError, ConfigurationError):
         raise ConfigurationError(
             "Semantic index configuration or release evidence is invalid"
@@ -329,7 +339,6 @@ async def compose_indexing(
             raise ConfigurationError("Semantic index local model is unavailable") from None
         provider = local_provider
         if query_enabled:
-            assert profile.reader_sha256 is not None
             queries = RunSemanticQueries(
                 factory,
                 clock,
@@ -343,7 +352,7 @@ async def compose_indexing(
                     principal,
                     policy_version=str(configuration["policy_version"]),
                     retrieval_policy=configuration_digest(configuration),
-                    reader_sha256=profile.reader_sha256,
+                    reader_sha256=None if standing else profile.reader_sha256,
                     interactive_only=isinstance(admitted, BoundedAdmission),
                 ),
             )

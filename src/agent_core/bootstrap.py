@@ -1788,11 +1788,8 @@ async def prepare_standing_admission(
             "in the effective configuration"
         )
     # The same conditions composition refuses a bounded admission under,
-    # checked here so the operator learns before any file is written.
-    if profile.reader_sha256 is None:
-        raise ConfigurationError(
-            "a standing admission needs the reviewed reader in the semantic index configuration"
-        )
+    # checked here so the operator learns before any file is written. A
+    # standing admission binds no reader, so none is required (ADR-0343).
     if settings.memory_reconsolidation_enabled:
         raise ConfigurationError(
             "a standing admission refuses unattended reconsolidation; disable it first"

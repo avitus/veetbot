@@ -211,7 +211,9 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   (Milestone 33, ADR-0178). In production it runs on the owner's standing
   admission, `agent_core.memory.standing_recall_admission` (ADR-0290): no
   expiry, no release census, hard-bound to the local encoder tuple, prepared
-  by `agent memory standing-admission` and installed by root.
+  by `agent memory standing-admission` and installed by root. Under it the
+  run's query authority binds no reader, so a chat model or model list change
+  leaves recall on (ADR-0343).
   `agent_core.knowledge.embedding` is the knowledge semantic arm behind
   `AGENT_KNOWLEDGE_SEMANTIC_ENABLED` (ADR-0289): chunks embedded in windows
   under the encoder's capacity (`knowledge-text@2`) into
