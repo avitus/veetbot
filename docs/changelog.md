@@ -4,6 +4,13 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-21 — A recall question may name only what must stay out (ADR-0339)
+
+- A recall question that names only memory text that must not be recalled, or
+  only words the answer must not contain, is now accepted, as the plan says.
+  It was refused as measuring nothing, so a negative check such as "a stale
+  notice must stay gone" could not be imported or added on the question page.
+
 ## 2026-11-21 — Erasing a message takes back what its signature ended (ADR-0336)
 
 - When the message that carried someone's newest signature is erased, the
