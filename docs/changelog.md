@@ -132,7 +132,9 @@ title: Changelog
   While Email is checking which accounts can still be read, a request you
   have already left behind no longer clears your other accounts' mail, mail
   asked for before the account stopped being readable is not shown, and each
-  regular refresh asks for the list first, so the check always finishes.
+  regular refresh asks for the list first, so the check always finishes. On
+  iPhone and iPad, the button that retries a failed page of mail is disabled
+  while pressing it would do nothing.
 - An importance judgment on a person or topic re-rates its own thread a second
   time even when the pass over that person's other threads fails part-way.
 
