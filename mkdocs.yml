@@ -484,4 +484,5 @@ nav:
       - "ADR-0343 — Standing recall binds no reader": adr/0343-standing-recall-binds-no-reader.md
       - "ADR-0344 — One approval for a job repair request": adr/0344-one-approval-for-a-job-repair-request.md
       - "ADR-0345 — One-press reply sends use an operational session": adr/0345-reply-send-operational-session.md
+      - "ADR-0346 — A fact is delivered by any memory that states it": adr/0346-a-fact-is-delivered-by-any-memory-that-states-it.md
   - Changelog: changelog.md

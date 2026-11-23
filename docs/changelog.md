@@ -4,6 +4,19 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-23 — The recall question set counts a fact any memory delivers (ADR-0346, proposed)
+
+- The question tool followed only the newest memory that contains an expected
+  text. Once mail and websites began forming memories, the newest was often a
+  later mention, and the tool reported a fact as missed while your own
+  statement of it was delivered. It now follows every live memory that states
+  the fact and reports the one that got furthest.
+- On a copy of production taken 2026-11-23, with recall unchanged, the same
+  run reads 99 of 114 questions passed, not 81. Reports name the rule that
+  scored them (`owner-recall-probes@2`); older reports still load.
+- No ranking change is made. Replaying four alternative scoring formulas found
+  none that helps both halves of the set.
+
 ## 2026-11-23 — One approval for the scripts of a request (ADR-0342)
 
 - When a request has read a web page, a message or other outside content,

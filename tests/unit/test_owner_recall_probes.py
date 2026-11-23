@@ -38,6 +38,7 @@ from agent_core.domain.recall_questions import (
 )
 from agent_core.evals import owner_recall_probe_driver as driver
 from agent_core.evals.owner_recall_probe_driver import (
+    _holders,
     _resolve,
     _StoreSnapshot,
     observe_probes,
@@ -46,6 +47,7 @@ from agent_core.evals.owner_recall_probe_driver import (
 from agent_core.evals.owner_recall_probes import (
     ExpectedEvidence,
     Probe,
+    ProbeReport,
     evidence_stage,
     load_probes,
 )
@@ -57,6 +59,7 @@ from tests.contract.owner_recall_probe_cases import (
     home_city_case,
     post_snapshot_home_case,
     save_case,
+    shared_text_case,
     stated,
 )
 from tests.gates.test_memory_m16 import _START
@@ -282,6 +285,61 @@ async def test_family_probe_checks_the_names_the_overview_delivers(tmp_path: Pat
         clock=FixedClock(_START),
     ) as app:
         await family_names_case(app, script)
+
+
+async def test_a_fact_is_delivered_when_any_live_memory_holding_its_text_is(
+    tmp_path: Path,
+) -> None:
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=script,
+        clock=FixedClock(_START),
+    ) as app:
+        report, _car, _mention = await shared_text_case(app, script)
+
+    # The rule a report was scored under is named, and an earlier report still reads.
+    assert report.version == "owner-recall-probes@2"
+    earlier = report.model_dump(mode="json") | {"version": "owner-recall-probes@1"}
+    assert ProbeReport.model_validate(earlier).version == "owner-recall-probes@1"
+
+
+async def test_live_memories_stand_for_a_text_and_a_retired_one_only_when_none_is_live(
+    tmp_path: Path,
+) -> None:
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=script,
+        clock=FixedClock(_START),
+    ) as app:
+        session_id = await app.sessions.create()
+        first = await stated(app, session_id, "User keeps bees at the allotment", "bees")
+        second = await stated(app, session_id, "The allotment society keeps bees too", "society")
+        gone = await stated(app, session_id, "User plays the cello on Sundays", "cello")
+        older_gone = await stated(app, session_id, "User plays the cello at school", "school")
+        async with app.uow_factory() as uow:
+            for retired in (older_gone, gone):
+                record = await uow.memories.get(retired.id, app.principal)
+                await uow.memories.reinforce(
+                    record.model_copy(
+                        update={"status": MemoryStatus.RETIRED, "valid_to": app.clock.now()},
+                        deep=True,
+                    )
+                )
+
+        live = await _holders(app, None, "keeps bees")
+        retired_only = await _holders(app, None, "plays the cello")
+        pinned = await _holders(app, first.id, None)
+        nothing = await _holders(app, None, "owns a submarine")
+
+    assert [record.id for record in live] == [second.id, first.id]
+    assert len(retired_only) == 1 and retired_only[0].status is MemoryStatus.RETIRED
+    assert retired_only[0].store_position == max(gone.store_position, older_gone.store_position)
+    assert [record.id for record in pinned] == [first.id]
+    assert nothing == []
 
 
 async def test_an_expected_text_is_found_however_many_beliefs_the_store_holds(

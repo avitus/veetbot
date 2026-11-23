@@ -127,6 +127,14 @@
 # saved jobs. Each schedule names its servers, the approval lists them, and a
 # job's grant names what it may read. Implemented, not yet delivered: the schedule
 # environment must mirror AGENT_SVP_ENABLED first. No milestone or gate moves.
+# ADR-0346 (Proposed, 2026-11-23): diagnosing the owner question set found
+# that the probe driver followed only the newest memory containing an expected
+# text, so a later mention in mail hid a delivered fact. The driver now follows
+# every live memory that states the fact (report version owner-recall-probes@2).
+# On a production clone of 2026-11-23, recall unchanged: 99 of 114 questions
+# pass, not 81. No ranking change: four replayed formulas helped neither half
+# reliably. Built on the local recall-ranking branch, sandbox tests only, not
+# delivered; waits for the owner's approval. No milestone or gate moves.
 # ADR-0343 (Accepted, 2026-11-22): a release that added a model to the model
 # list silently turned semantic recall off in the owner's chats, because the
 # query authority still admitted one reviewed reader although the standing

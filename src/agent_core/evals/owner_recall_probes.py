@@ -34,7 +34,9 @@ from agent_core.domain.memory import (
 )
 from agent_core.evals.general_memory_recall import FAMILIES
 
-PROBE_REPORT_VERSION: Final = "owner-recall-probes@1"
+# @2 follows every live memory that holds an expected text (ADR-0346); @1
+# followed the newest alone. A report names the rule it was scored under.
+PROBE_REPORT_VERSION: Final = "owner-recall-probes@2"
 STAGE_ORDER = (
     "not_stored",
     "stored_but_retired",
@@ -279,7 +281,7 @@ class ProbeSummary(BaseModel):
 
 class ProbeReport(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    version: Literal["owner-recall-probes@1"] = PROBE_REPORT_VERSION
+    version: Literal["owner-recall-probes@1", "owner-recall-probes@2"] = PROBE_REPORT_VERSION
     activation_evidence: Literal[False] = False
     release_evidence: Literal[False] = False
     generated_at: datetime

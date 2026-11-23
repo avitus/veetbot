@@ -1,4 +1,4 @@
-# Owner recall probes (`owner-recall-probes@1`)
+# Owner recall probes (`owner-recall-probes@2`)
 
 Fabricated analogues of the owner's real memory-retrieval incidents, one JSON
 object per line. The probe driver (`agent memory probe`) runs each probe
@@ -12,6 +12,10 @@ Saved -> Stored -> Eligible -> Candidate -> Ranked -> Packed -> Delivered -> Use
 A belief the store never held reports `not_stored`; one the lifecycle retired
 reports `stored_but_retired`; one a hard predicate excluded names that
 predicate; a refused owner save reports `save_refused:<reason_code>`.
+
+An expected text names a fact, and every live memory that contains the text
+states it: the report follows the one that travelled furthest (ADR-0346). Use
+`belief_id` when one particular memory is meant.
 
 The real probe file lives outside Git on the operator host
 (`/etc/veetbot/recall/probes/owner-probes.v1.jsonl`, root-owned) and runs only
