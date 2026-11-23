@@ -91,9 +91,10 @@ approved that in the conversation that produced this record.
    approval: id `uuid5(approval_id, "job-revision:<revision_id>")`. A second
    run of the same revision with different access in the same request would
    reuse that id, so the authorizer does not cover it and it asks. The run
-   checks again when it writes: if another run bound that id after
-   authorization, it fails asking for its own approval rather than replacing
-   a grant a run record or schedule may name.
+   checks again when it writes, whether it proposes access or carries an
+   existing grant to the new revision: if another run bound other access to
+   that id after authorization, it fails asking for its own approval rather
+   than replacing a grant a run record or schedule may name.
 
 5. **Lifetime.** As in ADR-0302 decision 4: the grant belongs to the run that
    answers the owner's message. It ends when that run ends, after 2 hours, or

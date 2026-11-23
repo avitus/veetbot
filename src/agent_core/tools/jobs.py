@@ -352,6 +352,8 @@ class JobRunTool:
                                 "Approve this code revision's private access before running it.",
                             )
                         grant_id = revision_grant_id(approval.id, revision.id)
+                        if _bound_elsewhere(saved, grant_id, grant.access):
+                            return _grant_already_bound()
                         changed = grant.model_copy(
                             update={
                                 "id": grant_id,
@@ -397,16 +399,8 @@ class JobRunTool:
                             if approval is None
                             else revision_grant_id(approval.id, revision.id)
                         )
-                        if str(grant_id) in saved.grants:
-                            # That approval already bound other access to this
-                            # revision, and a run record or schedule may name it;
-                            # authorization saw no collision, so another run
-                            # wrote it since (ADR-0344 decision 4).
-                            return _failure(
-                                "job.approval_required",
-                                "This approval already holds other access for this job "
-                                "revision; approve this run's access on its own.",
-                            )
+                        if _bound_elsewhere(saved, grant_id, access):
+                            return _grant_already_bound()
                         grant = JobGrant(
                             id=grant_id,
                             access=access,
@@ -480,6 +474,26 @@ class JobRunTool:
                 self.toolset.publication.uow_factory, self.spec.name, arguments, context
             ),
         )
+
+
+def _bound_elsewhere(saved: Any, grant_id: UUID, access: JobAccess) -> bool:
+    """Whether an approval already bound other access to this revision's grant id.
+
+    A run record or schedule may name that grant. Authorization refuses the
+    collision (ADR-0344 decision 4), so it is found here only when another run
+    wrote the grant after this one was authorized; the same access may be
+    bound again.
+    """
+    bound = saved.grants.get(str(grant_id))
+    return bound is not None and bound.access != access
+
+
+def _grant_already_bound() -> ToolResult:
+    return _failure(
+        "job.approval_required",
+        "This approval already holds other access for this job revision; approve this "
+        "run's access on its own.",
+    )
 
 
 async def _approval_for_run(

@@ -808,3 +808,61 @@ async def test_a_run_never_replaces_the_grant_its_request_approval_already_bound
     async with factory() as uow:
         kept = await uow.jobs.get(principal(), SLUG)
     assert kept.grants[str(bound.id)].access == first_access
+
+
+@pytest.mark.parametrize("held", ["other", "same"])
+async def test_rebinding_a_grant_never_replaces_what_the_request_approval_bound(
+    held: str,
+) -> None:
+    """A run that carries a grant to a new revision under the request approval
+    must not replace other access that approval already bound there; the same
+    access may be bound again (ADR-0344 decision 4)."""
+    from unittest.mock import AsyncMock
+
+    from agent_core.application.job_execution import JobExecution
+    from agent_core.tools.jobs import JobRunTool, JobToolset
+    from tests.unit.test_job_publication import setup
+
+    factory, publication, _, _ = await setup()
+    saved = job()
+    (existing,) = saved.grants.values()
+    held_access = access(inputs={"config": {"other": True}}) if held == "other" else access()
+    bound = JobGrant(
+        id=revision_grant_id(APPROVAL, NEW_REVISION),
+        access=held_access,
+        created_at=NOW,
+        approval_id=APPROVAL,
+    )
+    async with factory() as uow:
+        await uow.jobs.put(
+            saved.model_copy(update={"grants": {**saved.grants, str(bound.id): bound}}),
+            expected_version=None,
+        )
+        await uow.approvals.create(
+            approval(
+                status=ApprovalStatus.APPROVED,
+                resolution=ApprovalResolutionType.APPROVE_FOR_REQUEST,
+                resolved_at=NOW,
+                resolved_by=principal().principal_id,
+                session_id=tool_context().session_id,
+                run_id=tool_context().run_id,
+            )
+        )
+    execution = AsyncMock(spec=JobExecution)
+    execution.run.return_value = AsyncMock(value=1, diagnostics=[], broker_calls=0)
+    context = replace(
+        tool_context(),
+        principal=tool_context().principal.model_copy(update={"scopes": {"jobs.run"}}),
+        request_approval_id=APPROVAL,
+    )
+    arguments = {"slug": SLUG, "revision_id": str(NEW_REVISION), "grant_id": str(existing.id)}
+    result = await JobRunTool(JobToolset(publication, execution)).execute(arguments, context)
+    async with factory() as uow:
+        kept = await uow.jobs.get(principal(), SLUG)
+    if held == "other":
+        assert not result.ok
+        execution.run.assert_not_called()
+        assert kept.grants[str(bound.id)].access == held_access
+    else:
+        assert result.ok, result.content
+        assert kept.grants[str(bound.id)].access == existing.access
