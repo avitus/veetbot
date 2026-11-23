@@ -2833,9 +2833,13 @@ every bridge caller in the model loop, `sandbox.run_command` included.
   (`usage.unsettled_bridged_calls`, written with the run's counters). A call
   past the allowance never reaches the pipeline. It returns `failed` with
   `tool.budget_exhausted`, the code a direct call over budget gets.
-- A call whose identity is already recorded is not a new call. A script that
-  is executed again repeats its earlier calls under the same identities;
-  each returns its recorded outcome and takes no further room.
+- A call whose identity is already recorded is not a new call. The identity
+  is the call's position in its script together with the tool and the
+  arguments it asked for there, which is what the pipeline replays a recorded
+  outcome for. A script that is executed again repeats its earlier calls
+  under the same identities; each returns its recorded outcome and takes no
+  further room. If it asks for another tool or other arguments at a position
+  it already used, that is a new call: it takes room and is counted.
 - After the checkpoint that ends the step, the loop calls
   `settle_bridged_calls`, which adds the recorded calls to the tool-call
   count and clears them in one write. The count therefore never passes the

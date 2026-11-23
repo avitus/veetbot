@@ -1638,11 +1638,13 @@ class ToolPipeline:
             # A bridged call counts against the run's tool-call limit. The loop
             # states the room the step has; the refusal reads like a direct
             # call's. The call is recorded on the run before it is dispatched,
-            # so a pause or a stop cannot lose it, and a call a re-executed
-            # script repeats under the same identity is not a new call.
+            # so a pause or a stop cannot lose it. Only the same call at the
+            # same position is a repeat: a script executed again that asks
+            # for another tool or other arguments there makes a new call.
+            charged_as = _bridged_call_identity(bridge_call)
             if (
                 step.bridge_call_allowance is not None
-                and bridge_call_id not in run.usage.unsettled_bridged_calls
+                and charged_as not in run.usage.unsettled_bridged_calls
             ):
                 if len(run.usage.unsettled_bridged_calls) >= step.bridge_call_allowance:
                     return {
@@ -1650,7 +1652,7 @@ class ToolPipeline:
                         "reason_code": "tool.budget_exhausted",
                         "retryable": False,
                     }
-                await self._record_bridged_call(run, bridge_call_id, lease)
+                await self._record_bridged_call(run, charged_as, lease)
             approval_poll_seconds = 0.2
             while True:
                 token.raise_if_cancelled()
@@ -2936,6 +2938,25 @@ class ToolPipeline:
             ),
             lease=lease,
         )
+
+
+def _bridged_call_identity(call: ToolCallItem) -> str:
+    """What one bridged call is charged as: its position in its script, with the
+    tool and the arguments it asked for there (ADR-0342).
+
+    The pipeline replays a recorded outcome only for the same tool and
+    arguments, so the charge follows the same identity. Arguments that differ
+    only before normalization are charged as two calls, never as none.
+    """
+
+    asked = json.dumps(
+        {"name": call.name, "arguments": call.arguments},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=str,
+    ).encode("utf-8")
+    return f"{call.call_id}:{hashlib.sha256(asked).hexdigest()[:16]}"
 
 
 def _job_request_approval_id(standing: StandingAuthorization | None) -> UUID | None:

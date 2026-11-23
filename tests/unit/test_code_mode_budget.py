@@ -440,6 +440,55 @@ async def test_a_call_a_script_repeats_under_one_identity_is_charged_once(
     assert run.tool_call_count == 1 + 1
 
 
+class _Changing(_Script):
+    """A script run again after a stop that asks for something else at the same position."""
+
+    async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        del arguments
+        self.steps.append(context.step_number)
+        dispatch = cast(Any, context.bridge_dispatch)
+        self.responses.append(
+            [
+                await dispatch("demo.numbered", {"n": 1}, "bridge-position-0"),
+                await dispatch("demo.numbered", {"n": 1}, "bridge-position-0"),
+                await dispatch("demo.numbered", {"n": 2}, "bridge-position-0"),
+                await dispatch("demo.ordinary", {}, "bridge-position-0"),
+            ]
+        )
+        return ToolResult(
+            ok=True,
+            content=[TextPart(text="script finished")],
+            structured={},
+            output_trust=self.spec.output_trust,
+        )
+
+
+async def test_a_different_call_at_a_position_already_charged_is_a_new_call(
+    tmp_path: Path,
+) -> None:
+    numbered = _Probe(
+        _spec(
+            "demo.numbered",
+            input_schema={
+                "type": "object",
+                "properties": {"n": {"type": "integer"}},
+                "additionalProperties": False,
+            },
+        )
+    )
+    ordinary = _Probe(_spec("demo.ordinary"))
+    script = _Changing(_RUN_CODE, [[]])
+
+    run = await _run(
+        tmp_path, [_turn((SANDBOX_RUN_CODE_TOOL_NAME, "script"))], [script, numbered, ordinary]
+    )
+
+    # The exact repeat returned its recorded outcome. The call with other
+    # arguments and the call to another tool each ran, so each is charged.
+    assert (numbered.executions, ordinary.executions) == (2, 1)
+    assert run.tool_call_count == 1 + 3
+
+
 async def test_calls_whose_charge_was_interrupted_are_charged_before_the_next_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

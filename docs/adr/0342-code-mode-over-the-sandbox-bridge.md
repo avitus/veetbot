@@ -103,9 +103,10 @@ The owner prefers no new external dependency unless one is necessary.
      now the step count plus the steps refunded, recorded in the checkpoint.
      Idempotency keys, per-step limits and the recall phase read the number,
      so none of them sees two steps alike.
-   - Each bridged call is recorded on the run, by its identity, before it
-     is dispatched, and the step's calls are added to the tool-call count in
-     one write after the checkpoint that ends the step. A pause, a crash or a
+   - Each bridged call is recorded on the run before it is dispatched, by
+     its position in its script and the tool and arguments it asked for, and
+     the step's calls are added to the tool-call count in one write after
+     the checkpoint that ends the step. A pause, a crash or a
      script that is executed again therefore loses no call and counts none
      twice. The refund follows the same checkpoint. A crash before it loses
      one refund; it cannot refund a step twice.
