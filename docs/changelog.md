@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-23 — Review repairs before promotion
+
+- A job approval card's digest of a long source is now of the whole source
+  the job saves, not of the truncated text on the card.
+- `agent memory probe --live-model` without `--model-policy` runs on the
+  default chat model, not the fake model.
+- Erasing a message also takes its end from an earlier stored revision of a
+  signature detail whose current end you set yourself; your end stays.
+
 ## 2026-11-22 — One approval for a request that changes a saved job (ADR-0344)
 
 - Repairing a Cockpit widget's collector no longer asks at every step. A card
