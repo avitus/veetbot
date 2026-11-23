@@ -87,6 +87,61 @@ def _require_prefix_hash(request: ModelRequest) -> str:
     return prefix_sha256
 
 
+def _with_model_usage(current: RunUsage, usage: ModelUsage, reasoning: int | None) -> RunUsage:
+    """Add one model attempt's usage; every other field of the record is kept."""
+
+    return current.model_copy(
+        update={
+            "input_tokens": current.input_tokens + usage.input_tokens,
+            "cached_input_tokens": current.cached_input_tokens + usage.cached_input_tokens,
+            "cache_write_input_tokens": (
+                current.cache_write_input_tokens + usage.cache_write_input_tokens
+            ),
+            "output_tokens": current.output_tokens + usage.output_tokens,
+            "reasoning_tokens": reasoning,
+            "model_calls": current.model_calls + 1,
+            "cost": current.cost + usage.cost,
+        },
+        deep=True,
+    )
+
+
+def _refund_turn(run: Run) -> None:
+    """Give back one step and one model call (ADR-0342).
+
+    The step count falls and the refund count rises together, so their sum,
+    the number of the run's latest step, is the same before and after.
+    """
+
+    if run.step_count > 0:
+        run.step_count -= 1
+        run.usage = run.usage.model_copy(
+            update={"refunded_steps": run.usage.refunded_steps + 1}, deep=True
+        )
+    if run.model_call_count > 0:
+        run.model_call_count -= 1
+
+
+def _fold_bridged_calls(run: Run) -> int:
+    """Move the step's bridged calls into the tool-call count (ADR-0342).
+
+    The identities leave the record in the same change that counts them, so
+    settling twice counts nothing twice.
+    """
+
+    settled = len(run.usage.unsettled_bridged_calls)
+    if settled:
+        run.tool_call_count += settled
+        run.usage = run.usage.model_copy(
+            update={
+                "tool_calls": run.usage.tool_calls + settled,
+                "unsettled_bridged_calls": [],
+            },
+            deep=True,
+        )
+    return settled
+
+
 class InMemoryBudgetLedger:
     def __init__(self, runs: RunRepository, clock: Clock) -> None:
         self._runs = runs
@@ -122,19 +177,7 @@ class InMemoryBudgetLedger:
         reasoning = run.usage.reasoning_tokens
         if usage.reasoning_tokens is not None:
             reasoning = (reasoning or 0) + usage.reasoning_tokens
-        updated = RunUsage(
-            input_tokens=run.usage.input_tokens + usage.input_tokens,
-            cached_input_tokens=run.usage.cached_input_tokens + usage.cached_input_tokens,
-            cache_write_input_tokens=(
-                run.usage.cache_write_input_tokens + usage.cache_write_input_tokens
-            ),
-            output_tokens=run.usage.output_tokens + usage.output_tokens,
-            reasoning_tokens=reasoning,
-            model_calls=run.usage.model_calls + 1,
-            tool_calls=run.usage.tool_calls,
-            cost=run.usage.cost + usage.cost,
-        )
-        run.usage = updated
+        run.usage = _with_model_usage(run.usage, usage, reasoning)
         run.model_call_count += 1
         run.updated_at = self._clock.now()
         await self._runs.update_counters(run)
@@ -152,12 +195,18 @@ class InMemoryBudgetLedger:
 
     async def refund_orchestration_turn(self, run: Run, *, step: Step) -> None:
         del step
-        if run.step_count > 0:
-            run.step_count -= 1
-        if run.model_call_count > 0:
-            run.model_call_count -= 1
+        _refund_turn(run)
         run.updated_at = self._clock.now()
         await self._runs.update_counters(run)
+
+    async def settle_bridged_calls(self, run: Run, *, step: Step) -> int:
+        del step
+        settled = _fold_bridged_calls(run)
+        if settled:
+            run.updated_at = self._clock.now()
+            await self._runs.update_counters(run)
+            _check_after_record(run)
+        return settled
 
 
 class UnitOfWorkBudgetLedger:
@@ -196,18 +245,7 @@ class UnitOfWorkBudgetLedger:
         reasoning = run.usage.reasoning_tokens
         if usage.reasoning_tokens is not None:
             reasoning = (reasoning or 0) + usage.reasoning_tokens
-        run.usage = RunUsage(
-            input_tokens=run.usage.input_tokens + usage.input_tokens,
-            cached_input_tokens=run.usage.cached_input_tokens + usage.cached_input_tokens,
-            cache_write_input_tokens=(
-                run.usage.cache_write_input_tokens + usage.cache_write_input_tokens
-            ),
-            output_tokens=run.usage.output_tokens + usage.output_tokens,
-            reasoning_tokens=reasoning,
-            model_calls=run.usage.model_calls + 1,
-            tool_calls=run.usage.tool_calls,
-            cost=run.usage.cost + usage.cost,
-        )
+        run.usage = _with_model_usage(run.usage, usage, reasoning)
         run.model_call_count += 1
         run.updated_at = self._clock.now()
         try:
@@ -262,10 +300,7 @@ class UnitOfWorkBudgetLedger:
     async def refund_orchestration_turn(self, run: Run, *, step: Step) -> None:
         del step
         snapshot = run.model_copy(deep=True)
-        if run.step_count > 0:
-            run.step_count -= 1
-        if run.model_call_count > 0:
-            run.model_call_count -= 1
+        _refund_turn(run)
         run.updated_at = self._clock.now()
         try:
             async with self._uow_factory() as uow:
@@ -273,3 +308,19 @@ class UnitOfWorkBudgetLedger:
         except BaseException:
             _restore_run_accounting(run, snapshot)
             raise
+
+    async def settle_bridged_calls(self, run: Run, *, step: Step) -> int:
+        del step
+        snapshot = run.model_copy(deep=True)
+        settled = _fold_bridged_calls(run)
+        if not settled:
+            return 0
+        run.updated_at = self._clock.now()
+        try:
+            async with self._uow_factory() as uow:
+                await uow.runs.update_counters(run, lease=self._lease)
+        except BaseException:
+            _restore_run_accounting(run, snapshot)
+            raise
+        _check_after_record(run)
+        return settled

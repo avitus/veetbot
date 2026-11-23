@@ -776,9 +776,12 @@ def step_number_at(step_count: int, checkpoint_state: RunCheckpoint) -> int:
 
 
 def meter_bridge(run: Run, step: Step, calls: Sequence[ToolCallItem]) -> None:
-    """Give the bridge the room the tool-call limit has left beyond this batch."""
+    """Give the bridge the room the tool-call limit has left beyond this batch.
 
-    step.bridged_tool_calls = 0
+    The room is for the whole step. Calls an earlier attempt of the step made
+    are still on the run as unsettled, so they keep their place in it.
+    """
+
     step.bridge_call_allowance = max(
         0, run.limits.max_tool_calls - run.tool_call_count - len(calls)
     )
@@ -790,13 +793,14 @@ def note_orchestration_turn(
     """Record an orchestration-only step in the checkpoint that is about to end it.
 
     Such a step called nothing but `sandbox.run_code`, and its scripts made at
-    least one bridged call in this attempt. The count is written before the
-    ledger refund: a crash between the two loses one refund and skips one step
-    number, and can never repeat a number or refund a step twice.
+    least one bridged call, in this attempt or an earlier one of the step. The
+    count is written before the ledger refund: a stop between the two loses
+    one refund, and can never repeat a step number or refund a step twice.
     """
 
+    del step
     if not (
-        step.bridged_tool_calls
+        context.run.usage.unsettled_bridged_calls
         and turn_calls
         and all(call.name == SANDBOX_RUN_CODE_TOOL_NAME for call in turn_calls)
     ):
@@ -806,15 +810,17 @@ def note_orchestration_turn(
 
 
 async def settle_bridged_calls(context: RunContext, step: Step, *, refund: bool) -> None:
-    """Charge a step's bridged calls, then give back an orchestration-only step.
+    """Count a step's bridged calls, then give back an orchestration-only step.
 
-    Both writes follow the checkpoint that ends the step. That checkpoint holds
-    no pending batch, so the resume path's tool-usage watermark never has to
-    tell a batch's own count from the calls its scripts made.
+    Each bridged call was recorded on the run when it was dispatched. Here the
+    step's calls move into the tool-call count in one write. Both writes
+    follow the checkpoint that ends the step. That checkpoint holds no pending
+    batch, so the resume path's tool-usage watermark never has to tell a
+    batch's own count from the calls its scripts made. A stop before this
+    write leaves the calls on the run, and the next step counts them first.
     """
 
-    if step.bridged_tool_calls:
-        await context.budgets.record_tool_usage(context.run, step.bridged_tool_calls, step=step)
+    await context.budgets.settle_bridged_calls(context.run, step=step)
     if refund:
         await context.budgets.refund_orchestration_turn(context.run, step=step)
 
@@ -1632,6 +1638,18 @@ async def run_loop(context: RunContext) -> RunOutcome:
             # A run already writing its final answer leaves follow-ups for the
             # terminal transition to settle (ADR-0324).
             await read_follow_ups(context)
+        if context.run.usage.unsettled_bridged_calls:
+            # A stop fell between the checkpoint that ended the last step and
+            # the write that counts its bridged calls (ADR-0342). No batch is
+            # pending here, so they are counted before this step fits one.
+            await context.budgets.settle_bridged_calls(
+                context.run,
+                step=Step(
+                    run_id=context.run.id,
+                    step_number=step_number_at(context.run.step_count, context.checkpoint),
+                    started_at=context.clock.now(),
+                ),
+            )
         context.run.step_count += 1
         context.run.updated_at = context.clock.now()
         async with context.uow_factory() as uow:

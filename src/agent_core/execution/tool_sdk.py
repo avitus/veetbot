@@ -127,7 +127,9 @@ def _value(result: object) -> Any:
         for part in result
         if isinstance(part, dict) and isinstance(part.get("text"), str)
     )
-    if text[:1] in {"{", "["}:
+    # A tool may put whitespace before its JSON. Text that does not parse is
+    # returned exactly as the tool wrote it.
+    if text.lstrip()[:1] in {"{", "["}:
         try:
             return json.loads(text)
         except ValueError:

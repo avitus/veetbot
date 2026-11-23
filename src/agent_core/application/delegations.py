@@ -564,17 +564,22 @@ def _add_usage(total: RunUsage, addition: RunUsage) -> RunUsage:
         if total.reasoning_tokens is None and addition.reasoning_tokens is None
         else (total.reasoning_tokens or 0) + (addition.reasoning_tokens or 0)
     )
-    return RunUsage(
-        input_tokens=total.input_tokens + addition.input_tokens,
-        cached_input_tokens=total.cached_input_tokens + addition.cached_input_tokens,
-        cache_write_input_tokens=(
-            total.cache_write_input_tokens + addition.cache_write_input_tokens
-        ),
-        output_tokens=total.output_tokens + addition.output_tokens,
-        reasoning_tokens=reasoning,
-        model_calls=total.model_calls + addition.model_calls,
-        tool_calls=total.tool_calls + addition.tool_calls,
-        cost=total.cost + addition.cost,
+    # Only what was spent is summed. The total keeps its own run accounting
+    # (ADR-0342); an addition's never transfers.
+    return total.model_copy(
+        update={
+            "input_tokens": total.input_tokens + addition.input_tokens,
+            "cached_input_tokens": total.cached_input_tokens + addition.cached_input_tokens,
+            "cache_write_input_tokens": (
+                total.cache_write_input_tokens + addition.cache_write_input_tokens
+            ),
+            "output_tokens": total.output_tokens + addition.output_tokens,
+            "reasoning_tokens": reasoning,
+            "model_calls": total.model_calls + addition.model_calls,
+            "tool_calls": total.tool_calls + addition.tool_calls,
+            "cost": total.cost + addition.cost,
+        },
+        deep=True,
     )
 
 

@@ -140,3 +140,30 @@ async def test_the_relay_refuses_to_start_without_a_bootstrap_token() -> None:
     assert exit_code != 0
     assert b"bridge bootstrap token is missing or oversized" in stderr
     assert not socket_path.exists()
+
+
+async def test_the_relay_forwards_text_outside_ascii_at_the_size_the_script_sent() -> None:
+    """The script's library bounds a request in UTF-8 bytes; the relay must not
+    grow it by escaping, or a request the library accepted is refused here."""
+    accents = "é" * 11_000  # 22,000 bytes as UTF-8, 66,000 as ASCII escapes.
+    request = json.dumps(
+        {"call": "a.b", "arguments": {"text": accents}, "ordinal": 0},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode()
+    async with asyncio.timeout(30), _relay() as (process, socket_path):
+        assert process.stdin is not None and process.stdout is not None
+        await _started(process, socket_path)
+        reader, writer = await asyncio.open_unix_connection(str(socket_path))
+
+        writer.write(request + b"\n")
+        await writer.drain()
+        forwarded = await asyncio.wait_for(process.stdout.readline(), timeout=10)
+        process.stdin.write(b'{"status":"succeeded","result":[]}\n')
+        await process.stdin.drain()
+        answered = json.loads(await reader.readline())
+        writer.close()
+
+    assert json.loads(forwarded)["arguments"] == {"text": accents}
+    assert len(forwarded) < LIMIT
+    assert answered["status"] == "succeeded"

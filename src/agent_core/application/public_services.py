@@ -290,7 +290,7 @@ def _run_view(run: Run) -> RunView:
         status=run.status,
         step_count=run.step_count,
         model_call_count=run.model_call_count,
-        tool_call_count=run.tool_call_count,
+        tool_call_count=run.tool_calls_made,
         usage=RunUsageView(
             input_tokens=run.usage.input_tokens,
             output_tokens=run.usage.output_tokens,
@@ -1946,7 +1946,7 @@ class PublicRunService:
                 run.status is not RunStatus.WAITING_FOR_USER
                 or run.cancel_requested_at is not None
                 or (run.deadline_at is not None and run.deadline_at <= self._clock.now())
-                or run.tool_call_count >= run.limits.max_tool_calls
+                or run.tool_calls_made >= run.limits.max_tool_calls
             ):
                 return False
             checkpoint = await uow.checkpoints.latest(run.id)

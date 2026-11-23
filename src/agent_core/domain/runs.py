@@ -119,6 +119,14 @@ class RunUsage(BaseModel):
     model_calls: int = 0
     tool_calls: int = 0
     cost: Decimal = Decimal("0")
+    # Run accounting that must change in the same write as the counters above
+    # (ADR-0342). Steps given back to the run: a step's number is the step
+    # count plus this, so recovery numbers a step as it was first numbered.
+    refunded_steps: int = 0
+    # The identities of bridged calls made during the current step. Each is
+    # recorded when it is dispatched and folded into the tool-call count when
+    # the step ends, so a pause or a stop in between loses none of them.
+    unsettled_bridged_calls: list[str] = Field(default_factory=list)
 
 
 class FailureReason(StrEnum):
@@ -156,10 +164,9 @@ class Step(BaseModel):
     attempt_count: int = 0
     tool_call_count: int = 0
     compactions: int = 0
-    # Calls a script made through the bridge during this step's dispatch, and
-    # how many the run's tool-call limit has room for. `None` leaves the bridge
+    # How many bridged calls the run's tool-call limit has room for during
+    # this step, across every attempt of it. `None` leaves the bridge
     # unmetered, as it is for a caller that does not settle them (ADR-0342).
-    bridged_tool_calls: int = 0
     bridge_call_allowance: int | None = None
 
 
@@ -262,6 +269,17 @@ class Run(BaseModel):
         if self.deadline_at != self.limits.deadline_at:
             raise ValueError("run.deadline_at must equal run.limits.deadline_at")
         return self
+
+    @property
+    def tool_calls_made(self) -> int:
+        """Every tool call the run has made, the current step's bridged calls included.
+
+        `tool_call_count` gains a step's bridged calls when the step ends
+        (ADR-0342). A reader outside the run loop that reports the run, or
+        gives away the room it has left, counts them at once.
+        """
+
+        return self.tool_call_count + len(self.usage.unsettled_bridged_calls)
 
 
 class OutcomeKind(StrEnum):

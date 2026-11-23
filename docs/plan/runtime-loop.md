@@ -163,20 +163,24 @@ class Step(BaseModel):
     attempt_count: int = 0    # model attempts made in this step
     tool_call_count: int = 0
     compactions: int = 0      # compactions performed for this step
-    bridged_tool_calls: int = 0               # calls scripts made this step
-    bridge_call_allowance: int | None = None  # room left in the tool-call limit
+    bridge_call_allowance: int | None = None  # room for bridged calls this step
 ```
 
-The last two fields meter the programmatic bridge for one dispatch
-(ADR-0342). The loop sets the allowance before it dispatches a batch, and the
-tool executor counts each bridged call against it. `None` leaves the bridge
+The last field meters the programmatic bridge for one step (ADR-0342). The
+loop sets the allowance before it dispatches a batch. The tool executor
+records each bridged call on the run (`usage.unsettled_bridged_calls`) and
+refuses one the allowance has no room for. `None` leaves the bridge
 unmetered.
 
 A refunded step keeps its number. The ledger gives an orchestration-only step
 back by lowering `runs.step_count`, so the step number is the step count plus
 the steps the checkpoint records as refunded (`budget_state.refunded_steps`,
 absent until the first refund). The number is the same as the step count for
-every run that was never refunded.
+every run that was never refunded. The ledger also counts each refund on the
+run (`usage.refunded_steps`), in the write that lowers the step count. A
+checkpoint rebuilt from the run row after a loss takes its count from there,
+so a recovered batch keeps the step number, and the idempotency keys, it was
+proposed under.
 
 It is not persisted as itself. It is the argument that carries
 `step_number` into the idempotency key, into the `ProposedAction`, into the
@@ -434,6 +438,9 @@ class BudgetLedger(Protocol):
     async def refund_orchestration_turn(
         self, run: Run, *, step: Step
     ) -> None: ...
+    async def settle_bridged_calls(
+        self, run: Run, *, step: Step
+    ) -> int: ...
 ```
 
 `check` is synchronous and raises `BudgetExceeded`, because it is a
@@ -442,7 +449,10 @@ it would invite an implementation that queries. The `record_*` methods are
 asynchronous because they write, and they write in the same transaction as
 the event they account for. `refund_orchestration_turn` implements
 ADR-0015's requirement that an orchestration-only turn does not consume the
-step and model-call budget.
+step and model-call budget, and counts the refund on the run in the same
+write. `settle_bridged_calls` moves the bridged calls recorded on the run
+into the tool-call count and clears them in one write, so calling it twice
+counts nothing twice; it returns how many it moved.
 
 ### Ports declared elsewhere that the loop calls
 
@@ -798,7 +808,8 @@ totals are over budget and nothing has noticed.
 model attempt         check(ATTEMPT)      record_model_usage
 tool call batch       fit to remaining    record_tool_usage
 single tool call      check(TOOL_CALL)    record_tool_usage
-bridged call          bridge allowance    record_tool_usage, after the step
+bridged call          bridge allowance    recorded on the run at dispatch;
+                                          settle_bridged_calls after the step
 ```
 
 `BudgetExceeded` raised anywhere in the loop produces
@@ -810,13 +821,15 @@ Two refinements the corpus already requires and the loop must honour. An
 orchestration-only turn refunds its step and model-call budget, so
 `check(STEP)` on the following step sees the refunded totals. The loop first
 adds one to `budget_state.refunded_steps`, then writes the checkpoint that
-ends the step, then records the step's bridged calls and calls
+ends the step, then calls `settle_bridged_calls` and
 `refund_orchestration_turn` (ADR-0342). The two ledger writes follow the
 checkpoint for two reasons. That checkpoint holds no pending batch, so the
 resume path's tool-usage watermark never has to separate a batch's own count
 from the calls its scripts made. And a crash between the checkpoint and the
 refund loses one refund and skips one step number; the other order could
-refund a step twice or number two steps alike. And usage is
+refund a step twice or number two steps alike. A crash before the settlement
+loses no call: the calls are already on the run, and the loop settles any it
+finds there before it starts the next step. And usage is
 additive across subagent fan-out, so a parent's `record_model_usage` is
 called again with the child's rollup when the child run reaches a terminal
 state, which means a parent can fail on budget while suspended and is one of

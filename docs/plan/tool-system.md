@@ -2827,15 +2827,23 @@ every bridge caller in the model loop, `sandbox.run_command` included.
 
 - Before a batch is dispatched, the loop gives the step an allowance: the
   tool-call limit, less the calls already counted, less the batch itself.
-- The tool executor counts each bridged call that passes the refusal above.
-  A call past the allowance never reaches the pipeline. It returns `failed`
-  with `tool.budget_exhausted`, the code a direct call over budget gets.
-- After the checkpoint that ends the step, the loop records the bridged calls
-  with `record_tool_usage`. The count therefore never passes the limit.
+  The allowance is for the whole step, however many attempts it takes.
+- The tool executor records each bridged call that passes the refusal above
+  on the run, by its identity, before it dispatches the call
+  (`usage.unsettled_bridged_calls`, written with the run's counters). A call
+  past the allowance never reaches the pipeline. It returns `failed` with
+  `tool.budget_exhausted`, the code a direct call over budget gets.
+- A call whose identity is already recorded is not a new call. A script that
+  is executed again repeats its earlier calls under the same identities;
+  each returns its recorded outcome and takes no further room.
+- After the checkpoint that ends the step, the loop calls
+  `settle_bridged_calls`, which adds the recorded calls to the tool-call
+  count and clears them in one write. The count therefore never passes the
+  limit, and every bridged call is counted exactly once.
 
 **An orchestration-only step is refunded.** It is a step whose model turn
 called nothing but `sandbox.run_code` and whose scripts made at least one
-bridged call in the attempt that finished the step. The loop calls
+bridged call, in any attempt of the step. The loop calls
 `refund_orchestration_turn`, which lowers the run's step count and model-call
 count by one. Recorded usage (`usage.model_calls`, tokens, cost) is not
 changed. A refunded step costs at least two tool calls, so the tool-call
@@ -2845,14 +2853,25 @@ The refund never reuses a step number. [runtime-loop.md](runtime-loop.md)
 defines the number as the step count plus the steps refunded so far, and
 gives the order of the checkpoint and the two ledger writes.
 
-The same accounting runs when a suspended batch resumes. Calls bridged by an
-attempt that suspended or crashed before its step ended are not counted. The
-per-script cap of 64 calls, the cost budget and the deadline are unchanged.
+The same accounting runs when a suspended batch resumes. Calls a script made
+before its batch paused for an approval, or before the worker stopped, stay
+recorded on the run. They keep their place in the step's allowance on resume
+and are counted when the step ends. If the worker stops after the checkpoint
+that ends a step and before `settle_bridged_calls`, the next step settles
+them before it fits a batch. Until a step is settled its bridged calls are
+not yet in `tool_call_count`, so the resume path's watermark still sees only
+the batch's own count. A reader outside the run loop adds them itself: the
+run's public view reports `tool_call_count` with them, and a child run's
+limits are derived from the room left after them. A run that ends inside a
+step therefore still shows every call it made. The per-script cap of 64 calls, the cost budget and
+the deadline are unchanged.
 The bridge is not metered for browser workflows, email tasks or jobs, which
 dispatch outside the model loop.
 
 `tests/unit/test_code_mode_budget.py` covers the refund, the step numbers, the
-count, the refusal at the limit and the resumed batch.
+count, the refusal at the limit, the resumed batch, a batch that pauses after
+its script ran, a repeated call, a settlement that was interrupted, and a
+checkpoint rebuilt from the run row.
 
 ### Chat
 

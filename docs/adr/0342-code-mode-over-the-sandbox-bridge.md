@@ -103,9 +103,15 @@ The owner prefers no new external dependency unless one is necessary.
      now the step count plus the steps refunded, recorded in the checkpoint.
      Idempotency keys, per-step limits and the recall phase read the number,
      so none of them sees two steps alike.
-   - The refund and the bridged count are written after the checkpoint that
-     ends the step. A crash in between loses one refund; it cannot refund a
-     step twice.
+   - Each bridged call is recorded on the run, by its identity, before it
+     is dispatched, and the step's calls are added to the tool-call count in
+     one write after the checkpoint that ends the step. A pause, a crash or a
+     script that is executed again therefore loses no call and counts none
+     twice. The refund follows the same checkpoint. A crash before it loses
+     one refund; it cannot refund a step twice.
+   - The ledger counts each refund on the run in the write that lowers the
+     step count. A checkpoint rebuilt from the run row after a loss takes
+     the count from there, so a recovered batch keeps its step number.
 7. **Latency is measured before any interpreter is considered.** The sandbox
    is already created on the first sandbox call and held across steps within
    a claim (`sandbox-isolation.md`), so a second script reuses the container.
@@ -238,8 +244,15 @@ The work is cut into four slices.
 - Decision 6 also changes `sandbox.run_command`: the tool calls a command
   makes over the bridge now count against the run's tool-call limit. They
   were not counted before. Its steps are never refunded.
-- Calls bridged by an attempt that suspended or crashed before its step ended
-  are not counted. Each such attempt is still bounded by the 64-call cap.
+- Calls bridged by an attempt that paused or crashed before its step ended
+  stay recorded on the run and are counted when the step ends. The run row's
+  `usage` holds two accounting fields for this, `unsettled_bridged_calls` and
+  `refunded_steps`. They change no public view and need no migration.
+- Turning the setting off while a script is waiting fails closed. Its card
+  can still be approved once or denied; "Allow for this request" is refused
+  as unavailable and the card stays pending. An approved script whose tool is
+  no longer registered is denied as an unknown tool, the model is told so,
+  and the run goes on to its answer. A run is not left without an end.
 - A script written after the turn read outside content shows an approval
   card. With decision 11 the owner can allow the rest of the request from
   that card, so a request that reads mail and then runs three scripts asks

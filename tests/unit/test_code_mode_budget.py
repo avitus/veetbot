@@ -14,8 +14,12 @@ from uuid import UUID
 
 import pytest
 
+from agent_core.adapters.determinism import SystemClock
+from agent_core.application.public_services import _run_view
 from agent_core.bootstrap import build
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.delegations import derive_child_limits
+from agent_core.domain.errors import DelegationValidationError
 from agent_core.domain.execution import SANDBOX_RUN_CODE_TOOL_NAME
 from agent_core.domain.messages import (
     FakeModelScript,
@@ -26,9 +30,13 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass
 from agent_core.domain.runs import Run, RunCheckpoint, RunLimits, RunStatus, Step
+from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.tools import ToolExecutionContext, ToolResult, ToolSpec
+from agent_core.runtime import loop as loop_module
+from agent_core.runtime.checkpoints import DurableCheckpointSeeder
 from agent_core.runtime.loop import meter_bridge, step_number_at
 from agent_core.tools.registry import StaticToolRegistry
+from tests.contract.support import memory_uow_factory, principal
 from tests.unit.test_code_mode import _Probe, _spec
 from tests.unit.test_reply_attachments import _settings
 
@@ -70,7 +78,8 @@ class _Script:
         dispatch = cast(Any, context.bridge_dispatch)
         self.responses.append(
             [
-                await dispatch(name, {}, f"bridge-{execution}-{index}")
+                # As the real bridge does, an identity names its script too.
+                await dispatch(name, {}, f"bridge-{self.spec.name}-{execution}-{index}")
                 for index, name in enumerate(self._plans[execution])
             ]
         )
@@ -300,8 +309,193 @@ def test_the_bridge_allowance_is_the_limit_less_the_count_and_the_batch(
 ) -> None:
     run = cast(Run, type("_Run", (), {"limits": RunLimits(), "tool_call_count": used})())
     step = Step(run_id=UUID(int=1), step_number=1, started_at=_NOW)
-    step.bridged_tool_calls = 5
 
     meter_bridge(run, step, [cast(Any, object())] * batch)
 
-    assert (step.bridged_tool_calls, step.bridge_call_allowance) == (0, room)
+    assert step.bridge_call_allowance == room
+
+
+# --- a paused or interrupted step ---------------------------------------------
+
+# A tool the default profile asks about before it runs.
+_WRITE = _spec(
+    "demo.write",
+    side_effect=SideEffectClass.EXTERNAL_WRITE,
+    risk=RiskLevel.HIGH,
+    idempotency=IdempotencyClass.NON_IDEMPOTENT,
+)
+
+
+async def test_a_scripts_calls_are_charged_when_its_batch_pauses_for_an_approval(
+    tmp_path: Path,
+) -> None:
+    ordinary = _Probe(_spec("demo.ordinary"))
+    write = _Probe(_WRITE)
+    script = _Script(_RUN_CODE, [["demo.ordinary"] * 3])
+
+    run = await _run(
+        tmp_path,
+        [_turn((SANDBOX_RUN_CODE_TOOL_NAME, "script"), ("demo.write", "write"))],
+        [script, ordinary, write],
+        approvals=1,
+    )
+
+    # The script ran once, before the pause. On resume its recorded result is
+    # returned, and the three calls it made are still charged exactly once.
+    assert (len(script.steps), ordinary.executions, write.executions) == (1, 3, 1)
+    assert run.tool_call_count == 2 + 3
+    assert run.usage.tool_calls == 2 + 3
+    assert run.usage.unsettled_bridged_calls == []
+
+
+def _paused(*, counted: int, unsettled: int, limit: int = 24) -> Run:
+    """A run inside a step: some calls counted, some made over the bridge and not yet."""
+    run = Run(
+        id=UUID(int=0xA12),
+        session_id=UUID(int=0x5E56),
+        tenant_id=principal().tenant_id,
+        agent_id=UUID(int=0xA6),
+        agent_version="agent-v1",
+        status=RunStatus.WAITING_FOR_APPROVAL,
+        limits=RunLimits(max_tool_calls=limit),
+        tool_call_count=counted,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+    run.usage = run.usage.model_copy(
+        update={"unsettled_bridged_calls": [f"bridge:{index}" for index in range(unsettled)]}
+    )
+    return run
+
+
+def test_a_run_inside_a_step_reports_the_calls_its_scripts_have_made() -> None:
+    # However the run ends from here, what it shows is what it did.
+    assert _run_view(_paused(counted=2, unsettled=3)).tool_call_count == 5
+
+
+def test_a_child_run_gets_no_room_the_parents_scripts_already_used() -> None:
+    from tests.gates.test_delegate_m13 import DEFAULTS, _brief
+
+    parent = _paused(counted=1, unsettled=3, limit=4).model_copy(
+        update={"status": RunStatus.RUNNING}
+    )
+
+    with pytest.raises(DelegationValidationError, match="tool calls"):
+        derive_child_limits(parent, [_brief(None)], DEFAULTS, now=_NOW)
+
+
+async def test_calls_made_before_a_pause_keep_their_place_in_the_limit(tmp_path: Path) -> None:
+    ordinary = _Probe(_spec("demo.ordinary"))
+    script = _Script(_RUN_CODE, [["demo.ordinary"] * 2])
+    # Asks first, then makes two calls of its own once it is approved.
+    command = _Script(_OTHER_SANDBOX_TOOL, [["demo.ordinary"] * 2])
+
+    run = await _run(
+        tmp_path,
+        [_turn((SANDBOX_RUN_CODE_TOOL_NAME, "script"), ("demo.script", "command"))],
+        [script, command, ordinary],
+        limits=RunLimits(max_tool_calls=5),
+        approvals=1,
+    )
+
+    # Five calls of room: the batch's two and three over the bridge. The
+    # script used two before the pause, so the command has room for one.
+    refusal = {"status": "failed", "reason_code": "tool.budget_exhausted", "retryable": False}
+    assert [response["status"] for response in command.responses[0]] == ["succeeded", "failed"]
+    assert command.responses[0][1] == refusal
+    assert ordinary.executions == 3
+    assert run.tool_call_count == 5
+
+
+class _Repeating(_Script):
+    """A script that makes each of its calls twice under the same identity."""
+
+    async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        del arguments
+        self.steps.append(context.step_number)
+        dispatch = cast(Any, context.bridge_dispatch)
+        self.responses.append(
+            [await dispatch(name, {}, "bridge-same") for name in self._plans[0] * 2]
+        )
+        return ToolResult(
+            ok=True,
+            content=[TextPart(text="script finished")],
+            structured={},
+            output_trust=self.spec.output_trust,
+        )
+
+
+async def test_a_call_a_script_repeats_under_one_identity_is_charged_once(
+    tmp_path: Path,
+) -> None:
+    ordinary = _Probe(_spec("demo.ordinary"))
+    script = _Repeating(_RUN_CODE, [["demo.ordinary"]])
+
+    run = await _run(tmp_path, [_turn((SANDBOX_RUN_CODE_TOOL_NAME, "script"))], [script, ordinary])
+
+    # A re-executed script repeats its earlier calls. Each returns its
+    # recorded outcome and is not a new call.
+    assert [response["status"] for response in script.responses[0]] == ["succeeded"] * 2
+    assert ordinary.executions == 1
+    assert run.tool_call_count == 1 + 1
+
+
+async def test_calls_whose_charge_was_interrupted_are_charged_before_the_next_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stop between the checkpoint that ends a step and the ledger write."""
+    ordinary = _Probe(_spec("demo.ordinary"))
+    script = _Script(_RUN_CODE, [["demo.ordinary"] * 3])
+    settle = loop_module.settle_bridged_calls
+    skipped: list[int] = []
+
+    async def interrupted(context: Any, step: Step, *, refund: bool) -> None:
+        if not skipped:
+            skipped.append(step.step_number)
+            return
+        await settle(context, step, refund=refund)
+
+    monkeypatch.setattr(loop_module, "settle_bridged_calls", interrupted)
+
+    run = await _run(tmp_path, [_turn((SANDBOX_RUN_CODE_TOOL_NAME, "script"))], [script, ordinary])
+
+    assert skipped == [1]
+    assert run.tool_call_count == 1 + 3
+    assert run.usage.unsettled_bridged_calls == []
+
+
+async def test_a_recovered_checkpoint_keeps_the_run_s_refunded_steps() -> None:
+    """A checkpoint rebuilt from the run row numbers the next step as the lost one did."""
+    _fixed, uow_factory = await memory_uow_factory()
+    owner = principal()
+    session_id = UUID(int=0x5E55)
+    refunded = Run(
+        id=UUID(int=0xA11),
+        session_id=session_id,
+        tenant_id=owner.tenant_id,
+        agent_id=UUID(int=0xA6),
+        agent_version="agent-v1",
+        status=RunStatus.RUNNING,
+        step_count=1,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+    refunded.usage = refunded.usage.model_copy(update={"refunded_steps": 2})
+    async with uow_factory() as uow:
+        await uow.sessions.create(
+            Session(
+                id=session_id,
+                tenant_id=owner.tenant_id,
+                principal_id=owner.principal_id,
+                agent_id=UUID(int=0xA6),
+                agent_version="agent-v1",
+                status=SessionStatus.ACTIVE,
+                created_at=_NOW,
+                updated_at=_NOW,
+            )
+        )
+        await uow.runs.create(refunded)
+        seeded = await DurableCheckpointSeeder(SystemClock())(uow, refunded, None, None, owner)
+
+    # Two steps were given back, so the run's second counted step is its fourth.
+    assert step_number_at(refunded.step_count + 1, seeded) == 4

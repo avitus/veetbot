@@ -268,6 +268,8 @@ class BudgetLedger(Protocol):
 
     async def refund_orchestration_turn(self, run: Run, *, step: Step) -> None: ...
 
+    async def settle_bridged_calls(self, run: Run, *, step: Step) -> int: ...
+
 
 class CheckpointRepository(Protocol):
     async def write(

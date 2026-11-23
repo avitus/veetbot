@@ -19,6 +19,24 @@ title: Changelog
   that has not been updated shows Approve once and Deny as before.
 - Scripts are still off by default.
 
+## 2026-11-23 — Script accounting repairs from review (ADR-0342)
+
+- A script's tool calls are now recorded the moment each is made. They are
+  counted against the run's tool-call limit even when the step pauses for an
+  approval or the worker restarts part-way, and never twice when a script is
+  run again after a restart.
+- A run that was given steps back keeps its step numbering when its saved
+  state has to be rebuilt, so a recovered step cannot repeat a tool call
+  that already ran.
+- Text outside plain ASCII in a script's tool arguments no longer triples in
+  size on its way out of the sandbox, which could make a valid request be
+  refused as too large.
+- A tool result that is JSON after leading blank space is now handed to the
+  script as data rather than as text.
+- The evaluation harness that runs a real script now caps output while the
+  script runs, ends everything a script started when it times out, and
+  leaves nothing running when an evaluation is cancelled.
+
 ## 2026-11-23 — Review repairs before promotion
 
 - A job approval card's digest of a long source is now of the whole source

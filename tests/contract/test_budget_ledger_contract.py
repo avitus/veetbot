@@ -255,3 +255,44 @@ async def test_an_orchestration_turn_refund_frees_its_step_and_model_call() -> N
     assert (unspent.step_count, unspent.model_call_count) == (0, 0)
     stored = await runs.get(RUN_ID, principal())
     assert (stored.step_count, stored.model_call_count) == (0, 0)
+
+
+async def test_a_refund_is_counted_on_the_run_so_recovery_can_number_its_steps() -> None:
+    clock, _sessions, runs, _events = await memory_stack()
+    current = _limited(step_count=2, model_call_count=2)
+    await runs.create(current)
+    ledger = InMemoryBudgetLedger(runs, clock)
+    step = Step(run_id=current.id, step_number=2, started_at=NOW)
+
+    await ledger.refund_orchestration_turn(current, step=step)
+    await ledger.refund_orchestration_turn(current, step=step)
+
+    stored = await runs.get(RUN_ID, principal())
+    # The step count falls and the refund count rises in one write, so their
+    # sum, the number of the run's latest step, never moves.
+    assert (stored.step_count, stored.usage.refunded_steps) == (0, 2)
+    # Recording model usage keeps it.
+    await ledger.record_model_usage(current, ModelUsage(input_tokens=1), step=step)
+    assert (await runs.get(RUN_ID, principal())).usage.refunded_steps == 2
+
+
+async def test_settling_folds_bridged_calls_into_the_tool_count_exactly_once() -> None:
+    clock, _sessions, runs, _events = await memory_stack()
+    current = _limited(tool_call_count=1)
+    current.usage = current.usage.model_copy(
+        update={"tool_calls": 1, "unsettled_bridged_calls": ["bridge:a", "bridge:b"]}
+    )
+    await runs.create(current)
+    ledger = InMemoryBudgetLedger(runs, clock)
+    step = Step(run_id=current.id, step_number=1, started_at=NOW)
+
+    assert await ledger.settle_bridged_calls(current, step=step) == 2
+    assert await ledger.settle_bridged_calls(current, step=step) == 0
+
+    stored = await runs.get(RUN_ID, principal())
+    assert (stored.tool_call_count, stored.usage.tool_calls) == (3, 3)
+    assert stored.usage.unsettled_bridged_calls == []
+    # Recording model usage between a charge and its settlement keeps the charge.
+    current.usage = current.usage.model_copy(update={"unsettled_bridged_calls": ["bridge:c"]})
+    await ledger.record_model_usage(current, ModelUsage(input_tokens=1), step=step)
+    assert current.usage.unsettled_bridged_calls == ["bridge:c"]

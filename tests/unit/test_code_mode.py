@@ -139,6 +139,17 @@ async def test_a_text_result_stays_text_and_parts_join_by_newline() -> None:
     assert stdout == "'2026-11-21T10:00:00Z'\n'one\\ntwo'\n"
 
 
+async def test_json_after_leading_whitespace_is_still_parsed_and_other_text_is_kept() -> None:
+    exit_code, stdout, _stderr, _calls = await _run_script(
+        "print(tools.demo.padded()['items'])\nprint(repr(tools.demo.prose()))\n",
+        [_text_result(' \n{"items": [1, 2]}'), _text_result("  {not json")],
+    )
+
+    assert exit_code == 0
+    # Text that only looks like JSON comes back exactly as the tool wrote it.
+    assert stdout == "[1, 2]\n'  {not json'\n"
+
+
 async def test_a_refused_call_raises_an_error_the_script_can_read() -> None:
     source = """
 try:

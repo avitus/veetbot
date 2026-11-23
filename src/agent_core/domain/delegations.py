@@ -209,7 +209,7 @@ def derive_child_limits(
 
     remaining_steps = parent.limits.max_steps - parent.step_count
     remaining_model_calls = parent.limits.max_model_calls - parent.model_call_count
-    remaining_tool_calls = parent.limits.max_tool_calls - parent.tool_call_count
+    remaining_tool_calls = parent.limits.max_tool_calls - parent.tool_calls_made
     if remaining_steps <= 0:
         raise _insufficient("steps")
     if remaining_model_calls <= 0:

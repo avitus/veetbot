@@ -1636,17 +1636,21 @@ class ToolPipeline:
                     "retryable": False,
                 }
             # A bridged call counts against the run's tool-call limit. The loop
-            # states the room left; the refusal reads like a direct call's.
+            # states the room the step has; the refusal reads like a direct
+            # call's. The call is recorded on the run before it is dispatched,
+            # so a pause or a stop cannot lose it, and a call a re-executed
+            # script repeats under the same identity is not a new call.
             if (
                 step.bridge_call_allowance is not None
-                and step.bridged_tool_calls >= step.bridge_call_allowance
+                and bridge_call_id not in run.usage.unsettled_bridged_calls
             ):
-                return {
-                    "status": "failed",
-                    "reason_code": "tool.budget_exhausted",
-                    "retryable": False,
-                }
-            step.bridged_tool_calls += 1
+                if len(run.usage.unsettled_bridged_calls) >= step.bridge_call_allowance:
+                    return {
+                        "status": "failed",
+                        "reason_code": "tool.budget_exhausted",
+                        "retryable": False,
+                    }
+                await self._record_bridged_call(run, bridge_call_id, lease)
             approval_poll_seconds = 0.2
             while True:
                 token.raise_if_cancelled()
@@ -2243,6 +2247,36 @@ class ToolPipeline:
             )
             return None
         return authorization
+
+    async def _record_bridged_call(
+        self, run: Run, bridge_call_id: str, lease: WorkerLease | None
+    ) -> None:
+        """Record a bridged call on the run until its step is settled (ADR-0342).
+
+        The identity is added before the first await, so two calls dispatched
+        together cannot both take the last place the limit has.
+        """
+
+        previous = run.usage
+        run.usage = previous.model_copy(
+            update={"unsettled_bridged_calls": [*previous.unsettled_bridged_calls, bridge_call_id]},
+            deep=True,
+        )
+        try:
+            async with self._uow_factory() as uow:
+                await uow.runs.update_counters(run, lease=lease)
+        except BaseException:
+            run.usage = run.usage.model_copy(
+                update={
+                    "unsettled_bridged_calls": [
+                        recorded
+                        for recorded in run.usage.unsettled_bridged_calls
+                        if recorded != bridge_call_id
+                    ]
+                },
+                deep=True,
+            )
+            raise
 
     async def _script_request_offer(
         self,

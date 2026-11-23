@@ -60,7 +60,11 @@ async def _run() -> None:
                         response = _denied("bridge.protocol_error")
                     else:
                         payload["token"] = token
-                        encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                        # The script's library bounds a request in UTF-8 bytes,
+                        # so the stamped request is written the same way.
+                        encoded = json.dumps(
+                            payload, ensure_ascii=False, separators=(",", ":")
+                        ).encode("utf-8")
                         if len(encoded) > _MAX_REQUEST_BYTES:
                             response = _denied("bridge.request_too_large")
                         else:
