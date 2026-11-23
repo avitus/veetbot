@@ -1353,8 +1353,9 @@ offered origin and path prefix and is accepted only with `approve_for_task`.
 ADR-0302 added `request_grant`, which repeats the offered profile id and is
 accepted only with `approve_for_request`; for a job approval (ADR-0344) it
 repeats the offered `job_slug` instead.
-That decision also requires `browser.grant.write`, checked by the application
-service before any read; the route's declared scope stays `approval.resolve`.
+That decision also requires `browser.grant.write` for a browser approval and
+`jobs.run` for a job approval, checked by the application service before any
+read; the route's declared scope stays `approval.resolve`.
 
 ## Failure modes and defenses
 
