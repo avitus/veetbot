@@ -1483,6 +1483,20 @@ async def people_erased_signature_contract(store: PeopleStore) -> None:
     assert await held(analyst) == analyst
     assert await held(repeated) == repeated
 
+    # The owner replaced an end the mail had set: their end stays current, and
+    # the revision that held the mail's end loses it, with no new revision.
+    person, thread = await signer()
+    first, second = await message(thread, 6), await message(thread, 2)
+    analyst = await ends(await states(person, first, "role", "Analyst"), second)
+    corrected = await ends(
+        analyst, second, valid_to=NOW - timedelta(days=1), support_ids=[correction.id]
+    )
+    await states(person, second, "role", "Director")
+    assert await erase(second) == 2
+    assert await held(analyst) == corrected
+    stored = await held(analyst, 2)
+    assert stored is not None and stored.valid_to is None
+
     # The middle of three: the first title now ends where the third begins.
     person, thread = await signer()
     first, second, third = [await message(thread, days) for days in (6, 4, 2)]

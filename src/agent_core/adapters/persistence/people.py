@@ -152,6 +152,9 @@ def _signature_ends(
     of those messages may have set and the end that replaces them: the one the
     remaining signatures give. An end the owner set is never among them, on the
     copy they ended or on another copy of that detail their correction ended.
+    The protection is per end, not per copy: a copy whose current end is the
+    owner's keeps it, while an earlier revision holding an end the erased mail
+    set loses that end like any other.
     """
     groups: dict[tuple[UUID | None, str], list[tuple[str, PersonIdentifier]]] = {}
     for copy in copies:
@@ -166,7 +169,7 @@ def _signature_ends(
                 owner_set.setdefault(key, set()).add(copy.valid_to)
         for key, copy in rows:
             stale = erased - owner_set.get(key, set())
-            if stale and copy.id not in owner_ended:
+            if stale:
                 ends[copy.id] = stale, signature_end(copy.valid_from, key, signatures)
     return ends
 

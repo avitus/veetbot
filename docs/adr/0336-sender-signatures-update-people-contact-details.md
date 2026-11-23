@@ -132,8 +132,10 @@ Four existing rules bound the design:
        recompute each from the remaining copies, by the one rule placement
        uses.
      - The erased end leaves every stored revision of the copy, so a
-       historical read cannot recover it. A copy whose current end changed
-       takes a new revision.
+       historical read cannot recover it. That includes an earlier revision
+       of a copy whose current end the owner later set: the owner's end
+       stays, and the mail's end before it goes. A copy whose current end
+       changed takes a new revision.
 6. **Extraction is deterministic and no model is called.**
    - The block is found by the reader's third sign: the sender's name line
      and the short lines under it. One function now serves both the reader
