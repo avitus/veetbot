@@ -4,6 +4,19 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-22 — One approval for a request that changes a saved job (ADR-0344)
+
+- Repairing a Cockpit widget's collector no longer asks at every step. A card
+  for testing, saving or running a job, or for repinning its schedule, now
+  offers "Allow for this request". One tap covers that job's later tests,
+  saves, runs and schedule repins until your next message, for at most two
+  hours.
+- It covers only access the job already has: the same websites with the same
+  keys, MCP servers and feeds, and no larger time, request, size or model
+  limits. New access, other jobs, new schedules and schedule timing changes
+  still ask.
+- Older apps show Approve once and Deny as before.
+
 ## 2026-11-22 — Subscriptions keeps finding new senders after catch-up
 
 - Subscriptions stopped finding new senders once an account had caught up on

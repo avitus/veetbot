@@ -13,7 +13,7 @@ from datetime import timedelta
 from typing import Final, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent_core.domain.browser import (
     BrowserAction,
@@ -103,11 +103,22 @@ class BrowserRequestGrantOffer(BaseModel):
 
 
 class RequestGrantEcho(BaseModel):
-    """The offered profile, repeated in an ``approve_for_request`` body."""
+    """What the card offered, repeated in an ``approve_for_request`` body: the
+    website login's profile (ADR-0302) or the job's slug (ADR-0344), exactly
+    one of the two."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    profile_id: UUID
+    profile_id: UUID | None = None
+    job_slug: str | None = Field(default=None, min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def names_exactly_one_offer(self) -> RequestGrantEcho:
+        """A body names the website login or the job, never both or neither."""
+
+        if (self.profile_id is None) == (self.job_slug is None):
+            raise ValueError("request_grant names exactly one of profile_id and job_slug")
+        return self
 
 
 def request_grant_offer(

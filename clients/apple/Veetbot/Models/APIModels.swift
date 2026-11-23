@@ -582,6 +582,9 @@ public struct ApprovalView: Codable, Identifiable, Sendable {
     /// The one approval for the rest of the request a `browser.act` card
     /// offers, when the server makes one (ADR-0302).
     public var requestGrantOffer: RequestGrantOfferView? = nil
+    /// The one approval for the rest of the request a job card offers, when
+    /// the server makes one (ADR-0344).
+    public var jobRequestGrantOffer: JobRequestGrantOfferView? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, status, arguments, risk, decision
@@ -599,6 +602,7 @@ public struct ApprovalView: Codable, Identifiable, Sendable {
         case taskGrantID = "task_grant_id"
         case taskGrantNotCovered = "task_grant_not_covered"
         case requestGrantOffer = "request_grant_offer"
+        case jobRequestGrantOffer = "job_request_grant_offer"
     }
 }
 
@@ -606,6 +610,9 @@ extension ApprovalView {
     /// Why the server asked, as the sentence the card shows (ADR-0260). An older
     /// server sends a policy code such as `policy.matrix.code_execution` here; a
     /// code has no spaces and tells the owner nothing, so it shows no line.
+    /// Whether the card shows "Allow for this request" for a job (ADR-0344).
+    public var offersJobRequestGrant: Bool { status.isPending && jobRequestGrantOffer != nil }
+
     public var ownerReason: String? {
         let reason = policyReason.trimmingCharacters(in: .whitespacesAndNewlines)
         return reason.contains(" ") ? reason : nil
@@ -644,6 +651,10 @@ extension ApprovalView {
         )
         requestGrantOffer = try? container.decodeIfPresent(
             RequestGrantOfferView.self, forKey: .requestGrantOffer
+        )
+        // A malformed job offer hides its button, never the card (ADR-0344).
+        jobRequestGrantOffer = try? container.decodeIfPresent(
+            JobRequestGrantOfferView.self, forKey: .jobRequestGrantOffer
         )
     }
 }

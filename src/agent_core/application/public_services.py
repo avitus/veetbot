@@ -41,6 +41,10 @@ from agent_core.application.errors import (
     SessionMetadataValidationError,
 )
 from agent_core.application.folder_service import unfile_deleted_session
+from agent_core.application.job_request_grants import (
+    JobRequestGrantResolution,
+    run_allows_job_request_grant,
+)
 from agent_core.application.memory_evidence import memory_evidence
 from agent_core.application.session_service import bootstrap_session
 from agent_core.application.surfaces import PreparedSurfaceSubmission
@@ -111,6 +115,11 @@ from agent_core.domain.events import (
     is_context_only_seed_event,
 )
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
+from agent_core.domain.job_request_grants import (
+    JOB_REQUEST_GRANT_CREATED_EVENT,
+    JOB_REQUEST_GRANT_DURATION,
+    JOB_REQUEST_GRANT_TOOLS,
+)
 from agent_core.domain.memory import (
     LIVE_MEMORY_STATUSES,
     SENSITIVITY_ORDER,
@@ -317,6 +326,7 @@ def _approval_view(approval: ApprovalRequest) -> ApprovalView:
         task_grant_id=approval.task_grant_id,
         task_grant_not_covered=approval.task_grant_not_covered,
         request_grant_offer=approval.request_grant_offer,
+        job_request_grant_offer=approval.job_request_grant_offer,
     )
 
 
@@ -2059,6 +2069,7 @@ class PublicApprovalService:
         self_approval_enabled: bool,
         task_grants: TaskGrantResolution | None = None,
         request_grants: RequestGrantResolution | None = None,
+        job_request_grants: JobRequestGrantResolution | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._dispatcher = dispatcher
@@ -2067,6 +2078,7 @@ class PublicApprovalService:
         # ADR-0129: composed only when BROWSER_TASK_GRANTS_ENABLED is set.
         self._task_grants = task_grants
         self._request_grants = request_grants
+        self._job_request_grants = job_request_grants
 
     async def list(
         self,
@@ -2115,6 +2127,19 @@ class PublicApprovalService:
         lease: WorkerLease | None = None,
     ) -> ApprovalView:
         require_scope(principal, "approval.resolve")
+        if (
+            decision is ApprovalResolutionType.APPROVE_FOR_REQUEST
+            and request_grant is not None
+            and request_grant.job_slug is not None
+        ):
+            # ADR-0344: allowing a job request grants execution authority, so
+            # it needs the jobs.run scope too, checked before any read.
+            require_scope(principal, "jobs.run")
+            if self._job_request_grants is None:
+                raise _request_grant_unavailable(approval_id)
+            return await self._resolve_for_job_request(
+                principal, approval_id, reason, request_grant, self._job_request_grants
+            )
         if decision is ApprovalResolutionType.APPROVE_FOR_REQUEST:
             # ADR-0302: allowing the request needs the grant scope too, checked
             # before any read; with no request grants composed nothing is read.
@@ -2448,6 +2473,114 @@ class PublicApprovalService:
         if dispatch_run is not None:
             await self._dispatcher.resume(dispatch_run)
         return _approval_view(outcome.approval)
+
+    async def _resolve_for_job_request(
+        self,
+        principal: Principal,
+        approval_id: UUID,
+        reason: str | None,
+        echo: RequestGrantEcho,
+        resolution: JobRequestGrantResolution,
+    ) -> ApprovalView:
+        """ADR-0344: approve the job action once and record the request grant in
+        one unit of work; any refusal leaves the approval pending."""
+
+        dispatch_run: UUID | None = None
+        async with self._uow_factory() as uow:
+            visible = await uow.approvals.get(approval_id, principal)
+            if visible.principal_id != principal.principal_id:
+                # Only the chat's owner can allow its request.
+                raise NotFoundError("approval not found")
+            if visible.status in {ApprovalStatus.EXPIRED, ApprovalStatus.CANCELLED}:
+                raise ConflictError(
+                    "The approval is no longer pending.",
+                    details={"status": visible.status.value},
+                )
+            if not self._self_approval_enabled:
+                raise AuthorizationError("approval requires a distinct resolver")
+            offer = visible.job_request_grant_offer
+            if visible.status is not ApprovalStatus.PENDING:
+                return self._already_resolved_for_job_request(visible, echo)
+            owner = Principal(tenant_id=visible.tenant_id, principal_id=visible.principal_id)
+            run = await uow.runs.get(visible.run_id, owner)
+            try:
+                session: Session | None = await uow.sessions.get(visible.session_id, principal)
+            except NotFoundError:
+                session = None
+            if (
+                visible.tool_name not in JOB_REQUEST_GRANT_TOOLS
+                or offer is None
+                or session is None
+                or run.status is not RunStatus.WAITING_FOR_APPROVAL
+                or not run_allows_job_request_grant(run, session, principal)
+            ):
+                raise _request_grant_unavailable(approval_id)
+            if echo.job_slug != offer.slug:
+                raise _request_grant_offer_mismatch(approval_id)
+            now = resolution.clock.now()
+            outcome = await uow.approvals.resolve(
+                approval_id,
+                principal,
+                ApprovalResolutionType.APPROVE_FOR_REQUEST,
+                reason,
+            )
+            if outcome.state is not ApprovalResolutionState.APPLIED:
+                return self._already_resolved_for_job_request(outcome.approval, echo)
+            resolved_at = outcome.approval.resolved_at or now
+            await uow.events.append(
+                NewEvent(
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    event_type="approval.resolved",
+                    actor_type="principal",
+                    actor_id=principal.principal_id,
+                    payload={
+                        "approval_id": str(approval_id),
+                        "resolution": ApprovalResolutionType.APPROVE_FOR_REQUEST.value,
+                    },
+                )
+            )
+            await uow.events.append(
+                NewEvent(
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    event_type=JOB_REQUEST_GRANT_CREATED_EVENT,
+                    actor_type="principal",
+                    actor_id=principal.principal_id,
+                    payload={
+                        "approval_id": str(approval_id),
+                        "slug": offer.slug,
+                        "expires_at": (resolved_at + JOB_REQUEST_GRANT_DURATION).isoformat(),
+                    },
+                )
+            )
+            if run.status is RunStatus.WAITING_FOR_APPROVAL:
+                await self._resume_waiting_run(uow, run)
+                dispatch_run = run.id
+        if dispatch_run is not None:
+            await self._dispatcher.resume(dispatch_run)
+        return _approval_view(outcome.approval)
+
+    @staticmethod
+    def _already_resolved_for_job_request(
+        approval: ApprovalRequest, echo: RequestGrantEcho
+    ) -> ApprovalView:
+        """A retry of the same allow returns the stored view; anything else
+        conflicts, naming why."""
+
+        if approval.resolution is ApprovalResolutionType.APPROVE_FOR_REQUEST:
+            offer = approval.job_request_grant_offer
+            if offer is not None and offer.slug == echo.job_slug:
+                return _approval_view(approval)
+            raise _request_grant_offer_mismatch(approval.id)
+        raise ConflictError(
+            "The approval was already resolved differently.",
+            reason="approval_already_resolved",
+            details={
+                "approval_id": str(approval.id),
+                "decision": None if approval.resolution is None else approval.resolution.value,
+            },
+        )
 
     @staticmethod
     def _already_resolved_for_request(

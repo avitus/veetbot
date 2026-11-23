@@ -168,6 +168,9 @@ class ToolExecutionContext:
     # ADR-0129: the constraint a standing or task grant attached when it
     # authorized this call. Trusted runtime state, never a model argument.
     dispatch_constraint: BrowserDispatchConstraint | None = None
+    # ADR-0344: the request approval that authorized this job call, if one did.
+    # Trusted runtime state, never a model argument.
+    request_approval_id: UUID | None = None
     # The event-loop time at which the pipeline stops this call. `timeout_seconds`
     # was measured before the call's pre-effect work, so a tool that must finish
     # inside the limit counts down to this instead. Trusted runtime state.

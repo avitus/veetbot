@@ -17,11 +17,19 @@ from agent_core.application.job_grants import (
     grant_covers_revision,
     revision_grant_id,
 )
+from agent_core.application.job_request_grants import job_request_grant_offer
 from agent_core.application.jobs import JobPublication
 from agent_core.domain.agents import Principal
-from agent_core.domain.approvals import ApprovalPresentation, ApprovalStatus
+from agent_core.domain.approval_copy import generic_action_summary
+from agent_core.domain.approvals import (
+    ApprovalPresentation,
+    ApprovalRequest,
+    ApprovalResolutionType,
+    ApprovalStatus,
+)
 from agent_core.domain.argument_views import approval_argument_view
 from agent_core.domain.errors import ConflictError, NotFoundError
+from agent_core.domain.job_request_grants import JobRequestGrantOffer
 from agent_core.domain.jobs import JobAccess, JobBrokerError, JobGrant, JobManifest
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
@@ -124,6 +132,26 @@ def _model(context: ToolExecutionContext) -> Callable[..., Awaitable[dict[str, A
         if callable(context.job_model)
         else unavailable
     )
+
+
+async def job_request_offer(
+    factory: Any, tool_name: str, arguments: dict[str, Any], context: dict[str, Any]
+) -> JobRequestGrantOffer | None:
+    """ADR-0344: the "Allow for this request" offer for a job card, when the
+    executor supplied the run and turn and the action would be covered."""
+
+    run, principal = context.get("run"), context.get("principal")
+    if run is None or principal is None:
+        return None
+    async with factory() as uow:
+        return await job_request_grant_offer(
+            uow,
+            tool_name=tool_name,
+            arguments=arguments,
+            run=run,
+            principal=principal,
+            turn=context.get("turn"),
+        )
 
 
 class JobManageTool:
@@ -256,6 +284,19 @@ class JobManageTool:
         except (KeyError, ValueError, NotFoundError, ConflictError) as exc:
             return _failure("job.invalid_request", str(exc))
 
+    async def approval_view_in_session(
+        self, arguments: dict[str, Any], **context: Any
+    ) -> ApprovalPresentation:
+        """The ordinary card, with the ADR-0344 request offer when one applies."""
+
+        return ApprovalPresentation(
+            summary=generic_action_summary(self.spec),
+            arguments=approval_argument_view(arguments),
+            job_request_grant_offer=await job_request_offer(
+                self.toolset.publication.uow_factory, self.spec.name, arguments, context
+            ),
+        )
+
 
 class JobRunTool:
     supports_stored_keys = False
@@ -302,16 +343,8 @@ class JobRunTool:
                     if grant is None:
                         raise ValueError("The job grant does not exist.")
                     if not grant_covers_revision(grant, revision):
-                        approval = await uow.approvals.get_by_action(context.invocation_id)
-                        _, _, digest = validate_and_normalize(arguments, self.spec.input_schema)
-                        if (
-                            approval is None
-                            or approval.status is not ApprovalStatus.APPROVED
-                            or approval.principal_id != context.principal.principal_id
-                            or approval.tenant_id != context.tenant_id
-                            or approval.tool_name != self.spec.name
-                            or approval.normalized_arguments_hash != digest
-                        ):
+                        approval = await _approval_for_run(uow, context, arguments, self.spec, slug)
+                        if approval is None:
                             return _failure(
                                 "job.approval_required",
                                 "Approve this code revision's private access before running it.",
@@ -346,21 +379,17 @@ class JobRunTool:
                     if same is not None:
                         grant_id = same.id
                     else:
-                        approval = await uow.approvals.get_by_action(context.invocation_id)
                         if access_needs_approval(access, saved):
-                            _, _, digest = validate_and_normalize(arguments, self.spec.input_schema)
-                            if (
-                                approval is None
-                                or approval.status is not ApprovalStatus.APPROVED
-                                or approval.principal_id != context.principal.principal_id
-                                or approval.tenant_id != context.tenant_id
-                                or approval.tool_name != self.spec.name
-                                or approval.normalized_arguments_hash != digest
-                            ):
+                            approval = await _approval_for_run(
+                                uow, context, arguments, self.spec, slug
+                            )
+                            if approval is None:
                                 return _failure(
                                     "job.approval_required",
                                     "Approve this job's private access before running it.",
                                 )
+                        else:
+                            approval = await uow.approvals.get_by_action(context.invocation_id)
                         grant_id = (
                             publication.ids.new_id()
                             if approval is None
@@ -435,7 +464,47 @@ class JobRunTool:
         return ApprovalPresentation(
             summary="Run this saved job with the listed private inputs and access.",
             arguments=approval_argument_view(view),
+            job_request_grant_offer=await job_request_offer(
+                self.toolset.publication.uow_factory, self.spec.name, arguments, context
+            ),
         )
+
+
+async def _approval_for_run(
+    uow: Any, context: ToolExecutionContext, arguments: dict[str, Any], spec: ToolSpec, slug: str
+) -> ApprovalRequest | None:
+    """The owner's approval that binds this run's new grant: the card for this
+    exact call, or this run's request approval for the job (ADR-0344)."""
+
+    if context.request_approval_id is not None:
+        try:
+            approval = await uow.approvals.get(context.request_approval_id, context.principal)
+        except NotFoundError:
+            return None
+        offer = approval.job_request_grant_offer
+        if (
+            approval.status is ApprovalStatus.APPROVED
+            and approval.resolution is ApprovalResolutionType.APPROVE_FOR_REQUEST
+            and approval.run_id == context.run_id
+            and approval.principal_id == context.principal.principal_id
+            and approval.tenant_id == context.tenant_id
+            and offer is not None
+            and offer.slug == slug
+        ):
+            return cast(ApprovalRequest, approval)
+        return None
+    approval = await uow.approvals.get_by_action(context.invocation_id)
+    _, _, digest = validate_and_normalize(arguments, spec.input_schema)
+    if (
+        approval is None
+        or approval.status is not ApprovalStatus.APPROVED
+        or approval.principal_id != context.principal.principal_id
+        or approval.tenant_id != context.tenant_id
+        or approval.tool_name != spec.name
+        or approval.normalized_arguments_hash != digest
+    ):
+        return None
+    return cast(ApprovalRequest, approval)
 
 
 class StoredKeyJobRunTool(JobRunTool):

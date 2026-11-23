@@ -1947,9 +1947,11 @@ public final class ChatViewModel: ObservableObject {
         approvalsInFlight[approval.id] = decision
         defer { approvalsInFlight[approval.id] = nil }
         do {
-            // ADR-0302: allowing the request repeats the card's own offer.
+            // ADR-0302, ADR-0344: allowing the request repeats the card's own
+            // offer, the website login's or the job's.
             let requestGrant = decision == .approveForRequest
                 ? approval.requestGrantOffer.map(RequestGrantEcho.init(offer:))
+                    ?? approval.jobRequestGrantOffer.map(RequestGrantEcho.init(jobOffer:))
                 : nil
             let stored = try await api.resolveApproval(
                 approval.id,
