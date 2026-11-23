@@ -89,10 +89,20 @@ class RecallQuestionContent(BaseModel):
             texts = getattr(self, name)
             if any(not text.strip() or len(text) > _TEXT_MAX for text in texts):
                 raise ValueError(f"{name} holds a blank or overlong text")
-        if not (self.expected or self.delivered_must_contain or self.answer_must_contain):
-            # Without a fact to reach or a name to render, a run of the
-            # question can neither pass nor fail.
-            raise ValueError("the question measures nothing: name a fact or a text it must reach")
+        if not (
+            self.expected
+            or self.forbidden
+            or self.delivered_must_contain
+            or self.answer_must_contain
+            or self.answer_must_not_contain
+        ):
+            # With nothing to reach and nothing that must stay out, a run of
+            # the question can neither pass nor fail. A text that must not come
+            # back is a measure on its own: the run fails when it does.
+            raise ValueError(
+                "the question measures nothing: name a fact or a text it must reach, "
+                "or a text that must stay out"
+            )
         return self
 
     @property

@@ -24,7 +24,7 @@ from agent_core.domain.schedules import (
 from agent_core.domain.tools import ToolExecutionContext, ToolResult
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.scheduling.defaults import derived_definition, schedule_run_limits
-from agent_core.tools.jobs import _failure
+from agent_core.tools.jobs import _failure, job_request_offer
 from agent_core.tools.schedule_create import (
     CockpitScheduleCreateTool,
     parse_cadence,
@@ -217,6 +217,9 @@ class JobScheduleUpdateTool(CockpitScheduleUpdateTool):
                 **arguments,
                 "approved_access": saved.grants[str(task.grant_id)].model_dump(mode="json"),
             },
+            job_request_grant_offer=await job_request_offer(
+                self.factory, self.spec.name, arguments, context
+            ),
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:

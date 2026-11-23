@@ -1565,6 +1565,28 @@ agent version or permissions. Use authenticated broker reads for structured
 GitHub acquisition; a public scraping provider's rejection is not evidence that
 a repository has no pull requests.
 
+### One approval for a job repair request (ADR-0344)
+
+A repair reads the failing widget and its data, so the trust overlay asks
+before every later write in that turn. In an owner-driven top-level chat run,
+a card for `job.manage` (`trial` naming a grant, or `update`), `job.run`, or a
+`schedule.update` that repins a job schedule offers "Allow for this request"
+when the pending action is itself covered. The offer names the slug and access
+ceilings: the card's own access and each grant the job already holds, at most
+16. Accepting it with `approve_for_request` appends
+`job.request_grant.created`.
+
+For the rest of that run, at most two hours and until the owner's next message,
+`JobRequestGrantAuthorizer` allows, for that slug only: trials naming a grant,
+updates whose manifest feeds fit a ceiling, runs whose access fits one ceiling
+(hosts with the same credential reference, MCP servers, feeds, no larger
+limits or model cost), and repins of a schedule already running the job to a
+grant that fits, with an optional new title or instruction. Creating,
+archiving or restoring a job, other jobs, new schedules, cadence or time
+changes and MCP server replacement still ask. A run it authorizes binds its new
+grant to the request approval, `uuid5(approval_id, "job-revision:<id>")`; a
+second run of that revision with different access asks.
+
 ## Widget diagnostics
 
 [ADR-0273](../adr/0273-cockpit-widget-diagnostics.md) specifies private fixture

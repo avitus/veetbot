@@ -481,7 +481,7 @@ import Testing
     /// SHA-256 of `tests/fixtures/api/browser_task_grant_contract.json`. The
     /// Swift copy must be that file byte for byte; update both together.
     static let taskGrantContractChecksum =
-        "8acfbe1c188d27ad709332a28a7977ccb28333eb241405aaa1e573cf4799ad54"
+        "f7f0ef5ddda5feb3ad71e2781e4e894b45cebe343bd35d72a03c43e8da75c210"
 
     @Test
     func testTaskGrantContractFixtureIsTheServersCopy() throws {

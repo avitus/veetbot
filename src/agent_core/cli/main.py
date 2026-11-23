@@ -1708,10 +1708,11 @@ async def _memory_probe(
     paths: list[str],
     live_model: bool,
     questions: str | None = None,
+    model_policy: str | None = None,
 ) -> dict[str, Any]:
     # The probe driver lives with the evaluators; the entry point reaches it
     # only at call time, the way the other eval commands do.
-    from agent_core.config import load_settings
+    from agent_core.config import PRODUCTION_MODEL_POLICY, load_settings
     from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 
     database = cast(Any, importlib.import_module("agent_core.evals.general_recall_database"))
@@ -1734,18 +1735,39 @@ async def _memory_probe(
         return await app.runs.wait_terminal(run_id)
 
     selected = [path for path in paths if path in {"automatic", "deliberate"}]
-    async with build(storage="postgres", script=script) as composition:
-        if loaded is None:
+
+    async def observe(composition: Any, stand_in: Any) -> Any:
+        probes = loaded
+        if probes is None:
             # The clone carries the question set as it stood when it was taken.
-            loaded = await _stored_question_probes(composition, questions or "all")
-        report = await driver.observe_probes(
+            probes = await _stored_question_probes(composition, questions or "all")
+        return await driver.observe_probes(
             composition,
             script,
-            loaded.probes,
+            probes.probes,
             finish=finish,
             paths=selected or None,
-            probe_digest=loaded.digest,
+            probe_digest=probes.digest,
+            stand_in=stand_in,
         )
+
+    # A probe clone is never a production deployment, so an omitted policy is
+    # resolved here: left to the composition, a live run would be on the fake
+    # model rather than the default chat model the option promises.
+    chat_policy = model_policy or PRODUCTION_MODEL_POLICY
+    if script is None:
+        async with build(storage="postgres", script=None, model_policy=chat_policy) as live:
+            report = await observe(live, None)
+    else:
+        # A scripted run is labelled as the chat model, so it packs memories
+        # into that model's budget and is admitted to the recall a real chat
+        # gets; the scripted provider still answers and no model is called
+        # (ADR-0343).
+        async with driver.scripted_chat(script, model_policy=chat_policy, storage="postgres") as (
+            scripted,
+            stand_in,
+        ):
+            report = await observe(scripted, stand_in)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(report.model_dump_json(indent=2), encoding="utf-8")
     return cast(dict[str, Any], report.summary.model_dump(mode="json"))
@@ -1774,6 +1796,14 @@ def memory_probe(
         bool,
         typer.Option("--live-model", help="Use the configured model instead of a scripted answer."),
     ] = False,
+    model_policy: Annotated[
+        str | None,
+        typer.Option(
+            "--model-policy",
+            help="The chat model the runs are on, by policy name; the default chat model if "
+            "omitted. A scripted run carries its identity and limits and calls no model.",
+        ),
+    ] = None,
 ) -> None:
     """Replay owner recall probes through the run loop against a probe clone."""
 
@@ -1789,6 +1819,7 @@ def memory_probe(
                 [item.strip() for item in paths.split(",")],
                 live_model,
                 questions,
+                model_policy,
             )
         )
     except (ConfigurationError, ValueError) as exc:

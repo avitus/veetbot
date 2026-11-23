@@ -3,6 +3,8 @@
 - Status: Accepted implementation mechanism under ADR-0178; activation remains gated
 - Date: 2026-10-12
 - Related: ADR-0180, ADR-0181, ADR-0182, ADR-0185, ADR-0187
+- Amended by: ADR-0343, under which the owner's standing admission binds no reader;
+  the reader binding below holds for evidence-bound admissions
 - Detailed design: `docs/plan/general-memory-recall.md`
 
 ## Decision

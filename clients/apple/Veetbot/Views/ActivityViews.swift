@@ -421,15 +421,38 @@ struct ApprovalCard: View {
                     .accessibilityIdentifier("approval.reason")
             }
             if !approval.status.isPending { technicalDetails }
+            if approval.offersJobRequestGrant, let offer = approval.jobRequestGrantOffer {
+                // ADR-0344: what one approval for the rest of the request allows.
+                Text(offer.summary)
+                    .veetType(.meta)
+                    .foregroundColor(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("approval.job-request.summary")
+            }
             if approval.status.isPending {
                 DenialReasonField(text: $denialReason)
                     .disabled(inFlight != nil)
                 ApprovalDecisionButtons {
-                    Button { resolve(.approveOnce, nil) } label: {
-                        ApprovalDecisionLabel(title: "Approve once", decision: .approveOnce, inFlight: inFlight)
+                    if approval.offersJobRequestGrant {
+                        Button { resolve(.approveForRequest, nil) } label: {
+                            ApprovalDecisionLabel(
+                                title: "Allow for this request", decision: .approveForRequest,
+                                inFlight: inFlight
+                            )
+                        }
+                        .accessibilityIdentifier("approval.allow-for-request")
+                    } else {
+                        Button { resolve(.approveOnce, nil) } label: {
+                            ApprovalDecisionLabel(title: "Approve once", decision: .approveOnce, inFlight: inFlight)
+                        }
                     }
                 } secondary: {
-                    EmptyView()
+                    if approval.offersJobRequestGrant {
+                        Button { resolve(.approveOnce, nil) } label: {
+                            ApprovalDecisionLabel(title: "Approve once", decision: .approveOnce, inFlight: inFlight)
+                        }
+                        .accessibilityIdentifier("approval.allow-once")
+                    }
                 } deny: {
                     Button(role: .destructive) {
                         let reason = denialReason.trimmingCharacters(in: .whitespacesAndNewlines)

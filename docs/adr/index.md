@@ -15,6 +15,8 @@ title: Architecture Decisions
 - [ADR-0340: Email memories are kept by the thread's importance, and mail from people the owner knows forms first-class memories (Accepted)](0340-email-memories-keep-by-importance.md)
 - [ADR-0341: One fact in an email thread forms one memory (Accepted)](0341-one-memory-per-email-fact.md)
 - [ADR-0342: Code mode runs a model-written script over the sandbox bridge (Accepted)](0342-code-mode-over-the-sandbox-bridge.md)
+- [ADR-0343: The standing recall admission binds no reader, and a question run is labelled as the chat model (Accepted)](0343-standing-recall-binds-no-reader.md)
+- [ADR-0344: One approval for a request that changes a saved job (Accepted)](0344-one-approval-for-a-job-repair-request.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the

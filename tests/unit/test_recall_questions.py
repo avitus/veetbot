@@ -69,6 +69,14 @@ def test_a_question_that_measures_nothing_is_refused() -> None:
     assert _content(expected=(), delivered_must_contain=("Erin",)).delivered_must_contain
 
 
+@pytest.mark.parametrize("field", ["forbidden", "answer_must_not_contain"])
+def test_a_text_that_must_stay_out_is_a_measure_on_its_own(field: str) -> None:
+    """A question may name only what must not come back: its run fails when it does."""
+    content = _content(expected=(), **{field: ("the old invoice notice",)})
+
+    assert getattr(content, field) == ("the old invoice notice",)
+
+
 @pytest.mark.parametrize(
     "field",
     ["forbidden", "delivered_must_contain", "answer_must_contain", "answer_must_not_contain"],
@@ -136,6 +144,32 @@ def test_a_probe_file_line_imports_as_question_content_and_back() -> None:
     probe = probe_from_question(question)
 
     assert content_from_probe(probe) == question.content
+
+
+def test_a_probe_line_that_only_forbids_a_text_imports_as_a_question_and_back() -> None:
+    """A negative check as a probe file writes it: nothing expected, one text forbidden."""
+    probe = Probe.model_validate(
+        {
+            "id": "stale-notice-not-kept",
+            "incident": "owner-questions-holdout",
+            "family": "attributes",
+            "question": "Is there a payment I still need to finish?",
+            "search_text": "unfinished payment",
+            "scope": "general",
+            "paths": ["automatic", "deliberate"],
+            "expected": [],
+            "min_required_rendered": 0,
+            "forbidden": [{"statement_contains": "the old invoice notice"}],
+        }
+    )
+
+    content = content_from_probe(probe)
+
+    assert content.expected == () and content.forbidden == ("the old invoice notice",)
+    again = probe_from_question(_question("stale-notice-not-kept", **content.model_dump()))
+    assert again.min_required_rendered == 0
+    assert [item.statement_contains for item in again.forbidden] == ["the old invoice notice"]
+    assert content_from_probe(again) == content
 
 
 def test_a_save_probe_is_not_a_question() -> None:

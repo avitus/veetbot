@@ -51,7 +51,8 @@
         },
         "task_grant_id": null,
         "task_grant_not_covered": null,
-        "request_grant_offer": null
+        "request_grant_offer": null,
+        "job_request_grant_offer": null
       }
     },
     {
@@ -103,7 +104,8 @@
         },
         "task_grant_id": "ecb511f1-2976-5326-9f73-9748dc26211f",
         "task_grant_not_covered": null,
-        "request_grant_offer": null
+        "request_grant_offer": null,
+        "job_request_grant_offer": null
       }
     },
     {
@@ -144,7 +146,8 @@
           "grant_id": "ecb511f1-2976-5326-9f73-9748dc26211f",
           "reason": "browser.task_grant.excluded.payment"
         },
-        "request_grant_offer": null
+        "request_grant_offer": null,
+        "job_request_grant_offer": null
       }
     },
     {
@@ -181,7 +184,8 @@
         "task_grant_offer": null,
         "task_grant_id": null,
         "task_grant_not_covered": null,
-        "request_grant_offer": null
+        "request_grant_offer": null,
+        "job_request_grant_offer": null
       }
     },
     {
@@ -209,7 +213,8 @@
         "task_grant_offer": null,
         "task_grant_id": null,
         "task_grant_not_covered": null,
-        "request_grant_offer": null
+        "request_grant_offer": null,
+        "job_request_grant_offer": null
       }
     }
   ],

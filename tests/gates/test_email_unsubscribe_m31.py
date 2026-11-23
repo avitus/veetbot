@@ -6,6 +6,7 @@ first-party Gmail boundary and a recording one-click transport; no model runs.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -66,6 +67,7 @@ from agent_core.policy.engine import evaluate_deterministic
 from agent_core.ports.email import EmailStore
 from agent_core.tools.email_unsubscribe import EmailSubscriptionsTool, EmailUnsubscribeTool
 from agent_core.tools.registry import StaticToolRegistry
+from tests.gates.test_email_arrival_checks_m26 import _caught_up
 from tests.gates.test_email_m18 import _action, _email_settings, _principal, _ruleset, _run
 from tests.gates.test_email_runtime_m26 import _assessment_turn, _mailbox_factory, _page, _profile
 
@@ -144,6 +146,9 @@ class Mailbox:
 
     inbox: list[dict[str, Any]] = field(default_factory=list)
     blocks: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Conversations Gmail's change feed reports once, and what reading each returns.
+    changes: list[str] = field(default_factory=list)
+    pages: dict[str, dict[str, Any]] = field(default_factory=dict)
     sender_results: list[dict[str, Any]] | None = None
     calls: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
     write_result: str = "success"
@@ -164,6 +169,8 @@ class Mailbox:
             return {"threads": self.inbox if "in:inbox" in query else []}
         if name == "get_unsubscribe":
             return self.blocks[arguments["message_id"]]
+        if name == "get_thread_page" and arguments["thread_id"] in self.pages:
+            return copy.deepcopy(self.pages[arguments["thread_id"]])
         if name == "get_thread_page":
             value = _page()
             value["thread_id"] = arguments["thread_id"]
@@ -176,10 +183,19 @@ class Mailbox:
             value["complete"] = False
             return value
         if name == "sync_changes":
+            changed, self.changes = self.changes, []
             return {
                 "schema_version": 1,
-                "history_id": "100",
-                "changes": [],
+                "history_id": "101" if changed else "100",
+                "changes": [
+                    {
+                        "kind": "message_added",
+                        "thread_id": thread_id,
+                        "message_id": f"{thread_id}-m",
+                        "label_ids": ["INBOX"],
+                    }
+                    for thread_id in changed
+                ],
                 "resync_required": False,
                 "next_page_token": None,
             }
@@ -345,7 +361,70 @@ async def test_census_rides_refresh_without_queries_models_or_dollars() -> None:
         assert transport.posts == [], "building the census must never dial a sender"
 
 
-# -- gates 3, 8, 9, 16 --------------------------------------------------------------------------
+def _conversation(
+    thread_id: str,
+    message_id: str,
+    sender: str,
+    *,
+    offered: str = "one_click",
+    list_id: str = "",
+    labels: tuple[str, ...] = ("INBOX",),
+    direction: str = "received",
+) -> dict[str, Any]:
+    """One conversation as a full thread read returns it, naming its message's offer."""
+    value = _page(sent_at=NOW - timedelta(days=1))
+    value.update(thread_id=thread_id, complete=False)
+    value["messages"][0].update(
+        {
+            "id": message_id,
+            "thread_id": thread_id,
+            "from": sender,
+            "date": _date(1),
+            "label_ids": list(labels),
+            "direction": direction,
+            "body_complete": False,
+            "body_available": False,
+            "list_id": list_id,
+            "unsubscribe_offer": offered,
+        }
+    )
+    return value
+
+
+async def test_census_folds_new_mail_once_an_account_has_caught_up() -> None:
+    """New mail on a caught-up account reaches the census through the conversation read.
+
+    Regression (2026-11-22): once an account caught up, new mail arrived only through
+    Gmail's change feed, which lists no summaries, so no new sender ever formed a record.
+    """
+    mailbox, transport = Mailbox(), Transport()
+    mailbox.blocks["news-m1"] = _block("news-m1")
+    async with _app(mailbox, transport) as app:
+        await _caught_up(app)
+        mailbox.pages = {
+            "news-1": _conversation("news-1", "news-m1", "News <news@shop.example.com>"),
+            "junk-1": _conversation("junk-1", "junk-m1", "Spam <x@spam.example>", labels=("SPAM",)),
+            "plain-1": _conversation(
+                "plain-1", "plain-m1", "Friend <friend@example.org>", offered="none"
+            ),
+            "own-1": _conversation(
+                "own-1", "own-m1", "Owner <owner@example.test>", labels=("SENT",), direction="sent"
+            ),
+        }
+        mailbox.changes = list(mailbox.pages)
+        await _refresh(app)
+        assert {call["thread_id"] for call in mailbox.named("get_thread_page")} == set(
+            mailbox.pages
+        )
+        [row] = await _rows(app)
+        assert (row["address"], row["thread_count"]) == ("news@shop.example.com", 1)
+        assert (row["mechanism"], row["state"]) == ("one_click", "active")
+        # It still issues no query of its own: the conversation was read for new mail anyway.
+        assert mailbox.named("search_threads") == []
+        assert transport.posts == []
+
+
+# -- gates 3, 8, 9, 16--------------------------------------------------------------------------
 
 
 async def test_unsubscribe_destination_is_server_derived() -> None:

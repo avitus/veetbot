@@ -1681,12 +1681,18 @@ approval that carries a `request_grant_offer`, and its body repeats the
 offered profile id. An approval view carries `request_grant_offer` beside
 `task_grant_offer`: the profile id and generation, the login's origins,
 `duration_seconds` (7200) and a server-authored `summary`. A client that does
-not know the field or the decision shows the card without it.
+not know the field or the decision shows the card without it. Since ADR-0344
+`approve_for_request` is also valid for a `job.manage`, `job.run` or
+`schedule.update` approval carrying `job_request_grant_offer` (the job `slug`,
+its access `ceilings`, `duration_seconds` 7200 and a `summary`); its
+`request_grant` repeats `job_slug` instead of `profile_id`, exactly one of the
+two, and it requires `jobs.run` instead of `browser.grant.write`.
 
 ```json
 {"decision": "approve_once"}
 {"decision": "approve_for_task", "task_grant": {"origin": "https://www.example.com", "path_prefix": "/lesson"}}
 {"decision": "approve_for_request", "request_grant": {"profile_id": "6f1c…"}}
+{"decision": "approve_for_request", "request_grant": {"job_slug": "emerging-market-radar"}}
 {"decision": "deny", "reason": "Do not perform this action."}
 ```
 

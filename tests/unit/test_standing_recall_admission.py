@@ -310,6 +310,63 @@ async def test_composition_admits_standing_local_recall_with_interactive_queries
     await services.close()
 
 
+async def _owner_chat_admitted(kwargs: dict[str, Any], reader: str) -> bool:
+    """Whether a live owner chat whose run selected `reader` may use semantic recall.
+
+    The semantic index configuration these suites install reviewed the reader "aaa…".
+    """
+
+    from tests.contract.support import RUN_ID, SESSION_ID
+    from tests.contract.test_local_query_authority import setup
+    from tests.contract.test_runtime_semantic_queries_contract import revise_checkpoint
+
+    factory, _, _, _, _ = await setup()
+    await revise_checkpoint(factory, budget_state={"context_reader_sha256": reader})
+    kwargs["factory"] = factory
+    services = await compose_indexing(**kwargs)
+    assert services is not None and services.queries is not None
+    try:
+        return await services.queries.validate_authority(
+            session_id=SESSION_ID, run_id=RUN_ID, surface_id="private"
+        )
+    finally:
+        await services.close()
+
+
+@pytest.mark.parametrize("reader", ["a" * 64, "b" * 64])
+async def test_standing_recall_follows_the_owner_to_another_chat_model(
+    tmp_path: Path, reader: str
+) -> None:
+    """A model or registry change must not withdraw the owner's standing decision (ADR-0343)."""
+
+    kwargs, _, _ = await _standing_local_options(tmp_path)
+    assert await _owner_chat_admitted(kwargs, reader)
+
+
+async def test_evidence_bound_recall_still_withholds_a_changed_reader(tmp_path: Path) -> None:
+    """Quality evidence certifies the reader it was measured with, and only that one."""
+
+    from tests.unit.test_local_semantic_composition import local_options
+
+    kwargs, _, _, _ = await local_options(tmp_path / "reviewed")
+    assert await _owner_chat_admitted(kwargs, "a" * 64)
+    kwargs, _, _, _ = await local_options(tmp_path / "changed")
+    assert not await _owner_chat_admitted(kwargs, "b" * 64)
+
+
+async def test_composition_admits_standing_recall_with_no_reviewed_reader(
+    tmp_path: Path,
+) -> None:
+    kwargs, _, _ = await _standing_local_options(tmp_path)
+    path = kwargs["settings"].config_dir / "memory" / "semantic-index.yaml"
+    document = json.loads(path.read_text())
+    document["configurations"][0].pop("reader_sha256")
+    path.write_text(json.dumps(document))
+    services = await compose_indexing(**kwargs)
+    assert services is not None and services.queries is not None
+    await services.close()
+
+
 async def test_composition_refuses_standing_admission_on_a_remote_profile(
     tmp_path: Path,
 ) -> None:

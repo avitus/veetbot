@@ -12,7 +12,12 @@ from uuid import UUID, uuid5
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.email_semantics import EmailSemanticSource
-from agent_core.domain.email_signature import SIGNATURE_CONTEXT, SIGNATURE_NAMESPACE, sender_contact
+from agent_core.domain.email_signature import (
+    SIGNATURE_CONTEXT,
+    SIGNATURE_NAMESPACE,
+    sender_contact,
+    signature_end,
+)
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
 from agent_core.domain.memory import Sensitivity
 from agent_core.domain.people import (
@@ -230,14 +235,7 @@ async def project_signature(
                         context=SIGNATURE_CONTEXT,
                         verification="contextual",
                         valid_from=sent_at,
-                        valid_to=min(
-                            (
-                                at
-                                for at, said in signatures.items()
-                                if at > sent_at and key not in said
-                            ),
-                            default=None,
-                        ),
+                        valid_to=signature_end(sent_at, key, signatures),
                         support_ids=[source_id],
                         **common,
                     ),

@@ -17,7 +17,8 @@ from __future__ import annotations
 import hashlib
 import html
 import re
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -61,16 +62,59 @@ async def _wait(app: Any, run_id: UUID) -> Run:
     return cast(Run, await app.runs.wait_terminal(run_id))
 
 
-def _rewind(app: Any, script: FakeModelScript | None, turns: list[ScriptedTurn]) -> None:
+def _rewind(
+    app: Any, script: FakeModelScript | None, turns: list[ScriptedTurn], stand_in: Any = None
+) -> None:
     """Give the scripted provider this run's turns from the top."""
 
     if script is None:
         return
     script.turns[:] = turns
-    provider = getattr(app.executor, "model_provider", None)
-    rewind = getattr(provider, "rewind", None)
-    if callable(rewind):
-        rewind()
+    for provider in (getattr(app.executor, "model_provider", None), stand_in):
+        rewind = getattr(provider, "rewind", None)
+        if callable(rewind):
+            rewind()
+
+
+@asynccontextmanager
+async def scripted_chat(
+    script: FakeModelScript, *, model_policy: str, **build_arguments: Any
+) -> AsyncIterator[tuple[Any, Any]]:
+    """Compose scripted runs that carry the identity of the chat model a real chat uses.
+
+    A run takes the budget it packs memories into, and the reader its semantic
+    recall is admitted for, from the model it is on. A scripted composition is
+    otherwise on the fake model, whose limits and reader no real chat has, so
+    it measured recall a chat never gets (ADR-0343). Here the run is routed to
+    `model_policy` like a chat, the model's own adapter is never constructed,
+    and the scripted provider answers in its place: no model is called.
+
+    Yields the composition and that provider; hand the provider to
+    `observe_probes` as `stand_in` so each run starts its script over.
+    """
+
+    from agent_core import bootstrap
+    from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
+    from agent_core.config import PACKAGE_ROOT, load_settings
+    from agent_core.model.registry import ProviderRegistry, StaticModelRouter
+
+    settings = build_arguments.get("settings") or load_settings()
+    clock = build_arguments.get("clock") or bootstrap.system_clock()
+    registry = ProviderRegistry.load(
+        PACKAGE_ROOT / "models", adapters=ADAPTER_DEFINITIONS, overlay_root=settings.config_dir
+    )
+    resolved = await StaticModelRouter(registry, clock).resolve(
+        model_policy, tenant_id="owner-recall-probe"
+    )
+    stand_in = bootstrap.scripted_provider(script, clock)
+    async with bootstrap.build(
+        script=script,
+        model_policy=model_policy,
+        model_provider_overrides={resolved.provider: stand_in},
+        model_metadata_only=True,
+        **build_arguments,
+    ) as app:
+        yield app, stand_in
 
 
 async def observe_probes(
@@ -82,11 +126,14 @@ async def observe_probes(
     paths: Sequence[PathKind] | None = None,
     probe_digest: str | None = None,
     now: datetime | None = None,
+    stand_in: Any = None,
 ) -> ProbeReport:
     """Run every probe path and write probe, return the content-free report.
 
     With a scripted model the answer is fixed, so Used and answer correctness
-    are not judged; with the live model (`script is None`) they are.
+    are not judged; with the live model (`script is None`) they are. `stand_in`
+    is the scripted provider of a `scripted_chat` composition, which answers
+    in a routed model's place and is started over with each run.
     """
 
     captured: list[RecallResult] = []
@@ -107,11 +154,11 @@ async def observe_probes(
                 if paths is not None and path not in paths:
                     continue
                 path_observations.append(
-                    await _observe_path(app, script, probe, path, captured, finish)
+                    await _observe_path(app, script, probe, path, captured, finish, stand_in)
                 )
             save = None
             if probe.write is not None:
-                save = await _observe_save(app, script, probe, finish)
+                save = await _observe_save(app, script, probe, finish, stand_in)
             observations.append(
                 ProbeObservation(
                     probe_id=probe.id,
@@ -169,8 +216,9 @@ async def _observe_path(
     path: PathKind,
     captured: list[RecallResult],
     finish: Finish,
+    stand_in: Any = None,
 ) -> PathObservation:
-    _rewind(app, script, _script_turns(probe, path))
+    _rewind(app, script, _script_turns(probe, path), stand_in)
     session_id = await app.sessions.create()
     started = perf_counter()
     run_id = await app.runs.submit(probe.question, session_id=session_id)
@@ -383,7 +431,7 @@ def _locate(
 
 
 async def _observe_save(
-    app: Any, script: FakeModelScript | None, probe: Probe, finish: Finish
+    app: Any, script: FakeModelScript | None, probe: Probe, finish: Finish, stand_in: Any = None
 ) -> SaveObservation:
     assert probe.write is not None
     write = probe.write
@@ -413,7 +461,7 @@ async def _observe_save(
                 turns.append(ScriptedTurn(tool_calls=[search], stop_reason=StopReason.TOOL_USE))
             turns.append(ScriptedTurn(tool_calls=[remember], stop_reason=StopReason.TOOL_USE))
         turns.append(ScriptedTurn(text=SCRIPTED_ANSWER))
-        _rewind(app, script, turns)
+        _rewind(app, script, turns, stand_in)
     session_id = await app.sessions.create()
     run_id = await app.runs.submit(probe.question, session_id=session_id)
     run = await finish(app, run_id)

@@ -29,6 +29,7 @@ from agent_core.domain.folders import (
     FolderWithdrawalReason,
     ThreadFolder,
 )
+from agent_core.domain.job_request_grants import JobRequestGrantOffer
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
@@ -257,6 +258,8 @@ class ApprovalView(BaseModel):
     task_grant_not_covered: TaskGrantNotCovered | None = None
     # ADR-0302: the request-approval offer on a browser.act card. Additive.
     request_grant_offer: BrowserRequestGrantOffer | None = None
+    # ADR-0344: the request-approval offer on a job card. Additive.
+    job_request_grant_offer: JobRequestGrantOffer | None = None
 
 
 class DeviceView(BaseModel):

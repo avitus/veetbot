@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-23 — Review repairs before promotion
+
+- A job approval card's digest of a long source is now of the whole source
+  the job saves, not of the truncated text on the card.
+- `agent memory probe --live-model` without `--model-policy` runs on the
+  default chat model, not the fake model.
+- Erasing a message also takes its end from an earlier stored revision of a
+  signature detail whose current end you set yourself; your end stays.
+
 ## 2026-11-22 — Code mode: budget, approvals and Chat (ADR-0342)
 
 - A step in which Veetbot only runs scripts, and the scripts call at least one
@@ -35,6 +44,44 @@ title: Changelog
   production sandbox and a check that the live model reaches for a script
   when it should.
 
+## 2026-11-22 — One approval for a request that changes a saved job (ADR-0344)
+
+- Repairing a Cockpit widget's collector no longer asks at every step. A card
+  for testing, saving or running a job, or for repinning its schedule, now
+  offers "Allow for this request". One tap covers that job's later tests,
+  saves, runs and schedule repins until your next message, for at most two
+  hours.
+- It covers only access the job already has: the same websites with the same
+  keys, MCP servers and feeds, and no larger time, request, size or model
+  limits. New access, other jobs, new schedules and schedule timing changes
+  still ask.
+- Older apps show Approve once and Deny as before.
+
+## 2026-11-22 — Subscriptions keeps finding new senders after catch-up
+
+- Subscriptions stopped finding new senders once an account had caught up on
+  its mail: new mail arrives through Gmail's change feed, and the census
+  read only inbox listings. On the owner's accounts it had frozen in late
+  September (Personal) and on November 9 (Work).
+- The census now also folds every conversation refresh reads. The Gmail read
+  server names each message's `List-Id` and the kind of unsubscribe it
+  offers, never where it points, so new mail forms a subscription exactly as
+  a listed summary would. It still issues no query of its own.
+
+## 2026-11-22 — A model change no longer turns semantic recall off (ADR-0343)
+
+- Semantic recall stays on when a model is added to the model list, when you
+  choose another chat model, and when you change its reasoning effort. The
+  release of 2026-11-21 added a model, and every chat since had answered from
+  word-match recall alone, with no error and nothing in the logs. On the
+  stored question set that was 72 of 114 questions passed against 81.
+- The standing decision to keep semantic recall on now binds no chat model.
+  A trial still binds the one model its evidence was measured with, and the
+  run workers' journal now says when a changed model withholds recall.
+- `agent memory probe` labels its scripted runs as the chat model
+  (`--model-policy`, the default chat model if omitted), so a question run
+  measures the recall a chat gets. No model is called.
+
 ## 2026-11-21 — Code mode, first slice (ADR-0342)
 
 - Veetbot can now be given one tool that runs a short Python script, and the
@@ -47,6 +94,29 @@ title: Changelog
 - This is off by default (`AGENT_CODE_MODE_ENABLED`). Chat does not use it yet:
   the step refund, the instructions that tell Chat when to use it and the
   speed measurements are still to come.
+## 2026-11-21 — Refine draft shows that Veetbot is working
+
+- Pressing Refine draft in the Email reply now shows a spinner and
+  "Refining…" on the button, with the current preparation step beneath it,
+  until the rewritten draft arrives. The press used to look as if nothing
+  had happened, although the refinement ran.
+
+## 2026-11-21 — A recall question may name only what must stay out (ADR-0339)
+
+- A recall question that names only memory text that must not be recalled, or
+  only words the answer must not contain, is now accepted, as the plan says.
+  It was refused as measuring nothing, so a negative check such as "a stale
+  notice must stay gone" could not be imported or added on the question page.
+
+## 2026-11-21 — Erasing a message takes back what its signature ended (ADR-0336)
+
+- When the message that carried someone's newest signature is erased, the
+  earlier title or number it had ended is current again in People, or ends at
+  the next remaining signature that leaves it out. Before, the earlier detail
+  stayed ended with no current one until that person's next signed mail.
+- This holds for every way a message is erased: excluding it, erasing its
+  mailbox data or its session, and People forget. A detail the owner ended
+  stays ended.
 
 ## 2026-11-20 — Email memory, signature and Email screen repairs from review (ADR-0336, ADR-0340, ADR-0341)
 
