@@ -397,6 +397,16 @@ class JobRunTool:
                             if approval is None
                             else revision_grant_id(approval.id, revision.id)
                         )
+                        if str(grant_id) in saved.grants:
+                            # That approval already bound other access to this
+                            # revision, and a run record or schedule may name it;
+                            # authorization saw no collision, so another run
+                            # wrote it since (ADR-0344 decision 4).
+                            return _failure(
+                                "job.approval_required",
+                                "This approval already holds other access for this job "
+                                "revision; approve this run's access on its own.",
+                            )
                         grant = JobGrant(
                             id=grant_id,
                             access=access,

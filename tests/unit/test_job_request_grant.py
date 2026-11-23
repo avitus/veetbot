@@ -758,3 +758,53 @@ async def test_a_run_the_request_authorized_binds_its_grant_to_the_request_appro
         saved = await uow.jobs.get(principal(), SLUG)
     assert saved.grants[str(expected)].approval_id == APPROVAL
     assert result.structured is not None and result.structured["grant_id"] == str(expected)
+
+
+async def test_a_run_never_replaces_the_grant_its_request_approval_already_bound() -> None:
+    """Two runs the request authorized together, with different access: the
+    second must not overwrite the grant the first bound, which a run record or
+    schedule may already name (ADR-0344 decision 4)."""
+    from unittest.mock import AsyncMock
+
+    from agent_core.application.job_execution import JobExecution
+    from agent_core.tools.jobs import JobRunTool, JobToolset
+    from tests.unit.test_job_publication import setup
+
+    factory, publication, _, _ = await setup()
+    first_access = access(inputs={"config": {"news_queries": ["seed"]}})
+    bound = JobGrant(
+        id=revision_grant_id(APPROVAL, NEW_REVISION),
+        access=first_access,
+        created_at=NOW,
+        approval_id=APPROVAL,
+    )
+    saved = job()
+    async with factory() as uow:
+        await uow.jobs.put(
+            saved.model_copy(update={"grants": {**saved.grants, str(bound.id): bound}}),
+            expected_version=None,
+        )
+        await uow.approvals.create(
+            approval(
+                status=ApprovalStatus.APPROVED,
+                resolution=ApprovalResolutionType.APPROVE_FOR_REQUEST,
+                resolved_at=NOW,
+                resolved_by=principal().principal_id,
+                session_id=tool_context().session_id,
+                run_id=tool_context().run_id,
+            )
+        )
+    execution = AsyncMock(spec=JobExecution)
+    execution.run.return_value = AsyncMock(value=1, diagnostics=[], broker_calls=0)
+    context = replace(
+        tool_context(),
+        principal=tool_context().principal.model_copy(update={"scopes": {"jobs.run"}}),
+        request_approval_id=APPROVAL,
+    )
+    _, arguments = job_run(access(inputs={"config": {"other": True}}))
+    result = await JobRunTool(JobToolset(publication, execution)).execute(arguments, context)
+    assert not result.ok
+    execution.run.assert_not_called()
+    async with factory() as uow:
+        kept = await uow.jobs.get(principal(), SLUG)
+    assert kept.grants[str(bound.id)].access == first_access
