@@ -643,10 +643,13 @@ work, and both leave the turn's origin taint in force.
   and the turn's origin trust is `USER` or `MEMORY`. A turn that has read an
   external or knowledge result is neither, so its next script asks. So does a
   script after an earlier script's result, which is `EXTERNAL_UNTRUSTED`.
-  Recalled memory does not make a script ask. A script effects nothing by
-  itself: each call it makes crosses the bridge and is judged under that
-  call's own argument and origin trust. This rule never applies to a bridged
-  call, because the bridge refuses a sandbox tool. `sandbox.run_command` has
+  Recalled memory does not make a script ask. A script can read and change
+  the sandbox workspace of its own run directly, before any check; that
+  workspace has no network and no credentials and is destroyed with the
+  run's sandbox. Everything else a script does is a call that crosses the
+  bridge, and each such call is judged under its own argument and origin
+  trust. This rule never applies to a bridged call, because the bridge
+  refuses a sandbox tool. `sandbox.run_command` has
   no such rule.
 
 The direction is the whole design. Raising on a match can only be wrong by

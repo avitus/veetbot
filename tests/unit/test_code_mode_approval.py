@@ -291,8 +291,9 @@ def test_source_written_in_a_turn_that_read_nothing_outside_is_veetbots_own() ->
 
 @pytest.mark.parametrize("read", [None, TrustLevel.MEMORY, TrustLevel.INTERNAL_TOOL])
 def test_memory_in_the_context_does_not_make_a_script_ask(read: TrustLevel | None) -> None:
-    # Production Chat always carries the owner's memory. A script is not an
-    # external effect, and each call it makes is judged under its own trust.
+    # Production Chat always carries the owner's memory. A script reaches only
+    # its run's sandbox workspace directly, and each call it makes is judged
+    # under its own trust.
     assert _trust(_checkpoint(context=TrustLevel.MEMORY, read=read)) is TrustLevel.INTERNAL_TOOL
 
 

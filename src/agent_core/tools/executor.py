@@ -527,8 +527,9 @@ def _argument_trust(
         return dict.fromkeys(arguments, TrustLevel.INTERNAL_TOOL)
     # ADR-0342: a script written in a turn the owner opened, before the turn
     # read any outside content, is Veetbot's own work on that request. Recalled
-    # memory does not change that: the script effects nothing by itself, and
-    # each tool call it makes is judged under that call's own trust.
+    # memory does not change that. The script can read and change its run's
+    # sandbox workspace directly, which has no network and no credentials;
+    # every tool call it makes is judged under that call's own trust.
     if (
         tool_name == SANDBOX_RUN_CODE_TOOL_NAME
         and _active_turn_facts(checkpoint).newest_user_trust is TrustLevel.USER
