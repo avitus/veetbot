@@ -360,7 +360,7 @@ message read late takes its place in that sequence, ending an earlier copy that
 still held at its sent time. The details and the interval each one held are
 therefore the same whatever order mail is processed in. A detail the owner
 ended is never added again, and the end the owner set is not moved. Erasing or excluding a message removes its copies, and a detail that
-other retained messages also stated remains on theirs.
+other retained messages also stated remains on theirs. An end that message had set on an earlier copy goes with it, from every stored revision: the copy is current again, or ends at the earliest later remaining signature that omits it, so the record is what the remaining mail alone gives. A copy records when it ended and not which message ended it, so both stores find those ends, inside every erasure, by the erased message's sent time.
 
 ### Merge and split
 

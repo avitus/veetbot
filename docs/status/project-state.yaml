@@ -114,6 +114,15 @@
 # saved jobs. Each schedule names its servers, the approval lists them, and a
 # job's grant names what it may read. Implemented, not yet delivered: the schedule
 # environment must mirror AGENT_SVP_ENABLED first. No milestone or gate moves.
+# ADR-0343 (Accepted, 2026-11-22): a release that added a model to the model
+# list silently turned semantic recall off in the owner's chats, because the
+# query authority still admitted one reviewed reader although the standing
+# admission (ADR-0290) binds none. The owner approved the repair: under the
+# standing admission no reader is bound or required; evidence-bound routes keep
+# the binding and now log when it withholds a run. `agent memory probe` labels
+# its scripted runs as the chat model, so the question set measures the recall
+# a chat gets. First baseline on a production clone, 114 questions: 81 pass
+# with semantic recall, 72 without. Sandbox tests only. No milestone or gate moves.
 # ADR-0341 (Accepted, 2026-11-20): production held the same email fact many
 # times (271 of 668 live email memories repeated a value from their own thread).
 # The owner chose rules in code: one memory per fact per message whatever the

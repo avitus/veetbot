@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from agent_core.domain.email_signature import (
     SIGNATURE_NAMESPACE,
     SignatureContact,
     sender_contact,
+    signature_end,
 )
 from agent_core.domain.people import normalize_identifier
 
@@ -378,3 +381,18 @@ def test_signature_numbers_compare_by_digits_and_never_as_e164() -> None:
         normalize_identifier("phone", "owner", "650.378.6038")
     with pytest.raises(ValueError):
         normalize_identifier("phone", SIGNATURE_NAMESPACE, "call me")
+
+
+def test_a_detail_ends_at_the_earliest_later_signature_that_omits_it() -> None:
+    first = datetime(2026, 11, 2, 9, tzinfo=UTC)
+    second, third, fourth = (first + timedelta(days=days) for days in (2, 4, 6))
+    signatures = {first: {"analyst"}, second: {"analyst"}, third: {"partner"}, fourth: {"director"}}
+    # A later signature that repeats it does not end it; the first that omits it does.
+    assert signature_end(first, "analyst", signatures) == third
+    assert signature_end(third, "partner", signatures) == fourth
+    assert signature_end(fourth, "director", signatures) is None
+    # With the third signature gone, only what remains is read.
+    del signatures[third]
+    assert signature_end(first, "analyst", signatures) == fourth
+    # Another signature sent at the same instant is not a later one.
+    assert signature_end(fourth, "analyst", signatures) is None

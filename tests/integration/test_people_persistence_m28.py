@@ -22,6 +22,7 @@ from tests.contract.test_people_store_contract import (
     people_directory_contract,
     people_duplicate_source_erasure_contract,
     people_email_erasure_contract,
+    people_erased_signature_contract,
     people_generated_summary_contract,
     people_history_paging_contract,
     people_identifier_lookup_contract,
@@ -351,6 +352,7 @@ async def test_postgres_people_store_contract() -> None:
             await people_review_directory_contract(PostgresPeopleStore(session, FixedClock(NOW)))
             await people_merge_suggestion_contract(PostgresPeopleStore(session, FixedClock(NOW)))
             await people_generated_summary_contract(PostgresPeopleStore(session, FixedClock(NOW)))
+            await people_erased_signature_contract(PostgresPeopleStore(session, FixedClock(NOW)))
             await session.commit()
     finally:
         await engine.dispose()

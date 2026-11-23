@@ -15,6 +15,7 @@ from agent_core.domain.browser_task_grants import (
     BrowserTaskGrantOffer,
     TaskGrantNotCovered,
 )
+from agent_core.domain.job_request_grants import JobRequestGrantOffer
 from agent_core.domain.policies import ActionKind, PolicyDecision, RiskLevel
 
 
@@ -111,6 +112,8 @@ class ApprovalRequest(BaseModel):
     # ADR-0302: the request-approval offer on a browser.act card. Older
     # records carry none.
     request_grant_offer: BrowserRequestGrantOffer | None = None
+    # ADR-0344: the request-approval offer on a job card. Older records carry none.
+    job_request_grant_offer: JobRequestGrantOffer | None = None
     # ADR-0263: why research authorization refused the action, from a closed
     # content-free list. Stored for diagnosis; responses do not carry it.
     research_not_covered: str | None = None
@@ -137,6 +140,7 @@ class ApprovalPresentation(BaseModel):
     arguments: dict[str, Any]
     task_grant_offer: BrowserTaskGrantOffer | None = None
     request_grant_offer: BrowserRequestGrantOffer | None = None
+    job_request_grant_offer: JobRequestGrantOffer | None = None
 
 
 class ApprovalResolutionOutcome(BaseModel):

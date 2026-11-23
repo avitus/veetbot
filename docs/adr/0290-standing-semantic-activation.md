@@ -3,6 +3,8 @@
 - Status: Accepted (explicit owner direction on 2026-11-03)
 - Date: 2026-11-03
 - Related: ADR-0178, ADR-0188, ADR-0199, ADR-0220, ADR-0223, ADR-0246, ADR-0269, ADR-0274, ADR-0289, ADR-0292
+- Amended by: ADR-0343, which makes composition honour decision 1: the query
+  authority binds no reader under this admission, and none is required
 - Detailed design: `docs/plan/general-memory-recall.md`, `docs/plan/knowledge-documents.md`
 
 ## Context

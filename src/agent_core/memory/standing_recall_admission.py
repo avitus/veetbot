@@ -8,7 +8,10 @@ It binds the owner, the embedding tuple the stored vectors were made in, and
 the bytes of the two files, and nothing else: a policy, formation or reader
 change does not withdraw recall, because the admission makes no quality claim
 that such a change could invalidate. Only the operator's flag, or a change to
-either file, turns it off.
+either file, turns it off. Composition therefore binds a run's query authority
+to no reader under this route (ADR-0343): the owner's chat model, its
+reasoning effort and the model registry may all change without withholding
+recall.
 
 As with every other admission, the files bind bytes, not authorship. The
 operator verifies the genuine owner statement before installing them.
@@ -17,6 +20,7 @@ operator verifies the genuine owner statement before installing them.
 import hashlib
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Final, Literal
@@ -74,6 +78,11 @@ class StandingRecallManifest(ReleaseValue):
     rollback_build_ref: str = Field(pattern=r"^[a-f0-9]{40}$")
 
 
+@dataclass(frozen=True)
+class StandingAdmission(BoundedAdmission):
+    """The bounded marker for the owner's standing decision, which binds no reader."""
+
+
 def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -92,14 +101,14 @@ def bind_standing_recall(
     *,
     principal: Principal,
     clock: Clock,
-) -> BoundedAdmission:
+) -> StandingAdmission:
     """Bind the owner's standing decision; the handle withdraws only on file mutation.
 
     The three digests other than the embedding tuple are read but not enforced:
     this admission carries a decision, not quality evidence measured under a
     configuration, so a policy, formation or reader change leaves it standing.
     The returned marker keeps composition's local-encoder, interactive-only and
-    no-unattended-reconsolidation rules.
+    no-unattended-reconsolidation rules, and tells it to bind no reader.
     """
     raw_manifest, raw_evidence = _read_bounded(manifest), _read_bounded(evidence)
     binding = StandingRecallManifest.model_validate(
@@ -153,7 +162,7 @@ def bind_standing_recall(
         return not revoked
 
     _require(admitted(), "standing admission changed while binding")
-    return BoundedAdmission(admitted, _digest(raw_manifest))
+    return StandingAdmission(admitted, _digest(raw_manifest))
 
 
 def write_standing_admission(

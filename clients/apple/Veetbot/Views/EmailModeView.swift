@@ -1752,16 +1752,35 @@ private struct EmailThreadScreen: View {
                     Text(message).veetType(.meta).foregroundColor(AppTheme.inkSoft)
                 }
                 DisclosureGroup {
-                    HStack(alignment: .center, spacing: 8) {
-                        TextField("How should the reply change?", text: $refinement, prompt: .a2Prompt("How should the reply change?")).focused(
-                            $focusedField, equals: .refinement
-                        )
-                        .textFieldStyle(.plain).veetType(.ui).a2Field()
-                        Button("Refine draft") { Task { await model.generateDraft(instruction: refinement) } }
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .center, spacing: 8) {
+                            TextField("How should the reply change?", text: $refinement, prompt: .a2Prompt("How should the reply change?")).focused(
+                                $focusedField, equals: .refinement
+                            )
+                            .textFieldStyle(.plain).veetType(.ui).a2Field()
+                            .disabled(model.isGeneratingDraft)
+                            Button { Task { await model.generateDraft(instruction: refinement) } } label: {
+                                // A rewrite takes many seconds; without this the press reads as ignored.
+                                if model.isGeneratingDraft {
+                                    HStack(spacing: 6) {
+                                        ProgressView().controlSize(.small)
+                                        Text("Refining…")
+                                    }
+                                } else {
+                                    Text("Refine draft")
+                                }
+                            }
                             .buttonStyle(SecondaryCapsuleButtonStyle())
                             .disabled(
                                 refinement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                     || model.isPerformingAction || model.conflict != nil)
+                            .accessibilityIdentifier("email.refine-draft")
+                        }
+                        if model.isGeneratingDraft {
+                            Text(model.draftPreparationMessage).veetType(.meta).foregroundColor(AppTheme.inkSoft)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("email.refine-progress")
+                        }
                     }.padding(.top, 8)
                 } label: {
                     Label("Refine with Veetbot", systemImage: "sparkles")

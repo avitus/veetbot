@@ -673,6 +673,33 @@ def test_unsubscribe_eligibility_is_deterministic_and_authenticated(
     assert "lists.example.test" not in rendered
 
 
+async def test_m31_thread_pages_name_each_messages_offer_but_never_where_it_points() -> None:
+    """A full conversation read carries what the bulk block carries, message by message.
+
+    New mail reaches the refresh only through these reads once an account has caught
+    up, so the census folds them as it folds search summaries.
+    """
+    mailbox = _census_mailbox()
+    server = _server(mailbox)
+    offers: dict[str, tuple[str, str]] = {}
+    for thread_id in mailbox.threads:
+        page = await _call(server, "get_thread_page", {"thread_id": thread_id, "max_messages": 10})
+        for message in _output(page)["messages"]:
+            offers[message["id"]] = (message["list_id"], message["unsubscribe_offer"])
+        rendered = json.dumps(page.structured_content)
+        for destination in ("https://", "mailto:", "recipient-token", "unsub@"):
+            assert destination not in rendered
+    assert offers == {
+        "message-one-click": (SENDER, "one_click"),
+        "message-mailto": ("", "mailto"),
+        "message-link": ("deals.example.test", "link"),
+        "message-none": ("", "none"),
+        "message-received": (SENDER, "one_click"),
+        "message-reply": ("", "none"),
+        "message-sent": (SENDER, "one_click"),
+    }
+
+
 async def test_m31_folded_headers_are_unfolded_before_parsing() -> None:
     folded = _message(
         unsubscribe=(

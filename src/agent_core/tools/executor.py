@@ -69,6 +69,10 @@ from agent_core.domain.errors import (
 )
 from agent_core.domain.events import TOOL_CALL_DENIED_PAYLOAD_VERSION, EventEnvelope, NewEvent
 from agent_core.domain.failures import log_context, log_failure
+from agent_core.domain.job_request_grants import (
+    JOB_REQUEST_GRANT_AUTHORIZATION_KIND,
+    JobRequestGrantOffer,
+)
 from agent_core.domain.memory import (
     _RECALL_FUNCTION_WORDS,
     MINIMUM_LEXICAL_TERM_LENGTH,
@@ -1668,6 +1672,7 @@ class ToolPipeline:
                 if standing_authorization is not None and standing_authorization.allowed
                 else None
             ),
+            request_approval_id=_job_request_approval_id(standing_authorization),
             timeout_seconds=effective_timeout,
             monotonic_deadline=monotonic_deadline,
             maximum_output_bytes=tool.spec.maximum_output_bytes,
@@ -2217,6 +2222,7 @@ class ToolPipeline:
         approval_arguments = dict(invocation.normalized_arguments)
         offer: BrowserTaskGrantOffer | None = None
         request_offer: BrowserRequestGrantOffer | None = None
+        job_request_offer: JobRequestGrantOffer | None = None
         not_covered = _task_grant_not_covered(standing)
         in_session = getattr(tool, "approval_view_in_session", None)
         approval_view = getattr(tool, "approval_view", None)
@@ -2236,6 +2242,7 @@ class ToolPipeline:
                 approval_arguments = dict(presentation.arguments)
                 offer = presentation.task_grant_offer
                 request_offer = presentation.request_grant_offer
+                job_request_offer = presentation.job_request_grant_offer
             elif approval_view is not None:
                 action_summary, approval_arguments = await approval_view(
                     approval_arguments,
@@ -2253,6 +2260,7 @@ class ToolPipeline:
             approval_arguments = dict(invocation.normalized_arguments)
             offer = None
             request_offer = None
+            job_request_offer = None
         token.raise_if_cancelled()
         now = self._clock.now()
         approval = ApprovalRequest(
@@ -2284,6 +2292,7 @@ class ToolPipeline:
             created_at=now,
             task_grant_offer=offer,
             request_grant_offer=request_offer,
+            job_request_grant_offer=job_request_offer,
             task_grant_not_covered=not_covered,
             research_not_covered=_research_not_covered(standing),
         )
@@ -2822,3 +2831,17 @@ class ToolPipeline:
             ),
             lease=lease,
         )
+
+
+def _job_request_approval_id(standing: StandingAuthorization | None) -> UUID | None:
+    """ADR-0344: the request approval that authorized a job call, which the job
+    run binds its new grant to. Trusted runtime state, never a model argument."""
+
+    if (
+        standing is None
+        or not standing.allowed
+        or standing.authorization_kind != JOB_REQUEST_GRANT_AUTHORIZATION_KIND
+        or standing.authorization_ref is None
+    ):
+        return None
+    return UUID(standing.authorization_ref)

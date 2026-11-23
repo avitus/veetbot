@@ -802,7 +802,12 @@ no deployment reference and no release census, so the admission survives
 releases and configuration edits and is withdrawn by file mutation, by the
 flag, or by a different encoder. Composition keeps the local encoder,
 interactive private owner queries, no unattended reconsolidation and the
-request and USD 2 daily indexing ceilings. This is a recorded deviation from
+request and USD 2 daily indexing ceilings. It binds the run's query authority
+to no reader under this admission
+([ADR-0343](../adr/0343-standing-recall-binds-no-reader.md)): the owner's chat
+model, its reasoning effort and the model registry may change without
+withholding recall, while an evidence-bound admission still admits only the
+reader its evidence was measured with. This is a recorded deviation from
 the activation evidence above; it completes no M33 gate and leaves the trial
 routes available.
 

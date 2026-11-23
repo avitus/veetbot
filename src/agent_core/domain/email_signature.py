@@ -10,8 +10,9 @@ lines as written, so no caller's stripping or reflow can hide a code block.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from email.utils import parseaddr
 
 # Where People keeps what a signature states: a reserved, display-only namespace.
@@ -332,3 +333,18 @@ def sender_contact(body: str, sender: str) -> SignatureContact | None:
     if title is None and not phones:
         return None
     return SignatureContact(title=title, phones=tuple(phones.values()))
+
+
+def signature_end(
+    sent_at: datetime, key: str, signatures: Mapping[datetime, Collection[str]]
+) -> datetime | None:
+    """When a detail one signature stated stops holding; None while it holds.
+
+    `signatures` is what each of the sender's remaining signatures stated of
+    one kind of detail, by sent time. The detail ends at the earliest later one
+    that omits it. Only what remains is read, so reading a message late and
+    erasing one both leave the intervals the remaining mail alone would give.
+    """
+    return min(
+        (at for at, said in signatures.items() if at > sent_at and key not in said), default=None
+    )

@@ -915,7 +915,15 @@ recall must render as whole words, because an owner overview delivers family
 as People lines rather than one belief per person; the report keeps one flag
 per name, never the name. Probe files are never the frozen Milestone 16
 or 33 controls, their reports are not activation or release evidence, and the
-driver refuses production and any database not named for the purpose.
+driver refuses production and any database not named for the purpose. A run
+takes the budget it packs memories into, and the reader its semantic recall is
+admitted for, from the model it is on. A scripted probe run is therefore
+routed to a chat model policy the way a chat is, `--model-policy` or the
+default chat model, while the scripted provider answers in that model's place:
+it carries the model's limits, provider pin and reader and calls no model
+([ADR-0343](../adr/0343-standing-recall-binds-no-reader.md)). A live run
+(`--live-model`) is on the same policy, never the fake model a clone's
+composition would otherwise choose.
 
 The owner question set (ADR-0338) applies the same driver as a standing
 before-and-after measure. It holds real questions the owner asked and the

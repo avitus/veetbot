@@ -1685,14 +1685,20 @@ regular `model.onnx` and `tokenizer.json` files. It has no credential reference,
 uses local residency, `local-embedding@1` execution and zero provider price. No
 model download occurs at runtime. Model installation and matching release evidence
 must precede activation. Enabling the existing `retrieval.semantic_enabled` profile
-also requires an explicit reviewed `reader_sha256`; a run's actual selected reader
-must match it. Composition then supplies run-bound local lookup and explicit
+under an evidence-bound admission also requires an explicit reviewed
+`reader_sha256`; a run's actual selected reader must match it, and the first
+otherwise eligible run withheld for each other reader logs
+`semantic_recall_withheld_reader_changed`. Under the owner's standing admission
+([ADR-0343](../adr/0343-standing-recall-binds-no-reader.md)) no reader is bound:
+a configured `reader_sha256` is not read and none is required, so a chat model,
+reasoning effort or model registry change leaves recall on. Composition then
+supplies run-bound local lookup and explicit
 preparation before assembly and pending tool batches, with sparse fallback.
 Both evidence files remain mandatory. Remote tuples still receive no query egress
 authority. The checked-in catalog and retrieval flag remain disabled.
 The separate `retrieval.source_recovery_enabled` flag also defaults to false.
-Enabling it requires local semantic query authority and the same release-bound
-reviewed reader. It supplies bounded private, restricted, current-project source
+Enabling it requires local semantic query authority under the same reader rule.
+It supplies bounded private, restricted, current-project source
 quotes under [ADR-0189](../adr/0189-governed-memory-source-recovery.md). An absent
 runtime binding or withdrawn evidence leaves ordinary fact recall available.
 

@@ -356,6 +356,12 @@ class GmailSync:
                 "references": headers.get("references", ""),
                 "direction": "sent" if "SENT" in labels else "received",
                 "sender_check": unsubscribe.sender_check(raw.get("payload")),
+                # What the search summary's bulk block says, never where it points,
+                # so new mail read through the change feed reaches the census.
+                "list_id": unsubscribe.normalize_list_id(
+                    unsubscribe.last_header(raw.get("payload"), "List-Id")
+                ),
+                "unsubscribe_offer": unsubscribe.offer(raw.get("payload")).offered,
                 "body_complete": available and body == full_body,
                 "body_available": available,
                 "next_body_offset": len(body.encode()) if available and body != full_body else None,

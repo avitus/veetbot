@@ -129,6 +129,59 @@ async def delivery_case(
     return report, car, retired
 
 
+async def chat_model_case(
+    app: Composition,
+    script: FakeModelScript,
+    stand_in: FakeModelProvider,
+    *,
+    model_policy: str,
+    finish: Finish = _wait,
+) -> ProbeReport:
+    """Scripted runs of a `scripted_chat` composition carry the chat model's identity.
+
+    The budget a run packs memories into and the reader its recall is admitted
+    for both come from the model the run is on (ADR-0343).
+    """
+
+    from agent_core.evals.general_recall_runtime import reader_runtime_inputs
+
+    probes = tuple(
+        Probe(
+            id=name,
+            incident=name,
+            family="attributes",
+            question=f"What do I keep in the {name}?",
+            paths=("deliberate",),
+            expected=(ExpectedEvidence(statement_contains=f"nothing stored about the {name}"),),
+        )
+        for name in ("attic", "cellar")
+    )
+    report = await observe_probes(app, script, probes, finish=finish, stand_in=stand_in)
+    router = app.executor._model_router
+    assert router is not None
+    resolved = await router.resolve(model_policy, tenant_id=app.principal.tenant_id)
+    expected = reader_runtime_inputs(resolved, catalog=app.executor._model_settings, router=router)[
+        "reader_sha256"
+    ]
+    observed = [path for probe in report.probes for path in probe.paths]
+    assert [path.run_status for path in observed] == ["COMPLETED", "COMPLETED"]
+    for path in observed:
+        assert path.trace_ids, "Each run starts the script over and makes its own search"
+        assert path.run_id is not None
+        run = await app.runs.get(path.run_id)
+        assert run.provider_pin is not None, "The run is routed like a chat, not left on the fake"
+        assert (run.provider_pin.provider, run.provider_pin.model) == (
+            resolved.provider,
+            resolved.model,
+        )
+        async with app.uow_factory() as uow:
+            checkpoint = await uow.checkpoints.latest(path.run_id)
+        assert checkpoint is not None
+        assert checkpoint.budget_state["context_reader_sha256"] == expected
+    assert stand_in.requests, "The scripted provider answered; no real provider was called"
+    return report
+
+
 async def home_city_case(
     app: Composition, script: FakeModelScript, *, finish: Finish = _wait
 ) -> tuple[ProbeReport, MemoryRecord]:

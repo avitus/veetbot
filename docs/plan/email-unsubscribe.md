@@ -128,7 +128,7 @@ not find it here should find the reason here.
   match. This milestone reuses that mechanism and generalizes its subject
   from one thread to one bounded batch of senders.
 - **The approval floor.** `EXTERNAL_WRITE` and `EXTERNAL_MESSAGE` require
-  approval in the default matrix (policy-and-approvals.md:632-633), and no
+  approval in the default matrix (policy-and-approvals.md:636-637), and no
   profile may downgrade a mailbox write or send (ADR-0071 decision 8). The
   new request tool joins that floor.
 - **The egress proxy.** One policy function checks every outbound connection
@@ -288,6 +288,16 @@ the summaries refresh was already reading. It issues no query of its own and
 adds no page. A summary whose block says anything but `none`, or that carries
 a `List-Id`, creates or updates its subscription; owner-sent mail, Spam, and
 Trash never do.
+
+Summaries are listed only while an account catches up. Once it has, new mail
+arrives through Gmail's change feed and is read as whole conversations, so the
+census also folds each conversation refresh reads. The read server names, on
+every message it returns, the two fields the block carries — `list_id` and
+`unsubscribe_offer`, never a destination — and the census builds the same
+block from the newest received message, with the labels of the newest message
+of all. A conversation read is therefore folded exactly as its summary would
+be, and new senders keep forming records after catch-up. Without it the
+census froze at the last full inbox listing (2026-11-22).
 
 The census is a deterministic projection. Observing a summary twice, or in
 another order, or after a resynchronization, yields the same record: volume
@@ -1031,7 +1041,9 @@ in for the real-mailbox smoke.
    weaken the sandbox's boundary to serve a tool that never runs in one.
 6. **The census rides refresh.** A dedicated discovery query would find more
    senders sooner and would also be a second pager with its own cursor,
-   budget, and failure modes. Coverage is a metric first.
+   budget, and failure modes. Coverage is a metric first. Riding refresh
+   means riding every read it makes — inbox and history listings, and the
+   conversations the change feed names — not only the listings.
 7. **Identity is the list, then the address.** Domain grouping merges
    unrelated lists on shared hosts, and per-message grouping is no census at
    all.

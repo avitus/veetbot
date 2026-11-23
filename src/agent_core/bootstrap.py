@@ -374,6 +374,10 @@ from agent_core.application.folder_service import PublicFolderService
 from agent_core.application.integration_secrets import IntegrationSecrets
 from agent_core.application.job_execution import JobExecution
 from agent_core.application.job_grants import JobGrantAuthorizer
+from agent_core.application.job_request_grants import (
+    JobRequestGrantAuthorizer,
+    JobRequestGrantResolution,
+)
 from agent_core.application.jobs import JobPublication
 from agent_core.application.mcp_servers import MCPServerSettingsService
 from agent_core.application.media_inputs import StoredMediaInputResolver
@@ -1788,11 +1792,8 @@ async def prepare_standing_admission(
             "in the effective configuration"
         )
     # The same conditions composition refuses a bounded admission under,
-    # checked here so the operator learns before any file is written.
-    if profile.reader_sha256 is None:
-        raise ConfigurationError(
-            "a standing admission needs the reviewed reader in the semantic index configuration"
-        )
+    # checked here so the operator learns before any file is written. A
+    # standing admission binds no reader, so none is required (ADR-0343).
     if settings.memory_reconsolidation_enabled:
         raise ConfigurationError(
             "a standing admission refuses unattended reconsolidation; disable it first"
@@ -5196,6 +5197,10 @@ async def _compose(
         if settings.jobs_enabled:
             standing_authorizers.append(JobGrantAuthorizer(uow_factory))
             standing_authorizers.append(WidgetInstallationAuthorizer(uow_factory))
+            # ADR-0344: one approval for a request that changes a saved job.
+            standing_authorizers.append(
+                JobRequestGrantAuthorizer(uow_factory=uow_factory, now=clock.now)
+            )
         if browser_provider is not None:
             standing_authorizers.append(
                 BrowserFollowConsentAuthorizer(
@@ -6207,6 +6212,9 @@ async def _compose(
                 if browser_provider is not None
                 and _request_grants_composed(settings, browser_provider, ruleset)
                 else None
+            ),
+            job_request_grants=(
+                JobRequestGrantResolution(clock=clock) if settings.jobs_enabled else None
             ),
         )
         folder_proposal_pass: FolderProposalPass | None = None
