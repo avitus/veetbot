@@ -4,6 +4,17 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-22 — Subscriptions keeps finding new senders after catch-up
+
+- Subscriptions stopped finding new senders once an account had caught up on
+  its mail: new mail arrives through Gmail's change feed, and the census
+  read only inbox listings. On the owner's accounts it had frozen in late
+  September (Personal) and on November 9 (Work).
+- The census now also folds every conversation refresh reads. The Gmail read
+  server names each message's `List-Id` and the kind of unsubscribe it
+  offers, never where it points, so new mail forms a subscription exactly as
+  a listed summary would. It still issues no query of its own.
+
 ## 2026-11-22 — A model change no longer turns semantic recall off (ADR-0343)
 
 - Semantic recall stays on when a model is added to the model list, when you

@@ -952,6 +952,7 @@ class _TaskIO:
                 lease=self.context.lease,
             )
             self.imported[thread.id] = thread
+            await self._census_read(account_id, value)
         return not pending, thread
 
     async def refresh(self) -> None:
@@ -1414,6 +1415,40 @@ class _TaskIO:
                 run=c.run,
                 lease=c.lease,
             )
+
+    async def _census_read(self, account_id: str, value: dict[str, Any]) -> None:
+        """Fold a conversation this slice read, exactly as its search summary would fold.
+
+        A caught-up account learns of new mail only through Gmail's change feed,
+        which lists no summaries, so without this no new sender would ever form a
+        record. The block comes from the newest received message; the labels, like
+        a summary's, from the newest message of all.
+        """
+        messages = sorted(
+            (item for item in value.get("messages", []) if isinstance(item, dict)),
+            key=lambda item: (int(str(item.get("internal_date") or 0)), str(item.get("id", ""))),
+        )
+        received = [item for item in messages if "SENT" not in item.get("label_ids", [])]
+        if not received:
+            return
+        newest = received[-1]
+        offered = newest.get("unsubscribe_offer")
+        list_id = newest.get("list_id")
+        # Messages from an earlier read server name no offer; neither offer nor list is no record.
+        if not isinstance(offered, str) or (offered == "none" and not list_id):
+            return
+        summary = {
+            "thread_id": str(value.get("thread_id", "")),
+            "label_ids": list(messages[-1].get("label_ids", [])),
+            "bulk": {
+                "message_id": str(newest.get("id", "")),
+                "from": str(newest.get("from", "")),
+                "date": str(newest.get("date", "")),
+                "list_id": str(list_id or ""),
+                "unsubscribe": offered,
+            },
+        }
+        await self._census(account_id, {"threads": [summary]})
 
     async def _verify_subscriptions(self) -> None:
         """Read unsubscribe evidence with whatever bounded headroom the slice has left.
