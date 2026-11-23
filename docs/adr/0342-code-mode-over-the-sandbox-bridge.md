@@ -81,7 +81,9 @@ The owner prefers no new external dependency unless one is necessary.
 4. **Call identity follows the invocation, not the source alone.** The script
    hash covers the source and the outer call id, as `sandbox.run_command`
    already does. A replay of one invocation derives the same call ids and
-   reads recorded outcomes. The same source submitted again later is a new
+   reads recorded outcomes. The pipeline's id for a bridged call also covers
+   the tool and the arguments asked for at that position, so a replay that
+   asks for something else there makes a new call. The same source submitted again later is a new
    invocation and executes for real. ADR-0015's determinism caveat stands.
 5. **Only what the script prints returns to the model.** The result carries
    standard output, standard error, the exit code and the number of bridged
@@ -270,6 +272,14 @@ The work is cut into four slices.
   are the controls on a script written in a clean turn. Origin trust resets
   at each owner message, as `policy-and-approvals.md` already states, so
   outside content read in an earlier turn does not make a later script ask.
+- Recalled memory can shape a script that then starts without a card
+  (decision 9). A memory formed from outside content could carry an
+  instruction that way. What such a script can reach before any check is the
+  sandbox workspace of its own run, which has no network and no credentials
+  and is destroyed with the run's sandbox. Everything beyond the workspace is
+  a bridged call, decided by policy under its own trust. The owner accepted
+  this with decision 9; requiring a card whenever memory is present would
+  make every production script ask.
 
 ## Alternatives considered
 

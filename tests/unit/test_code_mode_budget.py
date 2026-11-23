@@ -489,6 +489,43 @@ async def test_a_different_call_at_a_position_already_charged_is_a_new_call(
     assert run.tool_call_count == 1 + 3
 
 
+class _RefusedThenAllowed(_Script):
+    """A script run again that asks for a real tool where it first asked for a missing one."""
+
+    async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        del arguments
+        self.steps.append(context.step_number)
+        dispatch = cast(Any, context.bridge_dispatch)
+        self.responses.append(
+            [
+                await dispatch("demo.missing", {}, "bridge-position-0"),
+                await dispatch("demo.ordinary", {}, "bridge-position-0"),
+                await dispatch("demo.missing", {}, "bridge-position-0"),
+            ]
+        )
+        return ToolResult(
+            ok=True,
+            content=[TextPart(text="script finished")],
+            structured={},
+            output_trust=self.spec.output_trust,
+        )
+
+
+async def test_a_refusal_is_replayed_only_for_the_call_that_was_refused(tmp_path: Path) -> None:
+    ordinary = _Probe(_spec("demo.ordinary"))
+    script = _RefusedThenAllowed(_RUN_CODE, [[]])
+
+    run = await _run(tmp_path, [_turn((SANDBOX_RUN_CODE_TOOL_NAME, "script"))], [script, ordinary])
+
+    first, second, third = script.responses[0]
+    # The permitted tool ran; it did not inherit the refusal recorded at its position.
+    assert (first["status"], second["status"]) == ("denied", "succeeded")
+    assert ordinary.executions == 1
+    # The exact repeat of the refused call reads the same refusal and is not a new call.
+    assert third == first
+    assert run.tool_call_count == 1 + 2
+
+
 async def test_calls_whose_charge_was_interrupted_are_charged_before_the_next_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -1611,8 +1611,13 @@ class ToolPipeline:
         async def bridge_dispatch(
             name: str, bridge_arguments: dict[str, Any], bridge_call_id: str
         ) -> dict[str, Any]:
+            # The session names a call by its position in its script. The
+            # pipeline names it by what was asked for there as well, so its
+            # invocation, a recorded refusal and its charge all follow one
+            # identity (ADR-0342). A script executed again that asks for
+            # something else at a position is then making a new call.
             bridge_call = ToolCallItem(
-                call_id=bridge_call_id,
+                call_id=_bridged_call_identity(bridge_call_id, name, bridge_arguments),
                 item_index=0,
                 name=name,
                 arguments=bridge_arguments,
@@ -1639,9 +1644,8 @@ class ToolPipeline:
             # states the room the step has; the refusal reads like a direct
             # call's. The call is recorded on the run before it is dispatched,
             # so a pause or a stop cannot lose it. Only the same call at the
-            # same position is a repeat: a script executed again that asks
-            # for another tool or other arguments there makes a new call.
-            charged_as = _bridged_call_identity(bridge_call)
+            # same position is a repeat.
+            charged_as = bridge_call.call_id
             if (
                 step.bridge_call_allowance is not None
                 and charged_as not in run.usage.unsettled_bridged_calls
@@ -2940,23 +2944,24 @@ class ToolPipeline:
         )
 
 
-def _bridged_call_identity(call: ToolCallItem) -> str:
-    """What one bridged call is charged as: its position in its script, with the
-    tool and the arguments it asked for there (ADR-0342).
+def _bridged_call_identity(position_id: str, name: str, arguments: dict[str, Any]) -> str:
+    """Name one bridged call: its position in its script, with the tool and the
+    arguments it asked for there (ADR-0342).
 
-    The pipeline replays a recorded outcome only for the same tool and
-    arguments, so the charge follows the same identity. Arguments that differ
-    only before normalization are charged as two calls, never as none.
+    The position alone would let a script that is executed again reuse a
+    recorded refusal, or a paid place in the tool-call limit, for a different
+    call. Arguments that differ only before normalization name two calls,
+    never one.
     """
 
     asked = json.dumps(
-        {"name": call.name, "arguments": call.arguments},
+        {"name": name, "arguments": arguments},
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
         default=str,
     ).encode("utf-8")
-    return f"{call.call_id}:{hashlib.sha256(asked).hexdigest()[:16]}"
+    return f"{position_id}:{hashlib.sha256(asked).hexdigest()[:16]}"
 
 
 def _job_request_approval_id(standing: StandingAuthorization | None) -> UUID | None:

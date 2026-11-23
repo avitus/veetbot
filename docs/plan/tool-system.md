@@ -1709,13 +1709,18 @@ place where outcome shapes are defined.
 There is no provider tool-call id here, so the bridge synthesizes one:
 
 ```text
-call_id = "bridge:" + sha256(script_hash NUL ordinal)[:32]
+position = "bridge:" + sha256(script_hash NUL ordinal)[:32]
+call_id  = position + ":" + sha256(canonical JSON of {name, arguments})[:16]
 ```
 
 `ordinal` is the zero-based index of the call within the turn, counted by the
 bridge rather than supplied by the script, so a script cannot forge a
 collision with a previous call and inherit its recorded result. `script_hash`
-is the sha256 of the orchestration source the model submitted.
+is the sha256 of the orchestration source the model submitted. The session
+derives the position; the tool pipeline appends the digest of the tool and
+arguments asked for there (ADR-0342). A script that is executed again and
+asks for something else at a position therefore makes a new call: it cannot
+read back a refusal recorded for a different call, and it is counted.
 
 This is what makes a replayed orchestration turn safe: the same script making
 the same calls in the same order derives the same `call_id`, therefore the
@@ -2835,8 +2840,9 @@ every bridge caller in the model loop, `sandbox.run_command` included.
   `tool.budget_exhausted`, the code a direct call over budget gets.
 - A call whose identity is already recorded is not a new call. The identity
   is the call's position in its script together with the tool and the
-  arguments it asked for there, which is what the pipeline replays a recorded
-  outcome for. A script that is executed again repeats its earlier calls
+  arguments it asked for there. The pipeline uses it as the bridged call's
+  `call_id`, so the invocation, a recorded refusal and the charge all follow
+  the same identity. A script that is executed again repeats its earlier calls
   under the same identities; each returns its recorded outcome and takes no
   further room. If it asks for another tool or other arguments at a position
   it already used, that is a new call: it takes room and is counted.

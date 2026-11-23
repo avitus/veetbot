@@ -64,7 +64,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:2330` states that device tools are *"a reserved
+    `tool-system.md:2335` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -1592,8 +1592,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1761` does open a *"Device-scoped tools"* section, and
-`tool-system.md:2330` states that device tools are *"a reserved seam,
+`tool-system.md:1766` does open a *"Device-scoped tools"* section, and
+`tool-system.md:2335` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. What it
 left behind was a model with no home.
@@ -1633,7 +1633,7 @@ rewriting the fifteen-string grammar and the gate that asserts it,
 and the `device.` that already exists is a tool-name domain rather
 than a scope prefix. Three conflicts between Section 29 and later
 specifications are named and resolved in the specifications' favour,
-one of them the question `tool-system.md:1775` reserved by name —
+one of them the question `tool-system.md:1780` reserved by name —
 whether a device tool may be advertised in a session opened while the
 device was absent — which resolves against the pinned prefix on the
 same precedent that governs an MCP catalog change mid-session. None
