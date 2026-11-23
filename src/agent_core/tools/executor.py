@@ -68,6 +68,7 @@ from agent_core.domain.errors import (
     WorkspaceEscape,
 )
 from agent_core.domain.events import TOOL_CALL_DENIED_PAYLOAD_VERSION, EventEnvelope, NewEvent
+from agent_core.domain.execution import SANDBOX_RUN_CODE_TOOL_NAME
 from agent_core.domain.failures import log_context, log_failure
 from agent_core.domain.memory import (
     _RECALL_FUNCTION_WORDS,
@@ -518,6 +519,16 @@ def _argument_trust(
     # exact job.manage rule. External reads still taint the whole turn above;
     # granting network/model access remains an independent approval decision.
     if tool_name in {"job.manage", "job.run"} and _turn_origin_trust(checkpoint) is TrustLevel.USER:
+        return dict.fromkeys(arguments, TrustLevel.INTERNAL_TOOL)
+    # ADR-0342: a script written in a turn the owner opened, before the turn
+    # read any outside content, is Veetbot's own work on that request. Recalled
+    # memory does not change that: the script effects nothing by itself, and
+    # each tool call it makes is judged under that call's own trust.
+    if (
+        tool_name == SANDBOX_RUN_CODE_TOOL_NAME
+        and _active_turn_facts(checkpoint).newest_user_trust is TrustLevel.USER
+        and _turn_origin_trust(checkpoint) in {TrustLevel.USER, TrustLevel.MEMORY}
+    ):
         return dict.fromkeys(arguments, TrustLevel.INTERNAL_TOOL)
     trust = dict.fromkeys(arguments, TrustLevel.EXTERNAL_UNTRUSTED)
     current_user = next(
@@ -1598,6 +1609,33 @@ class ToolPipeline:
                     bridge_arguments, ensure_ascii=False, separators=(",", ":")
                 ),
             )
+            # A script has no conversation to carry a control update or a
+            # suspension, and a sandbox tool would start a second execution in
+            # the workspace this one still holds (ADR-0342).
+            try:
+                bridged = self._resolve_pinned_tool(checkpoint, name, principal)
+            except NotFoundError:
+                bridged = None
+            if bridged is not None and (
+                bridged.spec.kind is ToolKind.CONTROL or bridged.spec.target_kind == "sandbox"
+            ):
+                return {
+                    "status": "denied",
+                    "reason_code": "bridge.tool_not_bridgeable",
+                    "retryable": False,
+                }
+            # A bridged call counts against the run's tool-call limit. The loop
+            # states the room left; the refusal reads like a direct call's.
+            if (
+                step.bridge_call_allowance is not None
+                and step.bridged_tool_calls >= step.bridge_call_allowance
+            ):
+                return {
+                    "status": "failed",
+                    "reason_code": "tool.budget_exhausted",
+                    "retryable": False,
+                }
+            step.bridged_tool_calls += 1
             approval_poll_seconds = 0.2
             while True:
                 token.raise_if_cancelled()

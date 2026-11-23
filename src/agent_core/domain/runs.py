@@ -156,6 +156,11 @@ class Step(BaseModel):
     attempt_count: int = 0
     tool_call_count: int = 0
     compactions: int = 0
+    # Calls a script made through the bridge during this step's dispatch, and
+    # how many the run's tool-call limit has room for. `None` leaves the bridge
+    # unmetered, as it is for a caller that does not settle them (ADR-0342).
+    bridged_tool_calls: int = 0
+    bridge_call_allowance: int | None = None
 
 
 class ProviderContinuation(BaseModel):

@@ -545,6 +545,7 @@ from agent_core.domain.email_subscriptions import SUBSCRIPTIONS_TOOL_NAME, UNSUB
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.execution import (
+    SANDBOX_RUN_CODE_TOOL_NAME,
     EgressDestination,
     EgressMode,
     EgressPolicy,
@@ -870,6 +871,7 @@ from agent_core.tools.records import (
 )
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.run_inspect import RunInspectTool
+from agent_core.tools.sandbox_run_code import SandboxRunCodeTool
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.schedule_create import (
     COCKPIT_FEED_SCOPES,
@@ -1355,6 +1357,19 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "Do not publish components or request new job access separately while preparing. Use "
     "offline trials or existing grants, then include all new access and the schedule "
     "in the proposal."
+)
+# ADR-0342: appended only while the agent has the script tool, so an agent
+# without it keeps exactly the instructions above.
+CODE_MODE_AGENT_INSTRUCTIONS = (
+    " When one answer needs many tool calls, such as a loop over items, paging through "
+    "results or comparing two lists, write one sandbox.run_code script instead of calling "
+    "the tools one at a time; a script of tool calls needs no question first. In the "
+    "script call each tool as tools.<name>(...) with keyword arguments, do the looping, "
+    "filtering and joining in Python, and print only what the answer needs: the tools' "
+    "raw results never reach you. Call a single tool directly, and make sends, deletes "
+    "and other changes as direct calls, never inside a script. The script tool stands in "
+    "for sandbox.run_command wherever these instructions name it: run a command with "
+    "subprocess inside the script."
 )
 _BROWSER_TOOL_NAMES = frozenset(
     {"browser.navigate", "browser.observe", "browser.act", "browser.upload"}
@@ -3354,6 +3369,7 @@ async def _compose(
     surface_limits: SurfaceLimits,
     recall_capture: Callable[[SemanticCompositionInputs], None] | None = None,
     cockpit_builder_override: WidgetBuilder | None = None,
+    fake_environment_factory: Callable[[Clock, IdFactory], FakeExecutionEnvironment] | None = None,
     cockpit_local_branch: bool = False,
     job_runner_override: JobRunner | None = None,
     job_screen_override: JobScreen | None = None,
@@ -3471,7 +3487,7 @@ async def _compose(
     cockpit_sandbox: SandboxManager | None = None
     code_sandbox: SandboxManager | None = None
     if storage == "memory" or settings.sandbox.value == "fake":
-        fake_environment = FakeExecutionEnvironment(clock, ids)
+        fake_environment = (fake_environment_factory or FakeExecutionEnvironment)(clock, ids)
         job_environment: Any = fake_environment
         job_image_options: dict[str, Any] = {"image_digest": fake_image_digest()}
         sandbox_manager = SandboxManager(
@@ -3780,6 +3796,11 @@ async def _compose(
     registry.register(
         SandboxRunCommandTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
     )
+    if settings.code_mode_enabled:
+        # ADR-0342: off, no roster, prompt or pin changes.
+        registry.register(
+            SandboxRunCodeTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
+        )
     registry.register(ArtifactExportTool())
     registry.register(ArtifactReadGuideTool())
     registry.register(
@@ -7044,6 +7065,7 @@ async def build(
     browser_provider_override: BrowserProvider | None = None,
     device_channel_override: DeviceChannel | None = None,
     cockpit_builder_override: WidgetBuilder | None = None,
+    fake_environment_factory: Callable[[Clock, IdFactory], FakeExecutionEnvironment] | None = None,
     cockpit_local_branch: bool = False,
     job_runner_override: JobRunner | None = None,
     job_screen_override: JobScreen | None = None,
@@ -7361,7 +7383,13 @@ async def build(
             if web_search_enabled or web_fetch_enabled or browser_enabled
             else ["demo.external_write"]
         ),
-        "sandbox.run_command",
+        # ADR-0342: the script tool takes the command tool's place, so the
+        # roster costs nothing more; a script can run a command itself.
+        (
+            SANDBOX_RUN_CODE_TOOL_NAME
+            if effective_settings.code_mode_enabled
+            else "sandbox.run_command"
+        ),
         "artifact.export",
         "artifact.build",
         "artifact.read_guide",
@@ -7488,6 +7516,7 @@ async def build(
         )
         if name in default_enabled_tools
     ]
+    agent_tools = enabled_tools if enabled_tools is not None else default_enabled_tools
     agent = AgentSpec(
         id=DEFAULT_AGENT_ID if storage == "postgres" else effective_ids.new_id(),
         version=(
@@ -7496,9 +7525,10 @@ async def build(
             else f"1.0.0+model.{effective_model_policy.replace('_', '-')}"
         ),
         name="Milestone 9 Agent",
-        instructions=DEFAULT_AGENT_INSTRUCTIONS,
+        instructions=DEFAULT_AGENT_INSTRUCTIONS
+        + (CODE_MODE_AGENT_INSTRUCTIONS if SANDBOX_RUN_CODE_TOOL_NAME in agent_tools else ""),
         model_policy=effective_model_policy,
-        enabled_tools=enabled_tools if enabled_tools is not None else default_enabled_tools,
+        enabled_tools=agent_tools,
         enabled_skills=list(enabled_skills or []),
         policy_profile=policy_profile,
         limits=limits or _run_limits_from_defaults(run_defaults),
@@ -7831,6 +7861,7 @@ async def build(
             surface_limits=surface_limits,
             recall_capture=recall_capture,
             cockpit_builder_override=cockpit_builder_override,
+            fake_environment_factory=fake_environment_factory,
             cockpit_local_branch=cockpit_local_branch,
             job_runner_override=job_runner_override,
             job_screen_override=job_screen_override,

@@ -31,6 +31,7 @@ from agent_core.domain.errors import (
     UserInputRequiredError,
 )
 from agent_core.domain.events import TOOL_RESULT_EVENTS, NewEvent
+from agent_core.domain.execution import SANDBOX_RUN_CODE_TOOL_NAME
 from agent_core.domain.memory import RecallQuery
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -342,7 +343,7 @@ async def prepare_recall(
             ).encode()
         ).hexdigest()
         if deliberate
-        else f"automatic:{context.run.step_count}"
+        else f"automatic:{step_number_at(context.run.step_count, context.checkpoint)}"
     )
     if phase_clocks and budget is not None and budget.phase_key == phase_key:
         return  # A checkpointed phase cannot recreate a spent or lost execution permit.
@@ -435,6 +436,7 @@ async def checkpoint(
     """Advance the materialized M1 checkpoint and record the checkpoint event."""
 
     previous = context.checkpoint.model_copy(deep=True)
+    refunded = refunded_steps(context.checkpoint)
     context.checkpoint.budget_state = {
         "step_count": context.run.step_count,
         "model_call_count": context.run.model_call_count,
@@ -453,6 +455,9 @@ async def checkpoint(
             ),
         ),
     }
+    if refunded:
+        # Absent until a step is refunded, so other runs' checkpoints are unchanged.
+        context.checkpoint.budget_state[_REFUNDED_STEPS] = refunded
     if pending_batch_budget is not None:
         # A resumed batch still belongs to its proposing step until dispatch
         # finishes. Other usage and the new recall reservation remain current.
@@ -746,6 +751,72 @@ def _fit_tool_batch(
             )
         )
     return fitted, refused
+
+
+_REFUNDED_STEPS = "refunded_steps"
+
+
+def refunded_steps(checkpoint_state: RunCheckpoint) -> int:
+    """Return how many orchestration-only steps this run has been given back."""
+
+    refunded = checkpoint_state.budget_state.get(_REFUNDED_STEPS, 0)
+    return refunded if type(refunded) is int and refunded > 0 else 0
+
+
+def step_number_at(step_count: int, checkpoint_state: RunCheckpoint) -> int:
+    """Number a step so that a refund frees budget without reusing a number.
+
+    The ledger gives a step back by lowering the run's step count (ADR-0342).
+    Idempotency keys, per-step limits and the recall phase all read the step
+    number, so the number adds back every step the checkpoint records as
+    refunded. It equals the step count for a run that was never refunded.
+    """
+
+    return step_count + refunded_steps(checkpoint_state)
+
+
+def meter_bridge(run: Run, step: Step, calls: Sequence[ToolCallItem]) -> None:
+    """Give the bridge the room the tool-call limit has left beyond this batch."""
+
+    step.bridged_tool_calls = 0
+    step.bridge_call_allowance = max(
+        0, run.limits.max_tool_calls - run.tool_call_count - len(calls)
+    )
+
+
+def note_orchestration_turn(
+    context: RunContext, step: Step, turn_calls: Sequence[ToolCallItem]
+) -> bool:
+    """Record an orchestration-only step in the checkpoint that is about to end it.
+
+    Such a step called nothing but `sandbox.run_code`, and its scripts made at
+    least one bridged call in this attempt. The count is written before the
+    ledger refund: a crash between the two loses one refund and skips one step
+    number, and can never repeat a number or refund a step twice.
+    """
+
+    if not (
+        step.bridged_tool_calls
+        and turn_calls
+        and all(call.name == SANDBOX_RUN_CODE_TOOL_NAME for call in turn_calls)
+    ):
+        return False
+    context.checkpoint.budget_state[_REFUNDED_STEPS] = refunded_steps(context.checkpoint) + 1
+    return True
+
+
+async def settle_bridged_calls(context: RunContext, step: Step, *, refund: bool) -> None:
+    """Charge a step's bridged calls, then give back an orchestration-only step.
+
+    Both writes follow the checkpoint that ends the step. That checkpoint holds
+    no pending batch, so the resume path's tool-usage watermark never has to
+    tell a batch's own count from the calls its scripts made.
+    """
+
+    if step.bridged_tool_calls:
+        await context.budgets.record_tool_usage(context.run, step.bridged_tool_calls, step=step)
+    if refund:
+        await context.budgets.refund_orchestration_turn(context.run, step=step)
 
 
 async def _record_refusals(
@@ -1567,7 +1638,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
             await uow.runs.update_counters(context.run, lease=context.lease)
         step = Step(
             run_id=context.run.id,
-            step_number=context.run.step_count,
+            step_number=step_number_at(context.run.step_count, context.checkpoint),
             started_at=context.clock.now(),
         )
         request = await build_with_pressure(context, step)
@@ -1637,6 +1708,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
         await prepare_recall(context)
         if context.uow_factory.is_open():
             raise RuntimeError("tool I/O cannot begin while a unit of work is open")
+        meter_bridge(context.run, step, fitted_calls)
         try:
             with recall_phase(context.recall_permit):
                 results = await context.dispatch_tools(
@@ -1716,7 +1788,9 @@ async def run_loop(context: RunContext) -> RunOutcome:
             await recover_browser_failure(context, step, fitted_calls, results)
         except UserInputRequiredError as exc:
             return await suspend_for_browser_question(context, exc)
+        orchestration_only = note_orchestration_turn(context, step, turn.tool_calls)
         await checkpoint(context, "tool_call")
+        await settle_bridged_calls(context, step, refund=orchestration_only)
         if repeated_denial:
             return _failure(
                 context,

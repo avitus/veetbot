@@ -1,0 +1,26 @@
+server_id: lists
+transport: stdio
+endpoint: /fixture/lists-server
+tools:
+  - name: renewals
+    description: List customers due for renewal, one page at a time.
+    input_schema:
+      type: object
+      properties:
+        page: {type: integer}
+      required: [page]
+      additionalProperties: false
+    replies:
+      - content: '{"items": ["Acme", "Birch", "Cobalt"], "next_page": 2}'
+      - content: '{"items": ["Dune", "Globex"], "next_page": null}'
+  - name: overdue
+    description: List customers with an overdue invoice, one page at a time.
+    input_schema:
+      type: object
+      properties:
+        page: {type: integer}
+      required: [page]
+      additionalProperties: false
+    replies:
+      - content: '{"items": ["Globex", "Harbor", "Acme"], "next_page": 2}'
+      - content: '{"items": ["Ivory"], "next_page": null}'

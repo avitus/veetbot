@@ -389,7 +389,7 @@ joined by dots, of which the last is the action. The four `browser.` scopes
 have three; the other forty-two have exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1439` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1455` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
@@ -711,6 +711,11 @@ label is `EXTERNAL_UNTRUSTED`, or the proposing turn's origin trust is
 `EXTERNAL_UNTRUSTED`, a decision of `ALLOW` for a class other than
 `NONE`, `WORKSPACE_READ`, or `NETWORK_READ` is raised to `REQUIRE_APPROVAL`.
 This is a `max` combination like any other, so it can only tighten.
+
+The overlay reads the labels the pipeline gives it. Which arguments are
+raised above `EXTERNAL_UNTRUSTED`, including the exact-name rules for
+`job.manage`, `job.run` and `sandbox.run_code`, is defined in
+[tool-system.md](tool-system.md).
 
 A tool-name-keyed entry adjusts both halves, and only for the tool it names.
 The argument half is suppressed only when the entry declares

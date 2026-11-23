@@ -474,7 +474,7 @@ explicit write.
 ## The live arm and its evidence
 
 The live arm runs only when `RUN_LIVE_MODEL_TESTS` is `1`
-(evaluation-harness.md:1276) and it runs every probe twice: a `with_memory`
+(evaluation-harness.md:1301) and it runs every probe twice: a `with_memory`
 arm, which is the deterministic driver with a real model policy and no script,
 and a `without_memory` arm, which is a fresh composition per probe carrying the
 same session metadata and the probe alone. The difference between them is the

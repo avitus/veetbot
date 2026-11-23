@@ -1,3 +1,13 @@
+# ADR-0342: On 2026-11-21 the owner asked for code mode on the existing Docker
+# sandbox and authorized its implementation. `sandbox.run_code` runs a
+# model-written script whose tool calls re-enter the pipeline over the
+# ADR-0015 bridge. The tool (slice 1), its budget accounting (slice 2,
+# 2026-11-22) and the owner's 2026-11-22 approval rule (a script written
+# before the turn read outside content does not ask) are implemented offline
+# behind the default-off `AGENT_CODE_MODE_ENABLED`, as are Chat's roster,
+# instructions and evaluation case 36 (slice 3). A local Docker run of the
+# real tool passed on 2026-11-22; production latency evidence and activation
+# remain open. No milestone or gate moves.
 # ADR-0337: On 2026-11-20 an archive made 38 seconds after a reply failed in
 # production because the refresh that synced the owner's sent message staled
 # the gesture. The owner asked for the repair: an Inbox gesture stays current

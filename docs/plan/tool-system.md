@@ -633,6 +633,22 @@ tool reports an ungrounded statement after a tainted turn as
 `tool.memory.statement_not_owner_grounded`, a closed reason with corrective
 guidance.
 
+Two tools have a rule of their own, each keyed by exact name and each only
+raising. Both give every argument `INTERNAL_TOOL`, the label of Veetbot's own
+work, and both leave the turn's origin taint in force.
+
+- `job.manage` and `job.run` (ADR-0268): when the turn's origin trust is
+  `USER`.
+- `sandbox.run_code` (ADR-0342): when the newest user message is the owner's
+  and the turn's origin trust is `USER` or `MEMORY`. A turn that has read an
+  external or knowledge result is neither, so its next script asks. So does a
+  script after an earlier script's result, which is `EXTERNAL_UNTRUSTED`.
+  Recalled memory does not make a script ask. A script effects nothing by
+  itself: each call it makes crosses the bridge and is judged under that
+  call's own argument and origin trust. This rule never applies to a bridged
+  call, because the bridge refuses a sandbox tool. `sandbox.run_command` has
+  no such rule.
+
 The direction is the whole design. Raising on a match can only be wrong by
 failing to raise, which costs an unnecessary approval. Lowering on a match —
 the intuitive version, where an argument that matches untrusted content gets
@@ -1738,7 +1754,9 @@ Budget accounting follows ADR-0015 point 3: an orchestration-only turn refunds
 the step and model-call budget, and the underlying calls are capped
 separately, default 64 per turn. The cap is per turn rather than per run
 because the failure it prevents is a runaway loop inside one script, and a
-run that legitimately needs 200 tool calls across 5 turns is not that.
+run that legitimately needs 200 tool calls across 5 turns is not that. Each
+bridged call also counts against the run's tool-call limit
+([Code mode](#code-mode-adr-0342) defines both).
 
 ## Device-scoped tools
 
@@ -2228,10 +2246,11 @@ evidence that the surface is the same one.
    came from the other, and untrusted content can quote a string it can see.
    Where an untrusted item contributed to a field, the lower label stands.
    `origin_trust` is the minimum label over the request's context items. The
-   two documented raises (the sixteen-character verbatim span, and the
-   owner-grounded `memory.remember` statement of ADR-0245) are the whole
-   exception: both only ever raise, and a word that an external item of the
-   turn supplied keeps the statement down.
+   documented raises (the sixteen-character verbatim span, the owner-grounded
+   `memory.remember` statement of ADR-0245, and the exact-name rules for
+   `job.manage`, `job.run` and `sandbox.run_code`) are the whole exception:
+   each only ever raises, and a word that an external item of the turn
+   supplied keeps the statement down.
 10. Large output is excerpted head-and-tail and artifactized. It is never
     summarized, because a summarizer over untrusted output launders it.
 11. All four non-success outcomes share one six-field shape with a stable
@@ -2702,3 +2721,149 @@ contain the partial batch's results and a replayed bridge call.
 approval resumes, including a deferred `cockpit.check` refused before the first
 approval. Both must leave one result per call, count the batch once, execute
 approved actions once and allow the next message in the same session.
+
+## Code mode (ADR-0342)
+
+ADR-0342 builds the model-facing half of the programmatic orchestration
+bridge. `sandbox.run_code` takes Python source and runs it in the run's
+sandbox. Inside the script, `tools` reaches the run's tools as functions, and
+every call is one bridge request that re-enters step 1 of the pipeline.
+
+### The script's view
+
+```python
+threads = tools.email.search(query="from:alice")   # attribute path
+same = tools.call("email.search", {"query": "from:alice"})
+```
+
+Both forms send `{"call": "email.search", "arguments": {...}, "ordinal": n}`
+over the socket named by `AGENT_TOOL_BRIDGE_SOCKET`. The library is standard
+library only. It holds no tool catalog, no token and no credential: the relay
+adds the turn token, and the bridge decides whether the name is pinned.
+
+A `succeeded` response returns the text parts of the result joined by a
+newline. When that text is a JSON object or array, the call returns the
+parsed value. Every other status raises `ToolCallError` with `status`,
+`reason_code` and `retryable`. An uncaught exception prints a traceback to
+standard error and the script exits nonzero.
+
+### What a script can reach
+
+A script reaches a tool by its own name when the run pins it, whether the
+prompt defines it or the deferred index lists it. `tool.call` is not needed
+and not reachable.
+
+The bridge refuses two kinds of tool before the pipeline starts, with
+`denied` and `bridge.tool_not_bridgeable`:
+
+```text
+kind is CONTROL          tool.call, conversation.ask_user, skill.load, ...
+target_kind is sandbox   sandbox.run_code, sandbox.run_command, artifact.build
+```
+
+A control tool changes the run's own state or suspends it, and a script has no
+conversation to carry that. A sandbox tool would start a second execution in
+the workspace the first still holds. The refusal applies to every bridge
+caller. A refused call still takes its ordinal, so later call ids are
+unchanged on replay.
+
+### Identity, output and trust
+
+The script hash is the sha256 of the canonical JSON of the source and the
+outer call id. A replay of one invocation derives the same bridge call ids and
+reads recorded outcomes. The same source in a later call executes for real.
+
+The result carries `exit_code`, `stdout`, `stderr`, `timed_out`, `killed_by`,
+`duration_ms`, the two truncation flags, `files_changed`, `tool_calls` and
+`tool_call_limit_reached`. Bridged results never enter the conversation; only
+what the script prints does. The result is `EXTERNAL_UNTRUSTED`.
+
+### Approval
+
+The owner decided on 2026-11-22 that a script should ask less often. The
+policy matrix and the trust overlay are unchanged. What changes is the trust
+of the script's source (see `argument_trust` above):
+
+- A script written in a turn the owner opened, before that turn has read any
+  outside content, runs without an approval. Recalled memory in the context
+  does not change this.
+- Once the turn has read a web page, a message, a knowledge passage or an
+  earlier script's output, the next script asks. The card says the chat has
+  read outside content.
+- A turn opened by anyone but the owner always asks.
+- Every tool call a script makes is still decided by itself. A write, a send
+  or a delete asks exactly as it does when the model calls it directly.
+
+`tests/unit/test_code_mode_approval.py` covers the rule and each case that
+still asks.
+
+### Budget
+
+**Bridged calls count against the run's tool-call limit.** This holds for
+every bridge caller in the model loop, `sandbox.run_command` included.
+
+- Before a batch is dispatched, the loop gives the step an allowance: the
+  tool-call limit, less the calls already counted, less the batch itself.
+- The tool executor counts each bridged call that passes the refusal above.
+  A call past the allowance never reaches the pipeline. It returns `failed`
+  with `tool.budget_exhausted`, the code a direct call over budget gets.
+- After the checkpoint that ends the step, the loop records the bridged calls
+  with `record_tool_usage`. The count therefore never passes the limit.
+
+**An orchestration-only step is refunded.** It is a step whose model turn
+called nothing but `sandbox.run_code` and whose scripts made at least one
+bridged call in the attempt that finished the step. The loop calls
+`refund_orchestration_turn`, which lowers the run's step count and model-call
+count by one. Recorded usage (`usage.model_calls`, tokens, cost) is not
+changed. A refunded step costs at least two tool calls, so the tool-call
+limit bounds how many steps a run can get back.
+
+The refund never reuses a step number. [runtime-loop.md](runtime-loop.md)
+defines the number as the step count plus the steps refunded so far, and
+gives the order of the checkpoint and the two ledger writes.
+
+The same accounting runs when a suspended batch resumes. Calls bridged by an
+attempt that suspended or crashed before its step ended are not counted. The
+per-script cap of 64 calls, the cost budget and the deadline are unchanged.
+The bridge is not metered for browser workflows, email tasks or jobs, which
+dispatch outside the model loop.
+
+`tests/unit/test_code_mode_budget.py` covers the refund, the step numbers, the
+count, the refusal at the limit and the resumed batch.
+
+### Chat
+
+With the setting on, three things change for a new chat. Sessions and
+schedules pin their agent version, so an existing chat keeps what it has.
+
+- **Roster.** `sandbox.run_code` takes the place of `sandbox.run_command` in
+  Chat's configured tools. Every other definition and every index entry stays
+  where it was, so no cap and none of ADR-0267's spare index entries is
+  spent. The definitions grow by about 42 tokens, and the fullest production
+  chat stays under its 9,000. The command tool stays registered for chats
+  that pinned it and for compositions that name it. A script runs a command
+  with `subprocess`.
+- **Why not both.** Keeping both tools defined moves reads out of the
+  definitions: one in an ordinary chat and two in a chat bound to a website.
+  Listing the command tool in the index instead leaves the fullest chat nine
+  spare entries, one under ADR-0267's ten.
+- **Instructions.** The agent's instructions gain one paragraph,
+  `CODE_MODE_AGENT_INSTRUCTIONS`, only when its tools include
+  `sandbox.run_code`. It tells Chat to write one script when an answer needs
+  a loop, paging or a comparison of two lists; to call a single tool
+  directly; to make sends, deletes and other changes as direct calls; and to
+  run a command from the script where the base instructions name
+  `sandbox.run_command`. An approval inside a script holds the sandbox and
+  re-runs the script on resume, which is why changes stay direct.
+
+Evaluation case 36 runs a real script through the pipeline
+([evaluation-harness.md](evaluation-harness.md)).
+`tests/gates/test_code_mode_roster_adr0342.py` covers the roster, the
+paragraph and the case.
+
+### Activation
+
+`AGENT_CODE_MODE_ENABLED` is off by default. Off, the tool is not registered
+and no roster, prompt or pin changes. On, the tool is registered and Chat
+changes as the section above describes. `tests/unit/test_code_mode.py` covers
+the library, the runner, the tool and the bridge refusal offline.

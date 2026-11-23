@@ -142,7 +142,7 @@ is the same "zero rows updated means stop, not retry" discipline that
 An append that carries no state change has no guarded `UPDATE` to inspect and is
 not subject to the check. The diagnostic `run.fenced` is the case in point: a
 fenced worker performs no transition, no lease release, and no checkpoint write,
-and appends exactly one event, which must commit (`runtime-loop.md:921-930`).
+and appends exactly one event, which must commit (`runtime-loop.md:942-951`).
 
 ### Gaps are normal; missing writes are not
 
@@ -343,7 +343,7 @@ they fix four acceptance criteria and one exclusion list. Neither states a
 format, a redaction procedure, or what "consent-gated" means mechanically,
 and [evaluation-harness.md](evaluation-harness.md) has already built the
 consuming half against the assumption that this half is redacted before a
-converter ever sees it (`evaluation-harness.md:1328`). This is the
+converter ever sees it (`evaluation-harness.md:1353`). This is the
 producing half, and it is the third projection in the table above.
 
 ### The export is an artifact, not a query
@@ -414,14 +414,14 @@ captured and labeled distinctly — true by construction rather than by
 convention, and `failure` carries the classification without carrying the
 error text, which is the field most likely to have a path, a host, or a
 query string in it. Its three values are `RunStatus`'s terminal subset
-(`runtime-loop.md:279`) and not a vocabulary of the export's own, so a
+(`runtime-loop.md:292`) and not a vocabulary of the export's own, so a
 consumer filtering exported runs and a reader querying `runs.status` ask the
 same question in the same words.
 
 `recorded_on` is a date, not a timestamp, and there are no per-message
 timestamps at all. Per-message timing is the highest-entropy correlatable
 field an export could carry, no stated consumer needs it — the harness
-discards timestamps at conversion (`evaluation-harness.md:1305`) and a
+discards timestamps at conversion (`evaluation-harness.md:1330`) and a
 training corpus has no use for them — and a field that is dropped by every
 consumer and re-identifies a user is a field that should not have been
 written. `tools` records the name and schema hash of every tool the run
