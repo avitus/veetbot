@@ -4,7 +4,7 @@ title: Changelog
 
 # Changelog
 
-## 2026-11-23 — The recall question set counts a fact any memory delivers (ADR-0346, proposed)
+## 2026-11-23 — The recall question set counts a fact any memory delivers (ADR-0346)
 
 - The question tool followed only the newest memory that contains an expected
   text. Once mail and websites began forming memories, the newest was often a

@@ -18,7 +18,7 @@ title: Architecture Decisions
 - [ADR-0343: The standing recall admission binds no reader, and a question run is labelled as the chat model (Accepted)](0343-standing-recall-binds-no-reader.md)
 - [ADR-0344: One approval for a request that changes a saved job (Accepted)](0344-one-approval-for-a-job-repair-request.md)
 - [ADR-0345: One-press reply sends use an operational session (Accepted)](0345-reply-send-operational-session.md)
-- [ADR-0346: A question's fact is delivered by any live memory that states it (Proposed)](0346-a-fact-is-delivered-by-any-memory-that-states-it.md)
+- [ADR-0346: A question's fact is delivered by any live memory that states it (Accepted)](0346-a-fact-is-delivered-by-any-memory-that-states-it.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the

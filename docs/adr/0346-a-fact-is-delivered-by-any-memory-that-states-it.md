@@ -1,8 +1,9 @@
 # ADR-0346: A question's fact is delivered by any live memory that states it
 
-- Status: Proposed (found while diagnosing the owner question set on
-  2026-11-23; it changes how the owner's yardstick counts, so it waits for the
-  owner's approval)
+- Status: Accepted (found while diagnosing the owner question set on
+  2026-11-23; it changes how the owner's yardstick counts, and the owner
+  accepted it the same day, answering "Accept the corrected scoring rule for
+  your question set?" with "Yes, accept it")
 - Date: 2026-11-23
 - Amends: ADR-0339 (decision 7, how an expected text is matched to memory)
 - Related: ADR-0338, ADR-0340, ADR-0341, ADR-0343
