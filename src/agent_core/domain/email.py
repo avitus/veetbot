@@ -372,6 +372,7 @@ class EmailOperation(EmailValue):
     run_id: UUID
     status: str
     replayed: bool = False
+    queued_draft: EmailDraft | None = Field(default=None, exclude=True, repr=False)
 
 
 class EmailAttachmentSelection(EmailValue):

@@ -636,7 +636,9 @@ class InMemoryRunRepository:
             self._runs[run_id] = updated
             return updated.model_copy(deep=True)
 
-    async def set_seed_event_sequence(self, run_id: UUID, sequence: int) -> None:
+    async def set_seed_event_sequence(
+        self, run_id: UUID, sequence: int, *, scheduled_for: datetime | None = None
+    ) -> None:
         async with self._lock:
             try:
                 current = self._runs[run_id]
@@ -645,7 +647,13 @@ class InMemoryRunRepository:
             if current.seed_event_sequence != 0:
                 raise ConflictError("run seed sequence was already assigned")
             self._runs[run_id] = current.model_copy(
-                update={"seed_event_sequence": sequence, "updated_at": self._clock.now()},
+                update={
+                    "seed_event_sequence": sequence,
+                    "updated_at": self._clock.now(),
+                    "scheduled_for": scheduled_for
+                    if scheduled_for is not None
+                    else current.scheduled_for,
+                },
                 deep=True,
             )
 

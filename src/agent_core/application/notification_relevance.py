@@ -11,6 +11,7 @@ from agent_core.domain.runs import RunStatus
 from agent_core.domain.sessions import (
     SESSION_COCKPIT_ENTRY_REFRESH_METADATA_KEY,
     SESSION_EMAIL_OPERATIONAL_METADATA_KEY,
+    SESSION_EMAIL_THREAD_ID_METADATA_KEY,
 )
 from agent_core.ports.notifications import NotificationOutbox
 from agent_core.ports.repositories import (
@@ -49,6 +50,7 @@ async def notification_obsolete(
             if (
                 notification.kind is NotificationKind.RUN_FAILED
                 and session.metadata.get(SESSION_EMAIL_OPERATIONAL_METADATA_KEY) is True
+                and SESSION_EMAIL_THREAD_ID_METADATA_KEY not in session.metadata
             ):
                 # Refresh failures belong to Email status, not a Chat deep link.
                 # Retain the transactional outbox/event audit and clear old pushes.

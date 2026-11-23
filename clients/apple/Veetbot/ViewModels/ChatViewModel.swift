@@ -632,16 +632,16 @@ public final class ChatViewModel: ObservableObject {
         }
         do {
             let session = try await api.getSession(link.sessionID)
+            let emailThreadID = session.metadata["email_thread_id"]?.stringValue.flatMap(UUID.init(uuidString:))
             if session.isOperational, link.focus == nil {
                 try await hideOperationalSession(session.id)
                 if session.metadata["email_operational"]?.boolValue == true {
-                    await emailNotificationHandler?(nil, nil)
+                    await emailNotificationHandler?(emailThreadID, nil)
                 }
                 return
             }
             if let emailNotificationHandler {
-                if let value = session.metadata["email_thread_id"]?.stringValue,
-                    let threadID = UUID(uuidString: value),
+                if let threadID = emailThreadID,
                     await emailAnswers(link.focus, threadID: threadID, api: api) {
                     let approvalID: UUID?
                     if case .approval(let id) = link.focus { approvalID = id } else { approvalID = nil }
