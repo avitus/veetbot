@@ -2767,6 +2767,24 @@ A script reaches a tool by its own name when the run pins it, whether the
 prompt defines it or the deferred index lists it. `tool.call` is not needed
 and not reachable.
 
+A script may also write the name the way the model is shown it (ADR-0342
+decision 12). A provider cannot carry a dotted name, so each adapter shows
+`system.current_time` as `system_current_time` followed by an underscore and
+32 hex digits of the name's sha256, and cuts a long name before the digest.
+The bridge reads these as the pinned tool they stand for:
+
+```text
+the name with every character outside A-Z a-z 0-9 _ - replaced by _
+a cut of that spelling at least 31 characters long
+either of the two followed by _ and the tool's 32-digit digest
+```
+
+A spelling resolves only when exactly one pinned tool is shown that way, and
+a tool's own name always reaches that tool. Any other name is refused with
+`policy.matrix.unknown_tool`. The name is resolved first, so the refusals
+below, the call's identity, its charge, policy and the audit events all carry
+the tool's own name.
+
 The bridge refuses two kinds of tool before the pipeline starts, with
 `denied` and `bridge.tool_not_bridgeable`:
 

@@ -1612,6 +1612,9 @@ class ToolPipeline:
         async def bridge_dispatch(
             name: str, bridge_arguments: dict[str, Any], bridge_call_id: str
         ) -> dict[str, Any]:
+            # A script may write a tool's name the way the model is shown it;
+            # everything below sees the tool's own name (ADR-0342 decision 12).
+            name = _script_tool_name(name, checkpoint.pinned_tool_names)
             # The session names a call by its position in its script. The
             # pipeline names it by what was asked for there as well, so its
             # invocation, a recorded refusal and its charge all follow one
@@ -2943,6 +2946,46 @@ class ToolPipeline:
             ),
             lease=lease,
         )
+
+
+# A provider cannot show the model a dotted name. Every adapter shows the name
+# with each character outside this set replaced by an underscore, cut to a
+# length, then an underscore and 32 hex digits of the name's sha256.
+_NOT_SHOWN = re.compile(r"[^A-Za-z0-9_-]")
+_SHOWN_WITH_DIGEST = re.compile(r"(?P<stem>.+)_(?P<digest>[0-9a-f]{32})")
+# The shortest stem an adapter shows before its digest.
+_SHORTEST_SHOWN_STEM = 31
+
+
+def _script_tool_name(name: str, pinned: Sequence[str]) -> str:
+    """Return the pinned tool a script means by a name (ADR-0342 decision 12).
+
+    A script is written by a model that sees each tool under its provider's
+    spelling, so it may send that spelling, with or without the digest. The
+    spelling is read only as a name for a tool the run already pins, and only
+    when exactly one pinned tool is shown that way. Anything else is returned
+    unchanged and refused as an unknown tool like any other unpinned name.
+    """
+
+    if name in pinned:
+        return name
+    digest_form = _SHOWN_WITH_DIGEST.fullmatch(name)
+    meant = [
+        candidate
+        for candidate in pinned
+        if _is_shown_as(candidate, name)
+        or (
+            digest_form is not None
+            and hashlib.sha256(candidate.encode("utf-8")).hexdigest()[:32] == digest_form["digest"]
+            and _is_shown_as(candidate, digest_form["stem"])
+        )
+    ]
+    return meant[0] if len(meant) == 1 else name
+
+
+def _is_shown_as(candidate: str, stem: str) -> bool:
+    shown = _NOT_SHOWN.sub("_", candidate)
+    return shown == stem or (len(stem) >= _SHORTEST_SHOWN_STEM and shown.startswith(stem))
 
 
 def _bridged_call_identity(position_id: str, name: str, arguments: dict[str, Any]) -> str:

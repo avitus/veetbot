@@ -7,7 +7,10 @@
   Implementation status), as are Chat's roster, instructions and evaluation
   case. A local Docker run passed on 2026-11-22. On 2026-11-23 the owner
   decided that one approval covers every script in a request (decision 11).
-  Production latency evidence and activation are open.
+  The owner turned the setting on in production for app chats on 2026-11-23;
+  the measurements are in Implementation status. That run found that a
+  script could not name a tool the way the model is shown it, which decision
+  12 repairs.
 - Date: 2026-11-21
 - Amends: ADR-0015 (names the tool of decision 1, defines the
   "orchestration-only turn" of decision 3, counts bridged calls against the
@@ -194,6 +197,29 @@ The owner prefers no new external dependency unless one is necessary.
       the setting of decision 8 is on. Off, a script card cannot exist and
       `approve_for_request` naming the tool is refused as unavailable.
     - A client that predates the offer shows Approve once and Deny.
+12. **A script may name a tool the way the model is shown it.** The first
+    production script that called a tool was refused (Implementation status).
+    The owner asked for the repair on 2026-11-23.
+    - A provider cannot carry a dotted tool name. Both adapters show the
+      model the name with each character outside letters, digits, underscore
+      and hyphen replaced by an underscore, cut to a length, then an
+      underscore and 32 hex digits of the name's sha256. The model wrote
+      `tools.system_current_time(...)`, and the bridge refused the name as an
+      unknown tool.
+    - The bridge reads such a spelling as the pinned tool it stands for. It
+      accepts the whole replaced name, a cut of it at least 31 characters
+      long (the shortest stem an adapter shows), and either one followed by
+      that tool's digest.
+    - A spelling resolves only to a tool the run pins, and only when exactly
+      one pinned tool is shown that way. A tool's own name always reaches
+      that tool. Every other name is refused as before with
+      `policy.matrix.unknown_tool`.
+    - The name is resolved before anything else in the bridge dispatch. The
+      refusal of control and sandbox tools (decision 3), the call's identity
+      and charge (decision 6), policy, approval and the audit events all see
+      the tool's own name. Nothing becomes reachable that the dotted name
+      did not already reach.
+    - The library in the sandbox is unchanged, so the image needs no rebuild.
 
 ## Implementation status
 
@@ -226,9 +252,29 @@ The work is cut into four slices.
      same 0.84 s, so four bridged calls to an in-process dispatcher added
      nothing measurable. The cost is fixed per script: starting the relay,
      waiting for its socket, and starting Python.
-   - **Not done.** The same timings in the production sandbox, whose runtime
-     and host differ; real tools behind the bridge, which add their own time;
-     a live model's choice of a script; then the owner's activation.
+   - **Activated in production, 2026-11-23.** The owner turned the setting
+     on for the API and the interactive, async and maintenance workers, which
+     serve app chats. The schedule, surface, notify and call services read
+     their own settings files and stay off, so schedules and inbound surfaces
+     keep `sandbox.run_command`. The release had already built the image.
+   - **Measured there (gVisor, the production host), four scripts in three
+     requests of one chat.** A script with no tool call returned 4.4 s after
+     it started, on the first request after the restart. A script with two
+     web searches took 5.5 s: 2.2 s before its first call arrived, 1.6 s and
+     1.1 s for the searches. Local Docker took 1.6 s for a first script. Each
+     in-process tool call over the bridge added about 0.15 s. The searches
+     returned 18.8 KB and 17.5 KB, under the 64 KiB frame, and the script put
+     377 bytes into the conversation. A script turn counted one step and one
+     model call, so the refund works. No script asked in a request that had
+     read nothing outside.
+   - **Found there.** The model's first script that called a tool named it
+     `system_current_time` and was refused as an unknown tool. Its second
+     attempt used the dotted name and asked for approval, because it followed
+     the first script's output. Decision 12 repairs the name.
+   - **Not done.** A later script of the same run, which needs an approval
+     in production and was not timed. Each request asked for a script in
+     words, so an unprompted choice of a script by a live model is still
+     unobserved.
 
 ## Consequences
 
@@ -239,7 +285,10 @@ The work is cut into four slices.
   hand a script. Slice 4 measures whether real tools reach it.
 - An approval inside a script holds the sandbox for up to 300 seconds, then
   the run suspends and the script re-executes from the start on resume.
-- The sandbox image must be rebuilt before the setting is turned on.
+- A release builds the sandbox image and tags it for production
+  (`docs/deployment.md`), so a deployed release already carries the runner
+  and the library. A host whose image was built by hand must rebuild it
+  before the setting is turned on.
 - With the setting on, a new chat no longer lists `sandbox.run_command`. A
   command then runs from a script, which the local Docker run confirmed.
 - Turning the setting on changes the default agent's tools and instructions,

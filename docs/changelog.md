@@ -4,6 +4,19 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-23 — Scripts are on for app chats, and a script may name a tool as the model sees it (ADR-0342)
+
+- Scripts were turned on in production for chats started in the app.
+  Schedules, Telegram and calls are unchanged.
+- Measured there: a script starts in 2 to 4 seconds, each tool call from
+  inside a script adds about 0.15 seconds, and two web searches of about
+  18 KB each passed through with only the 377-byte answer reaching the
+  conversation. A script written for your own request did not ask.
+- The first script that called a tool failed. The model is shown a tool as
+  `system_current_time`, while a script had to write `system.current_time`.
+  A script may now use either spelling. The spelling only ever stands for a
+  tool the request already has, and only when it fits exactly one.
+
 ## 2026-11-23 — The recall question set counts a fact any memory delivers (ADR-0346)
 
 - The question tool followed only the newest memory that contains an expected
