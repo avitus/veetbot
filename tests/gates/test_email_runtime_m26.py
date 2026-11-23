@@ -271,9 +271,7 @@ def _page(*, changed: bool = False, sent_at: datetime = MAIL_SENT_AT) -> dict[st
     }
 
 
-async def _seed_draft(app: Composition) -> tuple[EmailThread, EmailDraft]:
-    from uuid import uuid4
-
+async def _seed_reply_thread(app: Composition) -> EmailThread:
     from agent_core.application.email import save_value
     from agent_core.domain.email import EmailAccount
 
@@ -293,9 +291,15 @@ async def _seed_draft(app: Composition) -> tuple[EmailThread, EmailDraft]:
             app.clock.now(),
         )
     session = await app.sessions.create()
-    thread = await app.services.email.import_thread(principal, "default", _page(), session)
+    return await app.services.email.import_thread(principal, "default", _page(), session)
+
+
+async def _seed_draft(app: Composition) -> tuple[EmailThread, EmailDraft]:
+    from uuid import uuid4
+
+    thread = await _seed_reply_thread(app)
     draft = await app.services.email.save_generated_draft(
-        principal, thread.id, thread.revision, "Thanks. I will review them.", run_id=uuid4()
+        app.principal, thread.id, thread.revision, "Thanks. I will review them.", run_id=uuid4()
     )
     return thread, draft
 
@@ -2173,6 +2177,120 @@ def _fixed_clock() -> FixedClock:
     from datetime import UTC, datetime
 
     return FixedClock(datetime(2026, 10, 31, 12, tzinfo=UTC))
+
+
+async def test_reply_send_on_a_cold_worker_opens_only_the_sending_mailbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+    from unittest.mock import AsyncMock
+
+    from agent_core.domain.email import EmailDraftEdit
+    from tests.gates.test_email_m18 import _email_settings
+
+    started: dict[str, int] = {}
+    base = await _mailbox_factory([("get_profile", _profile()), ("get_thread_page", _page())])
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        mcp_client_factory=_counting(base, started),
+        clock=_fixed_clock(),
+    ) as app:
+        email = app.services.email
+        thread = await _seed_reply_thread(app)
+        draft = await email.select_reply(
+            app.principal,
+            thread.id,
+            kind="manual",
+            source_revision=thread.revision,
+            expected_revision=None,
+        )
+        draft = await email.edit_draft(
+            app.principal,
+            draft.id,
+            EmailDraftEdit(
+                expected_revision=draft.revision,
+                to=draft.to,
+                cc=draft.cc,
+                bcc=draft.bcc,
+                subject=draft.subject,
+                body="Thanks!",
+            ),
+        )
+        assert draft.session_id is None
+        catalog = AsyncMock(wraps=app.skill_catalogs.open)
+        monkeypatch.setattr(app.skill_catalogs, "open", catalog)
+        async with app.uow_factory() as uow:
+            task_scan = AsyncMock(
+                side_effect=AssertionError("a send only needs this draft's pending task")
+            )
+            monkeypatch.setattr(type(uow.email), "list_tasks", task_scan)
+        started.clear()
+        operation = await app.services.email.send(
+            app.principal,
+            draft.id,
+            expected_revision=draft.revision,
+            source_revision=thread.revision,
+            idempotency_key="cold-send",
+        )
+        await _drain(app)
+        run = await app.runs.get(operation.run_id)
+        assert run.status is RunStatus.COMPLETED, run.failure
+        assert run.model_call_count == 0
+        async with app.uow_factory() as uow:
+            send_session = await uow.sessions.get(run.session_id, app.principal)
+        assert send_session.metadata["email_thread_id"] == str(thread.id)
+        catalog.assert_not_awaited()
+        assert started == {"gmail_read": 1, "gmail_send": 1}
+        discussion = await email.discussion(app.principal, thread.id)
+        assert str(discussion["session_id"]) != str(run.session_id)
+        catalog.assert_awaited()
+
+
+async def test_slow_send_checkpoint_does_not_consume_the_undo_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+    from unittest.mock import AsyncMock
+
+    from agent_core.domain.errors import ConflictError
+    from tests.gates.test_email_m18 import _email_settings
+
+    clock = _fixed_clock()
+    async with build(
+        settings=replace(_email_settings(), email_mode_enabled=True),
+        mcp_client_factory=await _mailbox_factory([]),
+        clock=clock,
+    ) as app:
+        thread, draft = await _seed_draft(app)
+        email = app.services.email
+        seed = email.seed_checkpoint
+
+        async def slow_seed(*args: Any) -> Any:
+            result = await seed(*args)
+            clock.advance(timedelta(seconds=22))
+            return result
+
+        monkeypatch.setattr(email, "seed_checkpoint", slow_seed)
+        monkeypatch.setattr(email, "dispatch", AsyncMock())
+        operation = await email.send(
+            app.principal,
+            draft.id,
+            expected_revision=draft.revision,
+            source_revision=thread.revision,
+            idempotency_key="slow-admission",
+        )
+        queued = await app.runs.get(operation.run_id)
+        assert queued.scheduled_for == clock.now() + timedelta(seconds=10)
+        with pytest.raises(ConflictError, match="active thread run"):
+            await email.exclude_source(app.principal, thread.id, thread.revision)
+        clock.advance(timedelta(seconds=9))
+        restored = await email.undo_send(
+            app.principal,
+            draft.id,
+            expected_revision=draft.revision,
+            run_id=queued.id,
+        )
+        assert restored.status.value == "ready"
 
 
 @pytest.mark.parametrize(

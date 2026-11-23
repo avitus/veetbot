@@ -19,6 +19,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import EvalExpectationError
 from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.execution import SANDBOX_RUN_CODE_TOOL_NAME
 from agent_core.domain.memory import MemoryRecord
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.records import RecordCadence, RecordComponent, RecordPrecision
@@ -26,6 +27,7 @@ from agent_core.domain.runs import Run, RunLimits, RunStatus
 from agent_core.domain.skills import AuthoringContext, SkillSource
 from agent_core.evals.cases import EvalCase, EvalExpected, load_cases
 from agent_core.evals.cockpit import CommittedWidget, ManifestWidgetBuilder, drain_cockpit_outbox
+from agent_core.evals.code_mode import ScriptExecutionEnvironment
 from agent_core.evals.fixtures import (
     resolve_mcp_fixture,
     resolve_model_fixture,
@@ -52,6 +54,7 @@ def _settings(
     delegation_enabled: bool = False,
     records_enabled: bool = False,
     cockpit_enabled: bool = False,
+    code_mode_enabled: bool = False,
 ) -> Settings:
     return Settings(
         database_url="postgresql+asyncpg://localhost/eval",
@@ -65,6 +68,7 @@ def _settings(
         delegation_enabled=delegation_enabled,
         records_enabled=records_enabled,
         cockpit_enabled=cockpit_enabled,
+        code_mode_enabled=code_mode_enabled,
     )
 
 
@@ -239,6 +243,7 @@ async def _run_single(
         for name in case.fixtures.mcp_servers
     )
     bootstrap: Any = importlib.import_module("agent_core.bootstrap")
+    code_mode = SANDBOX_RUN_CODE_TOOL_NAME in effective_tools
     async with bootstrap.build(
         settings=_settings(
             delegation_enabled="delegate.run" in effective_tools,
@@ -247,7 +252,11 @@ async def _run_single(
             records_enabled=case.session is not None
             and case.session.records_append_turn is not None,
             cockpit_enabled=case.fixtures.cockpit,
+            # A case that names the script tool gets it, and a sandbox that
+            # runs the script instead of echoing it (ADR-0342).
+            code_mode_enabled=code_mode,
         ),
+        fake_environment_factory=ScriptExecutionEnvironment if code_mode else None,
         cockpit_builder_override=(
             ManifestWidgetBuilder(fixture_root.parents[2]) if case.fixtures.cockpit else None
         ),

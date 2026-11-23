@@ -4,6 +4,39 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-23 — One approval for the scripts of a request (ADR-0342)
+
+- When a request has read a web page, a message or other outside content,
+  the first script Veetbot writes still asks. Its card now offers "Allow for
+  this request". Choosing it lets the rest of that request's scripts run
+  without asking again.
+- It lasts until Veetbot finishes answering, until your next message, or for
+  two hours, whichever comes first. "Approve once" works as before, and the
+  next script then asks again.
+- It covers running scripts only. Anything a script does that would ask on
+  its own, such as sending, deleting or changing something, still asks.
+- The Apple apps show the new choice on a script's approval card. An app
+  that has not been updated shows Approve once and Deny as before.
+- Scripts are still off by default.
+
+## 2026-11-23 — Script accounting repairs from review (ADR-0342)
+
+- A script's tool calls are now recorded the moment each is made. They are
+  counted against the run's tool-call limit even when the step pauses for an
+  approval or the worker restarts part-way, and never twice when a script is
+  run again after a restart.
+- A run that was given steps back keeps its step numbering when its saved
+  state has to be rebuilt, so a recovered step cannot repeat a tool call
+  that already ran.
+- Text outside plain ASCII in a script's tool arguments no longer triples in
+  size on its way out of the sandbox, which could make a valid request be
+  refused as too large.
+- A tool result that is JSON after leading blank space is now handed to the
+  script as data rather than as text.
+- The evaluation harness that runs a real script now caps output while the
+  script runs, ends everything a script started when it times out, and
+  leaves nothing running when an evaluation is cancelled.
+
 ## 2026-11-23 — Review repairs before promotion
 
 - A job approval card's digest of a long source is now of the whole source
@@ -12,6 +45,37 @@ title: Changelog
   default chat model, not the fake model.
 - Erasing a message also takes its end from an earlier stored revision of a
   signature detail whose current end you set yourself; your end stays.
+
+## 2026-11-22 — Code mode: budget, approvals and Chat (ADR-0342)
+
+- A step in which Veetbot only runs scripts, and the scripts call at least one
+  tool, no longer uses up one of the run's steps or model calls. A long
+  paging job therefore does not run out of steps.
+- Every tool call a script makes now counts against the run's tool-call
+  limit. A script that reaches the limit is told so for each further call,
+  and the run still ends with an answer.
+- The same count now applies to tool calls made from a sandbox command. They
+  were not counted before.
+- A script Veetbot writes for your request now runs without asking you, as
+  long as the request has not yet read a web page, a message or other outside
+  content. After that, each script asks first. Anything a script does that
+  would ask on its own, such as sending or deleting, still asks.
+- Chat now has its guidance for scripts: write one script when an answer
+  needs a loop, several pages of results or a comparison of two lists, call a
+  single tool directly, and never send, delete or change anything from inside
+  a script.
+- When scripts are turned on, the script tool takes the place of the older
+  sandbox command tool in new chats, so nothing else is pushed out of Chat's
+  tool list. A script can still run a command.
+- A new evaluation case runs a real script that pages two lists and reports
+  the names on both, in one model step and without asking you.
+- A real script now runs in a real Docker sandbox on a development machine:
+  it paged two lists, ran a command, had no network and saw no secrets. The
+  first script of a request took 1.6 seconds and each later one under a
+  second.
+- Still off by default. Still to come: the same speed measurements in the
+  production sandbox and a check that the live model reaches for a script
+  when it should.
 
 ## 2026-11-22 — One approval for a request that changes a saved job (ADR-0344)
 
@@ -51,6 +115,18 @@ title: Changelog
   (`--model-policy`, the default chat model if omitted), so a question run
   measures the recall a chat gets. No model is called.
 
+## 2026-11-21 — Code mode, first slice (ADR-0342)
+
+- Veetbot can now be given one tool that runs a short Python script, and the
+  script calls its other tools as plain functions. Loops, paging and joins run
+  in the script, and only what it prints comes back into the chat.
+- Every call a script makes is checked exactly like a call the model makes
+  itself: the same permissions, approvals, limits and records.
+- A script cannot start another script, ask you a question or reach a tool the
+  chat was not given.
+- This is off by default (`AGENT_CODE_MODE_ENABLED`). Chat does not use it yet:
+  the step refund, the instructions that tell Chat when to use it and the
+  speed measurements are still to come.
 ## 2026-11-21 — Refine draft shows that Veetbot is working
 
 - Pressing Refine draft in the Email reply now shows a spinner and

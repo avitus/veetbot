@@ -632,16 +632,16 @@ public final class ChatViewModel: ObservableObject {
         }
         do {
             let session = try await api.getSession(link.sessionID)
+            let emailThreadID = session.metadata["email_thread_id"]?.stringValue.flatMap(UUID.init(uuidString:))
             if session.isOperational, link.focus == nil {
                 try await hideOperationalSession(session.id)
                 if session.metadata["email_operational"]?.boolValue == true {
-                    await emailNotificationHandler?(nil, nil)
+                    await emailNotificationHandler?(emailThreadID, nil)
                 }
                 return
             }
             if let emailNotificationHandler {
-                if let value = session.metadata["email_thread_id"]?.stringValue,
-                    let threadID = UUID(uuidString: value),
+                if let threadID = emailThreadID,
                     await emailAnswers(link.focus, threadID: threadID, api: api) {
                     let approvalID: UUID?
                     if case .approval(let id) = link.focus { approvalID = id } else { approvalID = nil }
@@ -1947,11 +1947,12 @@ public final class ChatViewModel: ObservableObject {
         approvalsInFlight[approval.id] = decision
         defer { approvalsInFlight[approval.id] = nil }
         do {
-            // ADR-0302, ADR-0344: allowing the request repeats the card's own
-            // offer, the website login's or the job's.
+            // ADR-0302, ADR-0344, ADR-0342: allowing the request repeats the
+            // card's own offer, the website login's, the job's or the script's.
             let requestGrant = decision == .approveForRequest
                 ? approval.requestGrantOffer.map(RequestGrantEcho.init(offer:))
                     ?? approval.jobRequestGrantOffer.map(RequestGrantEcho.init(jobOffer:))
+                    ?? approval.scriptRequestGrantOffer.map(RequestGrantEcho.init(scriptOffer:))
                 : nil
             let stored = try await api.resolveApproval(
                 approval.id,

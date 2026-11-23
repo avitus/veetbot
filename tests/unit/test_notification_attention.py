@@ -3,6 +3,8 @@
 from dataclasses import replace
 from uuid import UUID
 
+import pytest
+
 from agent_core.bootstrap import build
 from agent_core.domain.schedules import OccurrenceDisposition
 from agent_core.policy.scopes import PLATFORM_SCOPES
@@ -203,7 +205,8 @@ async def test_sync_rejects_active_and_foreign_runs_before_writing_receipts() ->
         await service.sync(stranger, NotificationSyncRequest(seen_run_ids=[completed.id]))
 
 
-async def test_operational_email_failure_cleanup_preserves_chat_alerts() -> None:
+@pytest.mark.parametrize("reply_send", [False, True])
+async def test_operational_email_failure_cleanup_preserves_chat_alerts(reply_send: bool) -> None:
     """Verify that operational email failure cleanup preserves chat alerts."""
     from agent_core.adapters.determinism import SequenceIdFactory
     from agent_core.adapters.push import FakePushTransport
@@ -221,6 +224,8 @@ async def test_operational_email_failure_cleanup_preserves_chat_alerts() -> None
     operational = session().model_copy(
         update={"id": UUID(int=9401), "metadata": {"email_operational": True}}
     )
+    if reply_send:
+        operational.metadata["email_thread_id"] = str(UUID(int=9403))
     hidden_run = run(status=RunStatus.FAILED).model_copy(
         update={"id": UUID(int=9402), "session_id": operational.id}
     )
@@ -241,13 +246,15 @@ async def test_operational_email_failure_cleanup_preserves_chat_alerts() -> None
     response = await service.sync(
         owner, NotificationSyncRequest(delivered_notification_ids=[internal.id, chat.id])
     )
-    assert response.obsolete_notification_ids == [internal.id]
+    assert response.obsolete_notification_ids == ([] if reply_send else [internal.id])
     transport = FakePushTransport()
     assert await _dispatcher(factory, clock, ids, transport).run_once() == 2
-    assert len(transport.calls) == 1
+    assert len(transport.calls) == (2 if reply_send else 1)
     async with factory() as uow:
         [settled] = await uow.notification_outbox.get_many(owner, (internal.id,))
-        assert settled.status is NotificationStatus.SUPERSEDED
+        assert settled.status is (
+            NotificationStatus.DISPATCHED if reply_send else NotificationStatus.SUPERSEDED
+        )
         assert (await uow.runs.get(hidden_run.id, owner)).status is RunStatus.FAILED
         assert (await uow.sessions.get(operational.id, owner)).metadata["email_operational"] is True
 

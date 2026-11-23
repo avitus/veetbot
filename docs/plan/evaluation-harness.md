@@ -1151,6 +1151,31 @@ Numbering stops there. A case added later takes the next integer and no case
 is ever renumbered, because case numbers appear in gate statements, in
 `interventions` fixtures, and in this document's own cross-references.
 
+### Case 36, and a sandbox that runs the script
+
+Case 36, `code_mode_two_list_intersection`, is ADR-0342's case. The scripted
+model writes one `sandbox.run_code` script that pages two lists on the
+`lists_server` MCP fixture and prints the names on both. The case asserts one
+script and four bridged reads, the printed answer as the only result the
+model receives, no approval, and one counted step and model call for two
+model requests, because the script's step is given back. It carries
+Milestone 6, the milestone of the bridge it exercises, and no `mcp` tag.
+
+The fake execution environment echoes standard input, so it cannot run a
+script. A case whose tools include `sandbox.run_code` is therefore composed
+with `agent_core.evals.code_mode.ScriptExecutionEnvironment`. It runs the
+sandbox image's own entry point, `agent_core.execution.code_runner`, as a
+local subprocess and serves the bridge from a socket in a temporary
+directory, adding the token as the in-sandbox relay does. Each call crosses
+the real bridge session and the tool pipeline. It reports a duration of zero
+so that two runs compare equal. It is not a sandbox: it isolates nothing, and
+only the deterministic harness builds it. Isolation and the relay are proved
+against Docker by the sandbox suites.
+
+The step-identity invariant in [runtime-loop.md](runtime-loop.md) reads
+"less the steps the run was refunded". Its gate subtracts the one step this
+case gives back and nothing for any other case.
+
 ## The capability track
 
 Section 20 establishes the track and gives six properties: live models, outside

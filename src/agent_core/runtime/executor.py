@@ -90,10 +90,14 @@ from agent_core.runtime.loop import (
     bind_browser_auth_question,
     checkpoint,
     guard_tool_turn,
+    meter_bridge,
+    note_orchestration_turn,
     prepare_browser_connection_question,
     prepare_recall,
     recover_browser_failure,
     run_loop,
+    settle_bridged_calls,
+    step_number_at,
     with_event_sequences,
 )
 from agent_core.runtime.scheduled_browser import (
@@ -1303,7 +1307,7 @@ class RunExecutor:
         durable_baseline, requested_synthesis = await self._turn_controls(context, latest)
         step = Step(
             run_id=context.run.id,
-            step_number=max(1, context.run.step_count),
+            step_number=max(1, step_number_at(context.run.step_count, restored)),
             started_at=self._clock.now(),
         )
         # A fully answered turn can be present even in a freshly seeded
@@ -1391,15 +1395,18 @@ class RunExecutor:
             step_number = proposed_at if isinstance(proposed_at, int) else context.run.step_count
             pending_batch_budget = {"step_count": step_number, "tool_call_count": baseline}
         restored.pending_tool_calls = [call.model_dump(mode="json") for call in calls]
+        # `step_number` is the step count the batch was proposed under. Its
+        # number adds back the steps the run had been refunded by then.
         step = Step(
             run_id=context.run.id,
-            step_number=max(1, step_number),
+            step_number=max(1, step_number_at(step_number, restored)),
             started_at=self._clock.now(),
         )
         # The queued generation is revalidating the persisted calls. Any approval
         # raised below becomes the sole pending suspension for the next generation.
         restored.pending_approval_ids = []
         await prepare_recall(context, pending_batch_budget=pending_batch_budget)
+        meter_bridge(context.run, step, calls)
         with recall_phase(context.recall_permit):
             results = await context.dispatch_tools(
                 run=context.run,
@@ -1430,7 +1437,9 @@ class RunExecutor:
         apply_tool_evidence(restored.working_state, calls)
         restored.pending_tool_calls = []
         await recover_browser_failure(context, step, calls, results)
+        orchestration_only = note_orchestration_turn(context, step, latest or calls)
         await checkpoint(context, "tool_recovered")
+        await settle_bridged_calls(context, step, refund=orchestration_only)
         return None
 
     def _internal_failure(self, run: Run, exc: Exception) -> RunOutcome:

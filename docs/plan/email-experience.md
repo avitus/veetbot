@@ -360,8 +360,8 @@ Existing content-free approval notifications and pending-action recovery use
 the server-owned thread/session association to open the correct Email draft,
 including after a cold launch. Resolving an approval on another device updates
 both modes without discarding unsaved input. No mail content is added to push.
-An outcome alert for a server-marked operational email session opens the Email list
-without adding the ingestion session to Chat history or replacing its draft.
+An operational send alert opens its reply thread. Other operational email alerts open
+the Email list. Both preserve unsaved drafts and keep the session out of Chat history.
 Approval and question alerts retain their existing resolution paths.
 
 ## 3. Retrieval and historical learning
@@ -959,11 +959,15 @@ The send flow is:
    everything else from that immutable revision. A thread that moved on, a
    stale draft, or a draft in another send state refuses the press in plain
    words. It reads nothing from the mailbox first: the owner is waiting, so
-   the task joins the interactive class (ADR-0278).
+   the task joins the interactive class (ADR-0278). A one-press send uses a
+   dedicated operational session. It reserves zero model spend, skips automatic
+   email budget aggregation and leaves the conversation available for Chat.
+   The worker prepares only the originating Gmail account’s read and send tools
+   ([ADR-0345](../adr/0345-reply-send-operational-session.md)).
 2. The task is parked for the undo window (`AGENT_EMAIL_SEND_UNDO_SECONDS`,
-   ten seconds by default). Undo within the window cancels the parked task
-   and returns the draft to editing with its text intact; once a worker has
-   claimed the task, Undo is refused and the send proceeds. The draft carries
+   ten seconds by default) after admission checks and checkpoint creation. Undo
+   cancels the parked task and restores the draft with its text intact. Once a
+   worker claims the task, Undo is refused and the send proceeds. The draft carries
    `send_undo_until` so every device shows the same window. Undo must name
    the run it takes back, so a late Undo cannot cancel a later press; the
    in-memory composition's inline dispatcher parks the run in the background
@@ -1219,12 +1223,12 @@ audit ownership before implementation. Do not execute Gmail directly from API
 handlers or invent principal-authored prompts to smuggle imported mail into
 trusted memory. Mail tool results retain their existing untrusted labels.
 
-Use ordinary operational sessions for bounded ingestion tasks, with server-owned
-metadata distinguishing them from user conversations. The default conversation
-index must not fill with polling sessions. User interaction or draft generation
-for a thread lazily creates/reuses its ordinary conversation session; Discuss
-in Chat selects it. This introduces task associations and an index filter, not
-a new session trust class or separate agent loop.
+Bounded ingestion and one-press sends use operational sessions. Server-owned
+metadata keeps those sessions out of the conversation index. Discuss in Chat,
+draft generation and saving an attachment create or reuse the thread’s ordinary
+conversation session. Sending a reply preserves that binding when it exists.
+Both kinds of session use the same durable task associations, trust model and
+agent loop.
 
 Release operational refresh MCP transports in the admitting process before
 dispatch, then release the worker's transports when the run becomes terminal,

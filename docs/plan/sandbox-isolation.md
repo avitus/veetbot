@@ -1909,3 +1909,20 @@ scheduling are implemented behind the default-off `AGENT_JOBS_ENABLED` flag.
 the flag is enabled. Local contract checks use known synthetic programs and
 scripted services; production acceptance remains pending. Existing sandbox
 isolation requirements still apply.
+
+## Code mode runner (ADR-0342)
+
+`sandbox.run_code` sends its source on standard input to
+`python -m agent_core.execution.code_runner` through `SandboxManager`, in the
+run's own sandbox and with the ordinary bridge endpoint. The runner executes
+the source with `tools` bound to the library in
+`agent_core.execution.tool_sdk`. The sandbox image copies both modules beside
+the job runner. They import the standard library only, and no source runs on
+the worker. The existing deadline, output bounds, egress denial, bridge call
+cap and cleanup apply unchanged.
+
+`tests/security/test_code_mode_runtime_adr0342.py` runs the tool against a
+real container: the relay, a command started from a script, the workspace
+kept between two scripts of one run, the scrubbed environment, the network
+denial and a refusal the script can read. It carries the `sandbox` marker, so
+`make test-sandbox` runs it after rebuilding the image.

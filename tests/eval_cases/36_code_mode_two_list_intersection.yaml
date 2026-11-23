@@ -1,0 +1,18 @@
+name: code_mode_two_list_intersection
+milestone: 6
+tags: [code_mode, sandbox, bridge]
+input: {text: "Which customers are due for renewal and also have an overdue invoice?"}
+model_fixture: code_mode_two_lists
+# One script pages both lists over the bridge. The pages never enter the
+# conversation, the step is given back, and nothing asks the owner (ADR-0342).
+fixtures:
+  tools: [sandbox.run_code, mcp.lists.renewals, mcp.lists.overdue]
+  mcp_servers: [lists_server]
+expected:
+  terminal_status: COMPLETED
+  final_text: Acme and Globex are on both lists.
+  # Two model requests ran; the script's step and model call were given back.
+  model_calls: 1
+  maximum_steps: 1
+  tool_started_count: 5
+  pending_approvals: 0

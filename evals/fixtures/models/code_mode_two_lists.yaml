@@ -1,0 +1,19 @@
+turns:
+  - kind: tool_call
+    tool_name: sandbox.run_code
+    arguments:
+      code: |
+        def everything(listing):
+            names, page = set(), 1
+            while page is not None:
+                reply = listing(page=page)
+                names.update(reply["items"])
+                page = reply["next_page"]
+            return names
+
+        both = everything(tools.mcp.lists.renewals) & everything(tools.mcp.lists.overdue)
+        print(", ".join(sorted(both)))
+    call_id: call_script
+  - kind: final
+    text: Acme and Globex are on both lists.
+    stop_reason: end_turn

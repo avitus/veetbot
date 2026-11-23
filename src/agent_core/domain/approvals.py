@@ -17,6 +17,7 @@ from agent_core.domain.browser_task_grants import (
 )
 from agent_core.domain.job_request_grants import JobRequestGrantOffer
 from agent_core.domain.policies import ActionKind, PolicyDecision, RiskLevel
+from agent_core.domain.script_request_grants import ScriptRequestGrantOffer
 
 
 class ApprovalStatus(StrEnum):
@@ -114,6 +115,9 @@ class ApprovalRequest(BaseModel):
     request_grant_offer: BrowserRequestGrantOffer | None = None
     # ADR-0344: the request-approval offer on a job card. Older records carry none.
     job_request_grant_offer: JobRequestGrantOffer | None = None
+    # ADR-0342 decision 11: the request-approval offer on a script card. Older
+    # records carry none.
+    script_request_grant_offer: ScriptRequestGrantOffer | None = None
     # ADR-0263: why research authorization refused the action, from a closed
     # content-free list. Stored for diagnosis; responses do not carry it.
     research_not_covered: str | None = None

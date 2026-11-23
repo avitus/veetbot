@@ -480,6 +480,8 @@ nav:
       - "ADR-0339 — Recall question page": adr/0339-recall-question-page.md
       - "ADR-0340 — Email memories kept by importance": adr/0340-email-memories-keep-by-importance.md
       - "ADR-0341 — One memory per email fact": adr/0341-one-memory-per-email-fact.md
+      - "ADR-0342 — Code mode over the sandbox bridge": adr/0342-code-mode-over-the-sandbox-bridge.md
       - "ADR-0343 — Standing recall binds no reader": adr/0343-standing-recall-binds-no-reader.md
       - "ADR-0344 — One approval for a job repair request": adr/0344-one-approval-for-a-job-repair-request.md
+      - "ADR-0345 — One-press reply sends use an operational session": adr/0345-reply-send-operational-session.md
   - Changelog: changelog.md

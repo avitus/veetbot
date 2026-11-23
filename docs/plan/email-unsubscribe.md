@@ -121,14 +121,14 @@ not find it here should find the reason here.
 - **Typed email tasks.** Unsubscribe work is a typed, model-free task on the
   ordinary durable queue, in the interactive class, preparing only the
   servers it calls (ADR-0104), exactly as Archive is
-  (email-experience.md:1373-1376).
+  (email-experience.md:1377-1380).
 - **Owner-gesture consent.** ADR-0095 made a clearly labelled gesture the
   consent for exactly one action while keeping `REQUIRE_APPROVAL` in force: a
   consent consumer resolves the still-mandatory approval only on an exact
   match. This milestone reuses that mechanism and generalizes its subject
   from one thread to one bounded batch of senders.
 - **The approval floor.** `EXTERNAL_WRITE` and `EXTERNAL_MESSAGE` require
-  approval in the default matrix (policy-and-approvals.md:636-637), and no
+  approval in the default matrix (policy-and-approvals.md:640-641), and no
   profile may downgrade a mailbox write or send (ADR-0071 decision 8). The
   new request tool joins that floor.
 - **The egress proxy.** One policy function checks every outbound connection
@@ -386,7 +386,7 @@ the arguments an approval of the destination.
 **Classification.** `IDEMPOTENT` is the honest class and not a convenience:
 the request is a constant, and sending it twice leaves the recipient exactly
 as unsubscribed as sending it once. Recovery may therefore re-execute
-(tool-system.md:713-722), which matters because an unsubscribe has no
+(tool-system.md:732-741), which matters because an unsubscribe has no
 read-back that could reconcile an unknown outcome. Per-target outcomes are
 persisted as each completes, so a re-execution skips targets already
 accepted rather than dialling them again.
@@ -643,7 +643,7 @@ restores the flag's eligibility.
 
 **Report spam on a thread.** Any conversation in the Inbox can be reported,
 flagged or not. The command is Archive's owner gesture with a different fixed
-delta (email-experience.md:1371-1391): the owner names one thread and the
+delta (email-experience.md:1375-1395): the owner names one thread and the
 desired state, and the server derives the account, the provider thread, and
 the labels. Report spam adds `SPAM` and removes `INBOX`; Not spam, offered
 only for a thread in Spam, adds `INBOX`, removes `SPAM`, and clears the flag.

@@ -68,6 +68,7 @@ from agent_core.domain.errors import (
     WorkspaceEscape,
 )
 from agent_core.domain.events import TOOL_CALL_DENIED_PAYLOAD_VERSION, EventEnvelope, NewEvent
+from agent_core.domain.execution import SANDBOX_RUN_CODE_TOOL_NAME
 from agent_core.domain.failures import log_context, log_failure
 from agent_core.domain.job_request_grants import (
     JOB_REQUEST_GRANT_AUTHORIZATION_KIND,
@@ -102,6 +103,7 @@ from agent_core.domain.policies import (
     TrustLevel,
 )
 from agent_core.domain.runs import Run, RunCheckpoint, Step
+from agent_core.domain.script_request_grants import ScriptRequestGrantOffer
 from agent_core.domain.skills import LoadedSkillBody
 from agent_core.domain.tool_output import content_bytes, output_excerpt
 from agent_core.domain.tools import (
@@ -523,6 +525,17 @@ def _argument_trust(
     # granting network/model access remains an independent approval decision.
     if tool_name in {"job.manage", "job.run"} and _turn_origin_trust(checkpoint) is TrustLevel.USER:
         return dict.fromkeys(arguments, TrustLevel.INTERNAL_TOOL)
+    # ADR-0342: a script written in a turn the owner opened, before the turn
+    # read any outside content, is Veetbot's own work on that request. Recalled
+    # memory does not change that. The script can read and change its run's
+    # sandbox workspace directly, which has no network and no credentials;
+    # every tool call it makes is judged under that call's own trust.
+    if (
+        tool_name == SANDBOX_RUN_CODE_TOOL_NAME
+        and _active_turn_facts(checkpoint).newest_user_trust is TrustLevel.USER
+        and _turn_origin_trust(checkpoint) in {TrustLevel.USER, TrustLevel.MEMORY}
+    ):
+        return dict.fromkeys(arguments, TrustLevel.INTERNAL_TOOL)
     trust = dict.fromkeys(arguments, TrustLevel.EXTERNAL_UNTRUSTED)
     current_user = next(
         (
@@ -826,6 +839,11 @@ class ToolPipeline:
         maximum_skill_body_tokens: int = 6_000,
         approval_expiry_seconds: Mapping[RiskLevel, int] | None = None,
         standing_authorizer: StandingAuthorizer | None = None,
+        script_request_offer: Callable[
+            [str, PolicyDecision, Run, Principal, AuthorizationTurn | None],
+            Awaitable[ScriptRequestGrantOffer | None],
+        ]
+        | None = None,
         delegations: DelegationStarter | None = None,
         job_model_factory: Callable[[Run, AgentSpec, WorkerLease | None], Awaitable[object]]
         | None = None,
@@ -874,6 +892,7 @@ class ToolPipeline:
             }
         )
         self._standing_authorizer = standing_authorizer
+        self._make_script_request_offer = script_request_offer
         self._delegations = delegations
         self._before_effect = before_effect
         self._job_model_factory = job_model_factory
@@ -1593,8 +1612,13 @@ class ToolPipeline:
         async def bridge_dispatch(
             name: str, bridge_arguments: dict[str, Any], bridge_call_id: str
         ) -> dict[str, Any]:
+            # The session names a call by its position in its script. The
+            # pipeline names it by what was asked for there as well, so its
+            # invocation, a recorded refusal and its charge all follow one
+            # identity (ADR-0342). A script executed again that asks for
+            # something else at a position is then making a new call.
             bridge_call = ToolCallItem(
-                call_id=bridge_call_id,
+                call_id=_bridged_call_identity(bridge_call_id, name, bridge_arguments),
                 item_index=0,
                 name=name,
                 arguments=bridge_arguments,
@@ -1602,6 +1626,38 @@ class ToolPipeline:
                     bridge_arguments, ensure_ascii=False, separators=(",", ":")
                 ),
             )
+            # A script has no conversation to carry a control update or a
+            # suspension, and a sandbox tool would start a second execution in
+            # the workspace this one still holds (ADR-0342).
+            try:
+                bridged = self._resolve_pinned_tool(checkpoint, name, principal)
+            except NotFoundError:
+                bridged = None
+            if bridged is not None and (
+                bridged.spec.kind is ToolKind.CONTROL or bridged.spec.target_kind == "sandbox"
+            ):
+                return {
+                    "status": "denied",
+                    "reason_code": "bridge.tool_not_bridgeable",
+                    "retryable": False,
+                }
+            # A bridged call counts against the run's tool-call limit. The loop
+            # states the room the step has; the refusal reads like a direct
+            # call's. The call is recorded on the run before it is dispatched,
+            # so a pause or a stop cannot lose it. Only the same call at the
+            # same position is a repeat.
+            charged_as = bridge_call.call_id
+            if (
+                step.bridge_call_allowance is not None
+                and charged_as not in run.usage.unsettled_bridged_calls
+            ):
+                if len(run.usage.unsettled_bridged_calls) >= step.bridge_call_allowance:
+                    return {
+                        "status": "failed",
+                        "reason_code": "tool.budget_exhausted",
+                        "retryable": False,
+                    }
+                await self._record_bridged_call(run, charged_as, lease)
             approval_poll_seconds = 0.2
             while True:
                 token.raise_if_cancelled()
@@ -2199,6 +2255,58 @@ class ToolPipeline:
             return None
         return authorization
 
+    async def _record_bridged_call(
+        self, run: Run, bridge_call_id: str, lease: WorkerLease | None
+    ) -> None:
+        """Record a bridged call on the run until its step is settled (ADR-0342).
+
+        The identity is added before the first await, so two calls dispatched
+        together cannot both take the last place the limit has.
+        """
+
+        previous = run.usage
+        run.usage = previous.model_copy(
+            update={"unsettled_bridged_calls": [*previous.unsettled_bridged_calls, bridge_call_id]},
+            deep=True,
+        )
+        try:
+            async with self._uow_factory() as uow:
+                await uow.runs.update_counters(run, lease=lease)
+        except BaseException:
+            run.usage = run.usage.model_copy(
+                update={
+                    "unsettled_bridged_calls": [
+                        recorded
+                        for recorded in run.usage.unsettled_bridged_calls
+                        if recorded != bridge_call_id
+                    ]
+                },
+                deep=True,
+            )
+            raise
+
+    async def _script_request_offer(
+        self,
+        tool: Tool,
+        decision: PolicyDecision,
+        run: Run,
+        principal: Principal,
+        turn: AuthorizationTurn | None,
+    ) -> ScriptRequestGrantOffer | None:
+        """ADR-0342 decision 11: the "Allow for this request" offer on a script
+        card. A source that fails makes no offer and the card is unchanged."""
+
+        make = self._make_script_request_offer
+        if make is None or tool.spec.name != SANDBOX_RUN_CODE_TOOL_NAME:
+            return None
+        try:
+            return await make(tool.spec.name, decision, run, principal, turn)
+        except (RunCancelledError, BudgetExceededError, DatabaseCapacityError):
+            raise
+        except Exception:
+            logger.exception("script_request_offer_failed", extra={"tool_name": tool.spec.name})
+            return None
+
     async def _request_approval(
         self,
         run: Run,
@@ -2261,6 +2369,9 @@ class ToolPipeline:
             offer = None
             request_offer = None
             job_request_offer = None
+        script_request_offer = await self._script_request_offer(
+            tool, decision, run, principal, turn
+        )
         token.raise_if_cancelled()
         now = self._clock.now()
         approval = ApprovalRequest(
@@ -2293,6 +2404,7 @@ class ToolPipeline:
             task_grant_offer=offer,
             request_grant_offer=request_offer,
             job_request_grant_offer=job_request_offer,
+            script_request_grant_offer=script_request_offer,
             task_grant_not_covered=not_covered,
             research_not_covered=_research_not_covered(standing),
         )
@@ -2831,6 +2943,26 @@ class ToolPipeline:
             ),
             lease=lease,
         )
+
+
+def _bridged_call_identity(position_id: str, name: str, arguments: dict[str, Any]) -> str:
+    """Name one bridged call: its position in its script, with the tool and the
+    arguments it asked for there (ADR-0342).
+
+    The position alone would let a script that is executed again reuse a
+    recorded refusal, or a paid place in the tool-call limit, for a different
+    call. Arguments that differ only before normalization name two calls,
+    never one.
+    """
+
+    asked = json.dumps(
+        {"name": name, "arguments": arguments},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=str,
+    ).encode("utf-8")
+    return f"{position_id}:{hashlib.sha256(asked).hexdigest()[:16]}"
 
 
 def _job_request_approval_id(standing: StandingAuthorization | None) -> UUID | None:

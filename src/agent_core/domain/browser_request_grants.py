@@ -104,20 +104,27 @@ class BrowserRequestGrantOffer(BaseModel):
 
 class RequestGrantEcho(BaseModel):
     """What the card offered, repeated in an ``approve_for_request`` body: the
-    website login's profile (ADR-0302) or the job's slug (ADR-0344), exactly
-    one of the two."""
+    website login's profile (ADR-0302), the job's slug (ADR-0344) or the script
+    tool's name (ADR-0342), exactly one of the three."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     profile_id: UUID | None = None
     job_slug: str | None = Field(default=None, min_length=1, max_length=64)
+    tool_name: Literal["sandbox.run_code"] | None = None
 
     @model_validator(mode="after")
     def names_exactly_one_offer(self) -> RequestGrantEcho:
-        """A body names the website login or the job, never both or neither."""
+        """A body names the website login, the job or the script tool, and only
+        one of them."""
 
-        if (self.profile_id is None) == (self.job_slug is None):
-            raise ValueError("request_grant names exactly one of profile_id and job_slug")
+        named = [
+            value for value in (self.profile_id, self.job_slug, self.tool_name) if value is not None
+        ]
+        if len(named) != 1:
+            raise ValueError(
+                "request_grant names exactly one of profile_id, job_slug and tool_name"
+            )
         return self
 
 

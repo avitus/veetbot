@@ -421,19 +421,23 @@ struct ApprovalCard: View {
                     .accessibilityIdentifier("approval.reason")
             }
             if !approval.status.isPending { technicalDetails }
-            if approval.offersJobRequestGrant, let offer = approval.jobRequestGrantOffer {
-                // ADR-0344: what one approval for the rest of the request allows.
-                Text(offer.summary)
+            if let summary = approval.requestOfferSummary {
+                // ADR-0344, ADR-0342: what one approval for the rest of the
+                // request allows, for a job or for scripts.
+                Text(summary)
                     .veetType(.meta)
                     .foregroundColor(AppTheme.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("approval.job-request.summary")
+                    .accessibilityIdentifier(
+                        approval.offersJobRequestGrant
+                            ? "approval.job-request.summary" : "approval.script-request.summary"
+                    )
             }
             if approval.status.isPending {
                 DenialReasonField(text: $denialReason)
                     .disabled(inFlight != nil)
                 ApprovalDecisionButtons {
-                    if approval.offersJobRequestGrant {
+                    if approval.requestOfferSummary != nil {
                         Button { resolve(.approveForRequest, nil) } label: {
                             ApprovalDecisionLabel(
                                 title: "Allow for this request", decision: .approveForRequest,
@@ -447,7 +451,7 @@ struct ApprovalCard: View {
                         }
                     }
                 } secondary: {
-                    if approval.offersJobRequestGrant {
+                    if approval.requestOfferSummary != nil {
                         Button { resolve(.approveOnce, nil) } label: {
                             ApprovalDecisionLabel(title: "Approve once", decision: .approveOnce, inFlight: inFlight)
                         }

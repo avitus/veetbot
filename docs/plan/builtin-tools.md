@@ -2177,3 +2177,34 @@ request to `dev`. A retry finds its own branch by commit trailer and its open pu
 request. The adapter refuses any other ref or a protected path before calling
 GitHub, and it has no merge, review or force operation. A push starts no CI, and
 the ordinary review loop applies.
+
+## Code mode tool (ADR-0342)
+
+`sandbox.run_code` is designed in
+[tool-system.md](tool-system.md#code-mode-adr-0342). It shares every
+classification with `sandbox.run_command`:
+
+```text
+side effect   CODE_EXECUTION        risk         HIGH
+idempotency   NON_IDEMPOTENT        scopes       sandbox.execute
+output trust  EXTERNAL_UNTRUSTED    target       sandbox
+timeout       300                   output       1048576
+parallel      no                    kind/source  CAPABILITY / BUILTIN
+```
+
+Its input is `code`, Python source of 1 byte to 64 KiB, and an optional
+`timeout_seconds` of 1 to 300. The approval card, when a policy asks for one,
+shows the first line of the source. The default policy matrix does not change:
+`code_execution` is allowed on an isolated target. The default profile's
+untrusted-input rule still applies. A script written in a turn the owner
+opened, before the turn has read outside content, counts as Veetbot's own
+work and runs without an approval (ADR-0342, the owner's decision of
+2026-11-22). After the turn has read a web page, a message, a knowledge
+passage or an earlier script's output, the next script asks, and its card
+offers one approval for the rest of the request's scripts (ADR-0342 decision
+11, the owner's decision of 2026-11-23).
+`sandbox.run_command` has no such rule and asks for whatever the model wrote.
+[tool-system.md](tool-system.md) states the rule. The tool is registered only
+when `AGENT_CODE_MODE_ENABLED` is on. On, it takes the place of
+`sandbox.run_command` in Chat's configured tools; the command tool stays
+registered.

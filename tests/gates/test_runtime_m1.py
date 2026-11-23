@@ -138,7 +138,10 @@ async def test_step_identity() -> None:
             for event in result.events
             if event.event_type == "model.request.started"
         }
-        assert result.run.step_count == len(step_numbers), case.name
+        # The count is the distinct steps less the steps the run was given
+        # back, and only the code-mode case has a refunded step (ADR-0342).
+        refunded = 1 if case.name == "code_mode_two_list_intersection" else 0
+        assert result.run.step_count == len(step_numbers) - refunded, case.name
         for observed_run in result.runs:
             transitions = [
                 event.event_type

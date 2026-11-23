@@ -76,6 +76,13 @@ class DurableCheckpointSeeder:
                 "model_call_count": run.model_call_count,
                 "tool_call_count": run.tool_call_count,
                 "usage": run.usage.model_dump(mode="json"),
+                # The lost checkpoint counted the run's refunds. The run row
+                # counts them too, in the write that lowers the step count,
+                # so a recovered batch keeps the step number it was proposed
+                # under (ADR-0342).
+                **(
+                    {"refunded_steps": run.usage.refunded_steps} if run.usage.refunded_steps else {}
+                ),
             },
             created_at=self._clock.now(),
         )

@@ -840,12 +840,16 @@ class PostgresRunRepository:
         await self._session.flush()
         return run_to_domain(row)
 
-    async def set_seed_event_sequence(self, run_id: UUID, sequence: int) -> None:
+    async def set_seed_event_sequence(
+        self, run_id: UUID, sequence: int, *, scheduled_for: datetime | None = None
+    ) -> None:
         statement = (
             update(RunRow)
             .where(RunRow.id == run_id, RunRow.seed_event_sequence == 0)
             .values(seed_event_sequence=sequence, updated_at=self._clock.now())
         )
+        if scheduled_for is not None:
+            statement = statement.values(scheduled_for=scheduled_for)
         if not _rowcount(await self._session.execute(statement)):
             if await self._session.get(RunRow, run_id) is None:
                 raise NotFoundError("run not found")
