@@ -4,6 +4,21 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-23 — One approval for the scripts of a request (ADR-0342)
+
+- When a request has read a web page, a message or other outside content,
+  the first script Veetbot writes still asks. Its card now offers "Allow for
+  this request". Choosing it lets the rest of that request's scripts run
+  without asking again.
+- It lasts until Veetbot finishes answering, until your next message, or for
+  two hours, whichever comes first. "Approve once" works as before, and the
+  next script then asks again.
+- It covers running scripts only. Anything a script does that would ask on
+  its own, such as sending, deleting or changing something, still asks.
+- The Apple apps show the new choice on a script's approval card. An app
+  that has not been updated shows Approve once and Deny as before.
+- Scripts are still off by default.
+
 ## 2026-11-23 — Review repairs before promotion
 
 - A job approval card's digest of a long source is now of the whole source

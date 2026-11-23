@@ -585,6 +585,9 @@ public struct ApprovalView: Codable, Identifiable, Sendable {
     /// The one approval for the rest of the request a job card offers, when
     /// the server makes one (ADR-0344).
     public var jobRequestGrantOffer: JobRequestGrantOfferView? = nil
+    /// The one approval for the rest of the request a script card offers, when
+    /// the server makes one (ADR-0342).
+    public var scriptRequestGrantOffer: ScriptRequestGrantOfferView? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, status, arguments, risk, decision
@@ -603,16 +606,25 @@ public struct ApprovalView: Codable, Identifiable, Sendable {
         case taskGrantNotCovered = "task_grant_not_covered"
         case requestGrantOffer = "request_grant_offer"
         case jobRequestGrantOffer = "job_request_grant_offer"
+        case scriptRequestGrantOffer = "script_request_grant_offer"
     }
 }
 
 extension ApprovalView {
-    /// Why the server asked, as the sentence the card shows (ADR-0260). An older
-    /// server sends a policy code such as `policy.matrix.code_execution` here; a
-    /// code has no spaces and tells the owner nothing, so it shows no line.
     /// Whether the card shows "Allow for this request" for a job (ADR-0344).
     public var offersJobRequestGrant: Bool { status.isPending && jobRequestGrantOffer != nil }
 
+    /// What "Allow for this request" allows on the generic card, in the
+    /// server's words: a job's offer (ADR-0344) or a script's (ADR-0342). Nil
+    /// when the card offers neither or is no longer pending.
+    public var requestOfferSummary: String? {
+        guard status.isPending else { return nil }
+        return jobRequestGrantOffer?.summary ?? scriptRequestGrantOffer?.summary
+    }
+
+    /// Why the server asked, as the sentence the card shows (ADR-0260). An older
+    /// server sends a policy code such as `policy.matrix.code_execution` here; a
+    /// code has no spaces and tells the owner nothing, so it shows no line.
     public var ownerReason: String? {
         let reason = policyReason.trimmingCharacters(in: .whitespacesAndNewlines)
         return reason.contains(" ") ? reason : nil
@@ -655,6 +667,10 @@ extension ApprovalView {
         // A malformed job offer hides its button, never the card (ADR-0344).
         jobRequestGrantOffer = try? container.decodeIfPresent(
             JobRequestGrantOfferView.self, forKey: .jobRequestGrantOffer
+        )
+        // A malformed script offer hides its button, never the card (ADR-0342).
+        scriptRequestGrantOffer = try? container.decodeIfPresent(
+            ScriptRequestGrantOfferView.self, forKey: .scriptRequestGrantOffer
         )
     }
 }

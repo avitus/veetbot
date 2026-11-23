@@ -198,7 +198,11 @@ added. ADR-0344 also accepts it for a `job.manage`, `job.run` or
 `schedule.update` approval that carries a `job_request_grant_offer`; the
 approval then covers that one job's covered changes for the rest of its run,
 as specified in [cockpit.md](cockpit.md), and requires `jobs.run` instead of
-`browser.grant.write`.
+`browser.grant.write`. ADR-0342 decision 11 also accepts it for a
+`sandbox.run_code` approval that carries a `script_request_grant_offer`; the
+approval then lets the later scripts of its run start without a card, as
+specified in [tool-system.md](tool-system.md#code-mode-adr-0342), and
+requires `approval.resolve` alone.
 
 `APPROVE_FOR_TASK` (ADR-0129, accepted by the owner 2026-09-25) is valid only
 for a `browser.act` approval that carries a server-authored task-grant offer
@@ -1357,10 +1361,12 @@ ADR-0129 later added one optional body field, `task_grant`, which repeats the
 offered origin and path prefix and is accepted only with `approve_for_task`.
 ADR-0302 added `request_grant`, which repeats the offered profile id and is
 accepted only with `approve_for_request`; for a job approval (ADR-0344) it
-repeats the offered `job_slug` instead.
+repeats the offered `job_slug` instead, and for a script approval (ADR-0342
+decision 11) the offered `tool_name`.
 That decision also requires `browser.grant.write` for a browser approval and
 `jobs.run` for a job approval, checked by the application service before any
-read; the route's declared scope stays `approval.resolve`.
+read; a script approval needs no further scope. The route's declared scope
+stays `approval.resolve`.
 
 ## Failure modes and defenses
 
@@ -1658,7 +1664,7 @@ policy remain enforced. An uncertain write is not automatically repeated.
 [ADR-0112](../adr/0112-milestone-31-email-unsubscribe.md) adds one tool-name
 arm to the floor ADR-0071 and ADR-0097 established for mutating email servers
 and telephone calls. `email.unsubscribe` is `EXTERNAL_WRITE`, which the default
-matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:637);
+matrix already resolves to `REQUIRE_APPROVAL` (policy-and-approvals.md:641);
 the arm holds that decision under every profile, so no profile can turn an
 unsubscribe request into a standing allow. It can only tighten. An owner
 gesture in Email mode satisfies the approval through the exact-match consent

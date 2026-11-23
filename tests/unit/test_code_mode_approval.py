@@ -7,6 +7,7 @@ read a web page, a message or an earlier script's output, the next script asks.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
@@ -15,6 +16,7 @@ import pytest
 
 from agent_core.bootstrap import build
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.browser_request_grants import RequestGrantEcho
 from agent_core.domain.execution import SANDBOX_RUN_CODE_TOOL_NAME
 from agent_core.domain.messages import (
     FakeModelScript,
@@ -27,8 +29,9 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import Run, RunCheckpoint, RunStatus
+from agent_core.domain.script_request_grants import SCRIPT_REQUEST_GRANT_AUTHORIZATION_KIND
 from agent_core.tools.executor import _argument_trust
-from agent_core.tools.registry import StaticToolRegistry
+from agent_core.tools.registry import RegisteredTool, StaticToolRegistry
 from tests.contract.support import NOW
 from tests.unit.test_code_mode import _Probe, _spec
 from tests.unit.test_code_mode_budget import _RUN_CODE, _Script, _turn
@@ -158,6 +161,92 @@ async def test_another_sandbox_tool_still_asks_for_what_the_model_wrote(
     _, asked, untrusted = await _submit(tmp_path, [turn], [command])
 
     assert (asked, untrusted) == (1, [True])
+
+
+# --- one approval for the scripts of a request (decision 11) -------------------
+
+
+async def _three_scripts_after_an_outside_read(
+    tmp_path: Path, first: ApprovalResolutionType
+) -> tuple[Run, list[bool], list[str]]:
+    """Run three scripts after an outside read.
+
+    The first card is resolved as given and any later card is approved once.
+    Returns the run, whether each card offered the request, and the kind of
+    each standing authorization the run recorded.
+    """
+    outside = _Probe(_OUTSIDE_READ)
+    model = FakeModelScript(
+        turns=[
+            _turn(("demo.outside", "read")),
+            _turn((SANDBOX_RUN_CODE_TOOL_NAME, "first")),
+            _turn((SANDBOX_RUN_CODE_TOOL_NAME, "second")),
+            _turn((SANDBOX_RUN_CODE_TOOL_NAME, "third")),
+            ScriptedTurn(text="Done.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    offered: list[bool] = []
+    async with build(
+        settings=replace(_settings(tmp_path), code_mode_enabled=True),
+        script=model,
+        enabled_tools=[SANDBOX_RUN_CODE_TOOL_NAME, "demo.outside"],
+    ) as built:
+        registry = cast(StaticToolRegistry, built.tool_pipeline._registry)
+        registry.register(outside)
+        # The setting registers the real tool. A run without a worker lease
+        # gives up its sandbox when it pauses for an approval, so the approval
+        # path is driven with the real tool's spec over a stand-in body.
+        registered = cast(RegisteredTool, registry.get(SANDBOX_RUN_CODE_TOOL_NAME))
+        script = _Script(registered.spec, [[], [], []])
+        registered.implementation = script
+        run_id = await built.runs.submit("Work out how long the pages are.")
+        for _ in range(4):
+            run = await built.runs.get(run_id)
+            if run.status is not RunStatus.WAITING_FOR_APPROVAL:
+                break
+            [card] = await built.approvals.list_pending(run_id=run_id)
+            assert card.tool_name == SANDBOX_RUN_CODE_TOOL_NAME
+            offered.append(card.script_request_grant_offer is not None)
+            if len(offered) == 1 and first is ApprovalResolutionType.APPROVE_FOR_REQUEST:
+                await built.services.approvals.resolve(
+                    built.principal,
+                    card.id,
+                    first,
+                    None,
+                    request_grant=RequestGrantEcho(tool_name=SANDBOX_RUN_CODE_TOOL_NAME),
+                )
+            else:
+                await built.approvals.resolve(card.id, ApprovalResolutionType.APPROVE_ONCE)
+        run = await built.runs.wait_terminal(run_id)
+        authorized = [
+            str(event.payload["authorization_kind"])
+            for event in await built.runs.events(run_id)
+            if event.event_type == "tool.call.authorized" and "authorization_kind" in event.payload
+        ]
+    assert run.status is RunStatus.COMPLETED, run.failure
+    assert script.steps == [2, 3, 4]
+    return run, offered, authorized
+
+
+async def test_one_approval_covers_every_later_script_of_the_request(tmp_path: Path) -> None:
+    run, offered, authorized = await _three_scripts_after_an_outside_read(
+        tmp_path, ApprovalResolutionType.APPROVE_FOR_REQUEST
+    )
+
+    # One card, which offered the request. The second and third scripts ran
+    # under it, and each use is recorded against the approval.
+    assert offered == [True]
+    assert authorized == [SCRIPT_REQUEST_GRANT_AUTHORIZATION_KIND] * 2
+    assert run.tool_call_count == 4
+
+
+async def test_approving_a_script_once_leaves_the_next_script_asking(tmp_path: Path) -> None:
+    _, offered, authorized = await _three_scripts_after_an_outside_read(
+        tmp_path, ApprovalResolutionType.APPROVE_ONCE
+    )
+
+    assert offered == [True, True, True]
+    assert authorized == []
 
 
 # --- the rule itself ----------------------------------------------------------

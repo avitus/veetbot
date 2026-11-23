@@ -6,8 +6,11 @@
 # before the turn read outside content does not ask) are implemented offline
 # behind the default-off `AGENT_CODE_MODE_ENABLED`, as are Chat's roster,
 # instructions and evaluation case 36 (slice 3). A local Docker run of the
-# real tool passed on 2026-11-22; production latency evidence and activation
-# remain open. No milestone or gate moves.
+# real tool passed on 2026-11-22. On 2026-11-23 the owner decided that one
+# approval covers every script in a request; a script card offers "Allow for
+# this request" (decision 11), built on the server and the Apple approval
+# card. Production latency evidence and activation remain open. No milestone
+# or gate moves.
 # ADR-0337: On 2026-11-20 an archive made 38 seconds after a reply failed in
 # production because the refresh that synced the owner's sent message staled
 # the gesture. The owner asked for the repair: an Inbox gesture stays current

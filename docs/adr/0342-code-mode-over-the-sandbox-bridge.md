@@ -5,13 +5,16 @@
   accepted the ADR on 2026-11-22. The tool, its budget accounting and its
   approval rule are implemented behind a default-off setting (see
   Implementation status), as are Chat's roster, instructions and evaluation
-  case. A local Docker run passed on 2026-11-22. Production latency evidence
-  and activation are open.
+  case. A local Docker run passed on 2026-11-22. On 2026-11-23 the owner
+  decided that one approval covers every script in a request (decision 11).
+  Production latency evidence and activation are open.
 - Date: 2026-11-21
 - Amends: ADR-0015 (names the tool of decision 1, defines the
   "orchestration-only turn" of decision 3, counts bridged calls against the
   run's tool-call limit), ADR-0021 (the bridge refuses two kinds of tool).
   Decision 9 adds one exact-name raise of argument trust beside ADR-0268's.
+  Decision 11 amends ADR-0302 and ADR-0344: `approve_for_request` and
+  `request_grant` also serve a script approval.
 - Related: ADR-0008 and ADR-0029 (sandbox isolation), ADR-0123 (deferred tool
   index), ADR-0268 (agent-written jobs, the same transport), ADR-0277 (trust of
   earlier bridge results)
@@ -146,6 +149,39 @@ The owner prefers no new external dependency unless one is necessary.
       tool. It names loops, paging and comparing two lists as the cases for
       a script, keeps a single call and every change as a direct call, and
       points the base instructions' mentions of the command tool at a script.
+11. **One approval covers every script in a request.** After decision 9 a
+    request that read outside content still asked before each script. The
+    owner decided on 2026-11-23 that one approval should cover them all. This
+    loosens the trust overlay for this one tool inside one request, and the
+    owner approved that in the conversation that produced this decision.
+    - A script card raised only because the turn read outside content offers
+      "Allow for this request" beside Approve once and Deny, in an eligible
+      run: the eligibility ADR-0344 decision 1 set for jobs. The offer is
+      stored on the approval as `script_request_grant_offer` with the tool
+      name, `duration_seconds` (7200) and a server-authored summary.
+    - The resolution is the existing `approve_for_request`. Its
+      `request_grant` body repeats the offered tool as `tool_name`. It
+      requires `approval.resolve` only: it allows nothing a script card does
+      not already allow one script at a time. Accepting approves the pending
+      script and records `script.request_grant.created` in the same
+      transaction. The approval is the grant. No table, migration, compiled
+      policy or `policy_version` changes.
+    - The grant covers starting a later `sandbox.run_code` call of the same
+      run whose only reason to ask is outside content. It covers nothing a
+      script does: every call over the bridge is still judged under its own
+      trust, so a write, a send or a delete asks. A profile that asks before
+      any code execution keeps asking, and its card makes no offer.
+      `sandbox.run_command` is not covered.
+    - Lifetime follows ADR-0302 decision 4: the grant ends when the run
+      ends, after two hours, or when the run reads a follow-up from the
+      owner. It never transfers to another run or session, and the agent
+      version and policy version must match the approval's.
+    - Each use is audited by `tool.call.authorized` with
+      `authorization_kind: "script_request_grant"` and the approval id.
+    - The authorizer, the offer and the resolution are composed only while
+      the setting of decision 8 is on. Off, a script card cannot exist and
+      `approve_for_request` naming the tool is refused as unavailable.
+    - A client that predates the offer shows Approve once and Deny.
 
 ## Implementation status
 
@@ -162,9 +198,8 @@ The work is cut into four slices.
    the bridge and the pipeline against a scripted model, so it proves the
    mechanism. It does not show that a live model chooses a script when it
    should; slice 4 observes that. One approval for all the scripts of a
-   request that has read outside content is not built: it needs an "Allow
-   for this request" choice on the approval card, as ADR-0302 added for
-   websites.
+   request (decision 11) was implemented on 2026-11-23, on the server and on
+   the Apple approval card.
 4. **Evidence and activation.** Started on 2026-11-22 with a local run.
    - **Done, local Docker (runc, a development laptop).**
      `tests/security/test_code_mode_runtime_adr0342.py` runs the real tool
@@ -206,8 +241,13 @@ The work is cut into four slices.
 - Calls bridged by an attempt that suspended or crashed before its step ended
   are not counted. Each such attempt is still bounded by the 64-call cap.
 - A script written after the turn read outside content shows an approval
-  card, and so does each later script in that request. A request that reads
-  mail and then runs three scripts asks three times.
+  card. With decision 11 the owner can allow the rest of the request from
+  that card, so a request that reads mail and then runs three scripts asks
+  once. Approve once still leaves the next script asking.
+- Inside a request the owner allowed, a script written after reading outside
+  content starts without a card showing its source. That is the loosening
+  the owner accepted. The script still runs in the sandbox without network
+  or credentials, and each call it makes is decided by policy as before.
 - Decision 9 removes a card that guarded code execution inside the sandbox.
   After it, the isolation of the sandbox and the policy on each bridged call
   are the controls on a script written in a clean turn. Origin trust resets

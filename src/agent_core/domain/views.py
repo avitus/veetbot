@@ -57,6 +57,7 @@ from agent_core.domain.persona import (
     PersonaTrait,
 )
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, FailureReason, Run, RunStatus
+from agent_core.domain.script_request_grants import ScriptRequestGrantOffer
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.surfaces import Pairing
 
@@ -260,6 +261,8 @@ class ApprovalView(BaseModel):
     request_grant_offer: BrowserRequestGrantOffer | None = None
     # ADR-0344: the request-approval offer on a job card. Additive.
     job_request_grant_offer: JobRequestGrantOffer | None = None
+    # ADR-0342 decision 11: the request-approval offer on a script card. Additive.
+    script_request_grant_offer: ScriptRequestGrantOffer | None = None
 
 
 class DeviceView(BaseModel):

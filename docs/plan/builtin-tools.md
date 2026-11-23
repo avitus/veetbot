@@ -2200,7 +2200,9 @@ untrusted-input rule still applies. A script written in a turn the owner
 opened, before the turn has read outside content, counts as Veetbot's own
 work and runs without an approval (ADR-0342, the owner's decision of
 2026-11-22). After the turn has read a web page, a message, a knowledge
-passage or an earlier script's output, the next script asks.
+passage or an earlier script's output, the next script asks, and its card
+offers one approval for the rest of the request's scripts (ADR-0342 decision
+11, the owner's decision of 2026-11-23).
 `sandbox.run_command` has no such rule and asks for whatever the model wrote.
 [tool-system.md](tool-system.md) states the rule. The tool is registered only
 when `AGENT_CODE_MODE_ENABLED` is on. On, it takes the place of

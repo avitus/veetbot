@@ -407,6 +407,11 @@ from agent_core.application.reconsolidation import PublicReconsolidationService
 from agent_core.application.records import RecordsService
 from agent_core.application.run_service import RunService
 from agent_core.application.schedule_service import ScheduleService
+from agent_core.application.script_request_grants import (
+    ScriptRequestGrantAuthorizer,
+    ScriptRequestGrantResolution,
+    ScriptRequestOffers,
+)
 from agent_core.application.services import (
     ApprovalService as PublicApprovalServiceContract,
 )
@@ -5275,6 +5280,11 @@ async def _compose(
             )
         if settings.call_enabled and settings.call_owner_requests_enabled:
             standing_authorizers.append(OwnerCallAuthorizer(uow_factory=uow_factory, now=clock.now))
+        if settings.code_mode_enabled:
+            # ADR-0342 decision 11: one approval for the scripts of a request.
+            standing_authorizers.append(
+                ScriptRequestGrantAuthorizer(uow_factory=uow_factory, now=clock.now)
+            )
         standing_authorizer = (
             CompositeStandingAuthorizer(standing_authorizers) if standing_authorizers else None
         )
@@ -5373,6 +5383,9 @@ async def _compose(
             maximum_skill_body_tokens=int(skill_bodies_config["max_tokens"]),
             approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
             standing_authorizer=standing_authorizer,
+            script_request_offer=(
+                ScriptRequestOffers(uow_factory).offer if settings.code_mode_enabled else None
+            ),
             job_model_factory=job_model_factory,
             delegations=delegation_materializer,
             before_effect=guard_email_effect,
@@ -6236,6 +6249,9 @@ async def _compose(
             ),
             job_request_grants=(
                 JobRequestGrantResolution(clock=clock) if settings.jobs_enabled else None
+            ),
+            script_request_grants=(
+                ScriptRequestGrantResolution(clock=clock) if settings.code_mode_enabled else None
             ),
         )
         folder_proposal_pass: FolderProposalPass | None = None

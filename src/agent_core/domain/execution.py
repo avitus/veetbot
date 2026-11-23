@@ -7,10 +7,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from pathlib import PurePosixPath
+from typing import Final
 from uuid import UUID
 
 # The runtime names this tool to recognize an orchestration-only step (ADR-0342).
-SANDBOX_RUN_CODE_TOOL_NAME = "sandbox.run_code"
+SANDBOX_RUN_CODE_TOOL_NAME: Final = "sandbox.run_code"
 
 
 class ChangeKind(StrEnum):

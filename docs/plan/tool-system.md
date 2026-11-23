@@ -2794,8 +2794,31 @@ of the script's source (see `argument_trust` above):
 - Every tool call a script makes is still decided by itself. A write, a send
   or a delete asks exactly as it does when the model calls it directly.
 
+The owner decided on 2026-11-23 that one approval covers every script in a
+request (ADR-0342 decision 11):
+
+- A script card raised only because the turn read outside content carries
+  `script_request_grant_offer` and shows "Allow for this request". The run
+  must be a top-level interactive run of the owner's own chat, in a turn
+  whose newest message is the owner's.
+- Resolving the card with `approve_for_request` and
+  `request_grant: {"tool_name": "sandbox.run_code"}` approves that script and
+  appends `script.request_grant.created`. The approval is the grant.
+- A standing authorizer then lets each later `sandbox.run_code` call of the
+  same run start without a card, when outside content is its only reason to
+  ask. Each use is recorded on `tool.call.authorized` with
+  `authorization_kind: "script_request_grant"` and the approval id.
+- The grant ends with the run, after two hours, when the run reads a
+  follow-up from the owner, or when the agent version or policy version
+  differs from the approval's. Any refusal falls back to an ordinary card.
+- It covers starting a script. It never covers a call a script makes, a
+  profile that asks before any code execution, or `sandbox.run_command`.
+- The authorizer, the offer and the resolution are composed only while
+  `AGENT_CODE_MODE_ENABLED` is on.
+
 `tests/unit/test_code_mode_approval.py` covers the rule and each case that
-still asks.
+still asks. `tests/unit/test_script_request_grant.py` covers the offer, the
+resolution, the coverage and the end of the grant.
 
 ### Budget
 

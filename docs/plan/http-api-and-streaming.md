@@ -1685,14 +1685,20 @@ not know the field or the decision shows the card without it. Since ADR-0344
 `approve_for_request` is also valid for a `job.manage`, `job.run` or
 `schedule.update` approval carrying `job_request_grant_offer` (the job `slug`,
 its access `ceilings`, `duration_seconds` 7200 and a `summary`); its
-`request_grant` repeats `job_slug` instead of `profile_id`, exactly one of the
-two, and it requires `jobs.run` instead of `browser.grant.write`.
+`request_grant` repeats `job_slug` instead of `profile_id`, and it requires
+`jobs.run` instead of `browser.grant.write`. Since ADR-0342 decision 11 it is
+also valid for a `sandbox.run_code` approval carrying
+`script_request_grant_offer` (the `tool_name`, `duration_seconds` 7200 and a
+`summary`); its `request_grant` repeats `tool_name`, and it requires no scope
+beyond `approval.resolve`. A `request_grant` names exactly one of
+`profile_id`, `job_slug` and `tool_name`.
 
 ```json
 {"decision": "approve_once"}
 {"decision": "approve_for_task", "task_grant": {"origin": "https://www.example.com", "path_prefix": "/lesson"}}
 {"decision": "approve_for_request", "request_grant": {"profile_id": "6f1c…"}}
 {"decision": "approve_for_request", "request_grant": {"job_slug": "emerging-market-radar"}}
+{"decision": "approve_for_request", "request_grant": {"tool_name": "sandbox.run_code"}}
 {"decision": "deny", "reason": "Do not perform this action."}
 ```
 

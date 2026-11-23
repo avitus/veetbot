@@ -103,6 +103,7 @@ from agent_core.domain.policies import (
     TrustLevel,
 )
 from agent_core.domain.runs import Run, RunCheckpoint, Step
+from agent_core.domain.script_request_grants import ScriptRequestGrantOffer
 from agent_core.domain.skills import LoadedSkillBody
 from agent_core.domain.tool_output import content_bytes, output_excerpt
 from agent_core.domain.tools import (
@@ -837,6 +838,11 @@ class ToolPipeline:
         maximum_skill_body_tokens: int = 6_000,
         approval_expiry_seconds: Mapping[RiskLevel, int] | None = None,
         standing_authorizer: StandingAuthorizer | None = None,
+        script_request_offer: Callable[
+            [str, PolicyDecision, Run, Principal, AuthorizationTurn | None],
+            Awaitable[ScriptRequestGrantOffer | None],
+        ]
+        | None = None,
         delegations: DelegationStarter | None = None,
         job_model_factory: Callable[[Run, AgentSpec, WorkerLease | None], Awaitable[object]]
         | None = None,
@@ -885,6 +891,7 @@ class ToolPipeline:
             }
         )
         self._standing_authorizer = standing_authorizer
+        self._make_script_request_offer = script_request_offer
         self._delegations = delegations
         self._before_effect = before_effect
         self._job_model_factory = job_model_factory
@@ -2237,6 +2244,28 @@ class ToolPipeline:
             return None
         return authorization
 
+    async def _script_request_offer(
+        self,
+        tool: Tool,
+        decision: PolicyDecision,
+        run: Run,
+        principal: Principal,
+        turn: AuthorizationTurn | None,
+    ) -> ScriptRequestGrantOffer | None:
+        """ADR-0342 decision 11: the "Allow for this request" offer on a script
+        card. A source that fails makes no offer and the card is unchanged."""
+
+        make = self._make_script_request_offer
+        if make is None or tool.spec.name != SANDBOX_RUN_CODE_TOOL_NAME:
+            return None
+        try:
+            return await make(tool.spec.name, decision, run, principal, turn)
+        except (RunCancelledError, BudgetExceededError, DatabaseCapacityError):
+            raise
+        except Exception:
+            logger.exception("script_request_offer_failed", extra={"tool_name": tool.spec.name})
+            return None
+
     async def _request_approval(
         self,
         run: Run,
@@ -2299,6 +2328,9 @@ class ToolPipeline:
             offer = None
             request_offer = None
             job_request_offer = None
+        script_request_offer = await self._script_request_offer(
+            tool, decision, run, principal, turn
+        )
         token.raise_if_cancelled()
         now = self._clock.now()
         approval = ApprovalRequest(
@@ -2331,6 +2363,7 @@ class ToolPipeline:
             task_grant_offer=offer,
             request_grant_offer=request_offer,
             job_request_grant_offer=job_request_offer,
+            script_request_grant_offer=script_request_offer,
             task_grant_not_covered=not_covered,
             research_not_covered=_research_not_covered(standing),
         )
