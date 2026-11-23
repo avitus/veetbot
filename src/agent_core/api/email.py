@@ -484,7 +484,7 @@ def email_router(service: EmailService, secured: Callable[[str], object]) -> API
             source_revision=body.source_revision,
             idempotency_key=body.idempotency_key,
         )
-        draft = await service.draft(authenticated, draft_id)
+        draft = operation.queued_draft or await service.draft(authenticated, draft_id)
         return {
             "draft": draft.model_dump(mode="json"),
             "run_id": str(operation.run_id),

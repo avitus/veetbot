@@ -17,6 +17,7 @@ title: Architecture Decisions
 - [ADR-0342: Code mode runs a model-written script over the sandbox bridge (Accepted)](0342-code-mode-over-the-sandbox-bridge.md)
 - [ADR-0343: The standing recall admission binds no reader, and a question run is labelled as the chat model (Accepted)](0343-standing-recall-binds-no-reader.md)
 - [ADR-0344: One approval for a request that changes a saved job (Accepted)](0344-one-approval-for-a-job-repair-request.md)
+- [ADR-0345: One-press reply sends use an operational session (Accepted)](0345-reply-send-operational-session.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the

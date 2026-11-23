@@ -156,7 +156,9 @@ class RunRepository(Protocol):
 
     async def update_counters(self, run: Run, *, lease: WorkerLease | None = None) -> None: ...
 
-    async def set_seed_event_sequence(self, run_id: UUID, sequence: int) -> None: ...
+    async def set_seed_event_sequence(
+        self, run_id: UUID, sequence: int, *, scheduled_for: datetime | None = None
+    ) -> None: ...
 
     async def set_waiting_limits(self, run_id: UUID, limits: RunLimits) -> Run:
         """ADR-0251: a run waiting for its owner takes a connected chat's limits."""
