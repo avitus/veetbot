@@ -190,3 +190,56 @@ def test_record_reads_a_bounded_report_and_counts_what_it_recorded(
     assert done.exit_code == 0
     assert json.loads(done.output) == {"recorded": 7, "stale": 2, "unknown": 1}
     assert seen == [b"{}"] and missing.exit_code == 1
+
+
+def test_a_live_probe_without_a_policy_runs_on_the_default_chat_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--model-policy omitted means the default chat model for live runs too (ADR-0343).
+
+    A probe clone is never a production deployment, so leaving the policy to
+    the composition would put a live run on the fake model.
+    """
+
+    import contextlib
+    import types
+
+    from agent_core import config
+    from agent_core.evals import (
+        general_recall_database,
+        owner_recall_probe_driver,
+        owner_recall_probes,
+    )
+
+    built: list[str | None] = []
+
+    @contextlib.asynccontextmanager
+    async def build(**kwargs: Any) -> Any:
+        built.append(kwargs.get("model_policy"))
+        yield object()
+
+    async def observe_probes(*_arguments: Any, **_kwargs: Any) -> Any:
+        summary = types.SimpleNamespace(model_dump=lambda mode: {"probes": 0})
+        return types.SimpleNamespace(model_dump_json=lambda indent: "{}", summary=summary)
+
+    monkeypatch.setattr(main, "build", build)
+    monkeypatch.setattr(config, "load_settings", lambda: None)
+    monkeypatch.setattr(general_recall_database, "validate_probe_database", lambda _s: None)
+    monkeypatch.setattr(
+        owner_recall_probes,
+        "load_probes",
+        lambda _path: types.SimpleNamespace(probes=(), digest=None),
+    )
+    monkeypatch.setattr(owner_recall_probe_driver, "observe_probes", observe_probes)
+
+    probes = tmp_path / "probes.jsonl"
+    import asyncio
+
+    asyncio.run(main._memory_probe(probes, tmp_path / "a.json", ["automatic"], True))
+    asyncio.run(
+        main._memory_probe(
+            probes, tmp_path / "b.json", ["automatic"], True, model_policy="astra-6-2"
+        )
+    )
+
+    assert built == [config.PRODUCTION_MODEL_POLICY, "astra-6-2"]

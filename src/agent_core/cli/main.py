@@ -1751,17 +1751,22 @@ async def _memory_probe(
             stand_in=stand_in,
         )
 
+    # A probe clone is never a production deployment, so an omitted policy is
+    # resolved here: left to the composition, a live run would be on the fake
+    # model rather than the default chat model the option promises.
+    chat_policy = model_policy or PRODUCTION_MODEL_POLICY
     if script is None:
-        async with build(storage="postgres", script=None, model_policy=model_policy) as live:
+        async with build(storage="postgres", script=None, model_policy=chat_policy) as live:
             report = await observe(live, None)
     else:
         # A scripted run is labelled as the chat model, so it packs memories
         # into that model's budget and is admitted to the recall a real chat
         # gets; the scripted provider still answers and no model is called
         # (ADR-0343).
-        async with driver.scripted_chat(
-            script, model_policy=model_policy or PRODUCTION_MODEL_POLICY, storage="postgres"
-        ) as (scripted, stand_in):
+        async with driver.scripted_chat(script, model_policy=chat_policy, storage="postgres") as (
+            scripted,
+            stand_in,
+        ):
             report = await observe(scripted, stand_in)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(report.model_dump_json(indent=2), encoding="utf-8")
