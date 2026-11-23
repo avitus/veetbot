@@ -247,7 +247,10 @@ The work is cut into four slices.
 - Calls bridged by an attempt that paused or crashed before its step ended
   stay recorded on the run and are counted when the step ends. The run row's
   `usage` holds two accounting fields for this, `unsettled_bridged_calls` and
-  `refunded_steps`. They change no public view and need no migration.
+  `refunded_steps`. Neither field appears in a public view and neither needs
+  a migration. One public value does move earlier: a run's `tool_call_count`
+  includes a bridged call from the moment it is dispatched, before its step
+  ends, so the count a client sees rises during an unfinished step.
 - Turning the setting off while a script is waiting fails closed. Its card
   can still be approved once or denied; "Allow for this request" is refused
   as unavailable and the card stays pending. An approved script whose tool is

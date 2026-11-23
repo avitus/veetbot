@@ -169,6 +169,37 @@ time.sleep(600)
             await asyncio.sleep(0.05)
 
 
+class _Held(_Echo):
+    """A bridge whose call never returns, as one waiting on an approval does not."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancelled = False
+
+    async def handle(self, request: bytes) -> bytes:
+        self.requests.append(json.loads(request))
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        return b""
+
+
+async def test_a_timeout_does_not_wait_for_a_bridge_call_that_is_still_held() -> None:
+    bridge = _Held()
+
+    # Without a bound of its own the old shutdown waited on the held call forever.
+    result = await asyncio.wait_for(
+        _run("tools.demo.slow()\nprint('never')", timeout=2, bridge=bridge), timeout=20
+    )
+
+    assert (result.timed_out, result.killed_by, result.stdout) == (True, KillReason.TIMEOUT, b"")
+    assert len(bridge.requests) == 1
+    # The held call is abandoned with the script that made it.
+    assert bridge.cancelled is True
+
+
 async def test_cancelling_the_evaluation_ends_the_script(tmp_path: Path) -> None:
     pid_file = tmp_path / "script.pid"
     source = f"""

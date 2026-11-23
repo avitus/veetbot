@@ -54,8 +54,13 @@ class ScriptExecutionEnvironment(FakeExecutionEnvironment):
         self.commands.append((environment, command))
         bridge: _BridgeHandler = handler  # type: ignore[assignment]
 
+        relays: set[asyncio.Task[None]] = set()
+
         async def relay(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
             # What the in-sandbox relay does: add the token the script never sees.
+            current = asyncio.current_task()
+            if current is not None:
+                relays.add(current)
             try:
                 while request := await reader.readline():
                     payload: dict[str, Any] = json.loads(request)
@@ -69,6 +74,8 @@ class ScriptExecutionEnvironment(FakeExecutionEnvironment):
                     writer.write(response.rstrip(b"\n") + b"\n")
                     await writer.drain()
             finally:
+                if current is not None:
+                    relays.discard(current)
                 writer.close()
                 with suppress(ConnectionError):
                     await writer.wait_closed()
@@ -84,6 +91,13 @@ class ScriptExecutionEnvironment(FakeExecutionEnvironment):
                 )
             finally:
                 server.close()
+                # A script that was ended may have left a call waiting in the
+                # bridge, on an approval for example. The server waits for
+                # every open connection, so that call is abandoned first.
+                held = tuple(relays)
+                for task in held:
+                    task.cancel()
+                await asyncio.gather(*held, return_exceptions=True)
                 await server.wait_closed()
         limit = command.maximum_output_bytes
         ended_early = captured.timed_out or captured.over_limit
