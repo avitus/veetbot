@@ -1719,16 +1719,22 @@ call_id  = position + ":" + sha256(canonical JSON of {name, arguments})[:16]
 `ordinal` is the zero-based index of the call within the turn, counted by the
 bridge rather than supplied by the script, so a script cannot forge a
 collision with a previous call and inherit its recorded result. `script_hash`
-is the sha256 of the orchestration source the model submitted. The session
-derives the position; the tool pipeline appends the digest of the tool and
+is the sha256 of canonical JSON that holds what the model submitted and the
+id of the outer tool call that submitted it: `{code, outer_call_id}` for
+`sandbox.run_code`, and `{argv, working_directory, outer_call_id}` for
+`sandbox.run_command`. It names one invocation, not the source alone. The
+same source submitted again under another outer call id gets other
+positions and replays nothing. The session derives the position; the tool pipeline appends the digest of the tool and
 arguments asked for there (ADR-0342). A script that is executed again and
 asks for something else at a position therefore makes a new call: it cannot
 read back a refusal recorded for a different call, and it is counted.
 
-This is what makes a replayed orchestration turn safe: the same script making
-the same calls in the same order derives the same `call_id`, therefore the
-same idempotency key, therefore hits the deduplication path at step 8 and
-returns the recorded outcome instead of re-executing.
+This is what makes a replayed orchestration turn safe: the same invocation
+making the same calls in the same order derives the same `call_id`, therefore
+the same idempotency key, therefore hits the deduplication path at step 8 and
+returns the recorded outcome instead of re-executing. Changing the source,
+the outer call id, the tool or the arguments changes the `call_id`, and the
+call executes for real.
 
 The honest caveat, stated here rather than discovered later: **replay safety
 is conditional on script determinism.** A script that branches on wall-clock
@@ -2819,6 +2825,11 @@ request (ADR-0342 decision 11):
 - The grant ends with the run, after two hours, when the run reads a
   follow-up from the owner, or when the agent version or policy version
   differs from the approval's. Any refusal falls back to an ordinary card.
+  The cutoff for a follow-up is the run reading it, not the service
+  accepting it, as for the website and job grants (ADR-0324). A run reads
+  follow-ups before a model step that can call tools, so a script the model
+  asked for before the follow-up existed can still start under the grant,
+  and no script it asks for after reading the follow-up can.
 - It covers starting a script. It never covers a call a script makes, a
   profile that asks before any code execution, or `sandbox.run_command`.
 - The authorizer, the offer and the resolution are composed only while

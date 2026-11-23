@@ -183,8 +183,11 @@ The owner prefers no new external dependency unless one is necessary.
       `sandbox.run_command` is not covered.
     - Lifetime follows ADR-0302 decision 4: the grant ends when the run
       ends, after two hours, or when the run reads a follow-up from the
-      owner. It never transfers to another run or session, and the agent
-      version and policy version must match the approval's.
+      owner. The cutoff is the run reading the follow-up, not the service
+      accepting it (ADR-0324): a script the model asked for before the
+      follow-up existed can still start, and none it asks for after reading
+      it can. The grant never transfers to another run or session, and the
+      agent version and policy version must match the approval's.
     - Each use is audited by `tool.call.authorized` with
       `authorization_kind: "script_request_grant"` and the approval id.
     - The authorizer, the offer and the resolution are composed only while
