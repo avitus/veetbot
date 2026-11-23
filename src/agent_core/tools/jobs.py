@@ -289,9 +289,11 @@ class JobManageTool:
     ) -> ApprovalPresentation:
         """The ordinary card, with the ADR-0344 request offer when one applies."""
 
+        # The executor truncates the card and digests each long value; handing
+        # it a truncated source would digest the cut text, not the job's code.
         return ApprovalPresentation(
             summary=generic_action_summary(self.spec),
-            arguments=approval_argument_view(arguments),
+            arguments=dict(arguments),
             job_request_grant_offer=await job_request_offer(
                 self.toolset.publication.uow_factory, self.spec.name, arguments, context
             ),

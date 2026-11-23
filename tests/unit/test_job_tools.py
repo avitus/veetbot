@@ -228,3 +228,27 @@ def test_interrupted_job_schedule_update_preserves_uncertain_outcome() -> None:
     )
     assert tool_recovery_action(invocation) is ToolRecoveryAction.MARK_UNCERTAIN
     assert CockpitScheduleUpdateTool.spec.idempotency is IdempotencyClass.CONDITIONALLY_IDEMPOTENT
+
+
+async def test_a_long_job_source_keeps_a_digest_of_the_whole_source() -> None:
+    """The job card truncates a long source, and its digest is of the source
+    the job will save, not of the truncated text on the card (ADR-0344)."""
+    import hashlib
+    from unittest.mock import AsyncMock
+
+    from agent_core.tools.executor import _approval_argument_digests, _approval_argument_view
+
+    _, publication, _, _ = await setup()
+    source = "def main(inputs, job):\n" + "    job.log('step')\n" * 60
+    assert len(source) > 512
+    presentation = await JobManageTool(
+        JobToolset(publication, AsyncMock(spec=JobExecution))
+    ).approval_view_in_session(
+        {"operation": "create", "slug": "long-job", "source": source, "manifest": {}},
+        principal=tool_context().principal,
+    )
+
+    assert _approval_argument_digests(dict(presentation.arguments)) == {
+        "source": hashlib.sha256(source.encode("utf-8")).hexdigest()
+    }
+    assert _approval_argument_view(dict(presentation.arguments))["source"].endswith("[TRUNCATED]")
