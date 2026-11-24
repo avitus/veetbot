@@ -17,7 +17,8 @@ from tests.browser_host import host_browser_refusal
 from tests.browser_partition import BROWSER_MODULES
 
 # The directories whose tests form the integration partition. CI's integration
-# discovery collects only these (.circleci/test-suites.yml).
+# discovery collects these and tests/native, whose modules mark themselves
+# (.circleci/test-suites.yml).
 INTEGRATION_DIRECTORIES = ("integration", "resilience", "security")
 
 NetworkMode = Literal["blocked", "integration", "live"]

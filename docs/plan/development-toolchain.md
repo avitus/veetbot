@@ -425,6 +425,7 @@ must never be used for this workflow.
 | PostgreSQL integration and real-browser tests | A disposable database or installed Chromium in their respective partitions. Skips count as missing browser evidence in the required lane. |
 | Native Email, Unsubscribe, Folders, and Cockpit acceptance | Xcode and the target device or VM. Six navigation cases check wide layouts and skip on an iPhone. Two hosted-board Swift tests require the built Cockpit runtime. The macOS CI job runs `make cockpit-runtime-build` before Swift tests, requires a nonempty manifest, and includes `cockpit` and the npm installer in its verification key. |
 | SVP credential persistence and deploy-identity calling permission checks | A non-root process that respects directory permissions. |
+| iOS-only branches of the Swift package tests (three composer Return-key cases, and the iOS side of a few layout and sign-in cases) | Never: the package tests run through `swift test` on macOS only, so `#if os(iOS)` unit code is not compiled in any lane. |
 | Owner procedure TLS floor check | An OpenSSL executable capable of serving the legacy TLS version under test. |
 | Duplicate and stale release-evidence fixtures | An artifact in the bundled evidence directory. A separate test requires a nonempty bundle. |
 
@@ -881,7 +882,7 @@ tests/resilience    interventions   integration M2
 tests/security      security        integration M2
 tests/live          live            live        M3
 tests/eval_cases    case fixtures   n/a         M1
-tests/native        Apple journeys  (none)      M26
+tests/native        Apple journeys  integration M26
 tests/corpora       data            n/a         M16
 tests/fixtures      data            n/a         M0
 ```

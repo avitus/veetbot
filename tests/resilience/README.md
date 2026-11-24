@@ -1,4 +1,4 @@
 # Resilience tests
 
 Deterministically scheduled crash, retry, fencing, and recovery interventions
-live here once their owning milestones activate.
+live here. They run with the PostgreSQL integration partition.
