@@ -677,7 +677,13 @@ record through a display name that is only that record's
 unconfirmed role label, such as an unnamed relative recorded as "mom": the word
 names a tie, as the role alias beside it already selects nobody. An
 owner-confirmed role alias still selects. No role vocabulary, merge or inferred
-identity is added.
+identity is added. A label taken from a predicate is the person's role toward
+the owner (ADR-0348, addition of 2026-11-24). The predicate is the subject's
+role toward the object, so an edge whose subject is the owner is labelled by
+the inverse: the same word for a mutual tie, `child` for `parent` and `parent`
+for `child`. A one-way tie stored that way, such as `investor` or `reports_to`,
+has no inverse in the vocabulary and names nobody. A qualifier stays the whole
+label.
 
 [ADR-0238](../adr/0238-owner-overview-and-memory-delivery.md) adds direct owner
 relationship pages for explicit owner/family overviews. The first family page

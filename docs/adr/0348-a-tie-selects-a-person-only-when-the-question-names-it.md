@@ -80,6 +80,44 @@ ADR-0125).
    budgets and rendering are unchanged. No role vocabulary is added and no
    identity is merged, created or inferred.
 
+## Addition, 2026-11-24: the label is read from the person's side
+
+Found in review of pull request 265, and written there: the owner accepted the
+decisions above on 2026-11-23 and has not yet been asked about this addition.
+Decision 2 labels an edge that has no
+qualifier by its predicate, and does not say from which end. A stored edge
+reads subject, predicate, object, and the predicate is the subject's role
+toward the object. `owner --parent--> Ava` records that the owner is Ava's
+parent, so Ava is the owner's child; the owner-kinship rule of ADR-0259 stores
+a daughter that way and a mother as `mother --parent--> owner`. Matching the
+raw predicate named an owner-first edge by the owner's role. "My parent"
+selected the owner's child, or, with a parent stored the other way round,
+named both people and abstained; "my child" named nobody.
+
+The label of an edge with no qualifier is the person's role toward the owner:
+
+- **The person is the subject.** The predicate, as before.
+- **The owner is the subject of a mutual tie** (sibling, relative, partner,
+  spouse, friend, colleague, collaborator). The predicate, as before.
+- **The owner is the subject of a parent or child tie.** The other of the two.
+- **The owner is the subject of a one-way tie** (introduced by, reports to,
+  employment, founder, board member, investor). No label. The predicate
+  vocabulary has no word for the person's side and none is added, so the edge
+  names nobody and ordinary recall runs, hiding nothing.
+
+A qualifier already states the person's role and remains the whole label. The
+generic predicate still gives none. Owner overview ordering already read
+parent and child this way (ADR-0259) and now uses the same rule. Stored edges,
+formation, the retrieval version and every other decision here are unchanged.
+
+Red first, in the Linux container: an owner-first parent edge was selected by
+"my parent" and an owner-first child edge by "my child"; the two directions the
+kinship repair writes abstained on "my parent" and named nobody on "my child";
+an owner-first investor edge was selected by "my investor". The same cases run
+against the in-memory and PostgreSQL adapters, with person-first, mutual and
+qualified edges unchanged. The owner question set was not run again for this
+addition, so the figures below predate it.
+
 ## Consequences
 
 - A question that uses a role word the directory does not store as a label

@@ -61,16 +61,33 @@ _PAGE_FOCAL = 3
 _FIRST_PAGE_FOCAL = 8
 
 
+# A predicate is the subject's role toward the object, so an owner-first edge
+# names its person by the inverse: the same word for a mutual tie, the other of
+# parent and child, and no word for a one-way tie the vocabulary cannot invert.
+_MUTUAL = frozenset(
+    {"sibling", "relative", "partner", "spouse", "friend", "colleague", "collaborator"}
+)
+_INVERSE = {"parent": "child", "child": "parent"}
+
+
+def _owner_role(edge: RelationshipAssertion) -> str:
+    """The predicate for the other end's role toward the owner, or "" when none says it.
+
+    owner --parent--> X makes X a child; X --parent--> owner a parent.
+    """
+    if edge.subject.kind != "owner" or edge.predicate in _MUTUAL:
+        return edge.predicate
+    return _INVERSE.get(edge.predicate, "")
+
+
 def _closeness(edge: RelationshipAssertion) -> int:
-    owner_first = edge.subject.kind == "owner"
     role = {
         "spouse": "partner",
         "partner": "partner",
-        # owner --parent--> X makes X a child; X --parent--> owner a parent.
-        "parent": "child" if owner_first else "parent",
-        "child": "parent" if owner_first else "child",
+        "parent": "parent",
+        "child": "child",
         "sibling": "sibling",
-    }.get(edge.predicate, "relative")
+    }.get(_owner_role(edge), "relative")
     return _RANK.index(role)
 
 
@@ -758,7 +775,10 @@ class PeopleContextService:
                 or not any(endpoint.kind == "owner" for endpoint in (edge.subject, edge.object))
             ):
                 continue
-            label = edge.qualifier or (edge.predicate if edge.predicate != "other" else "")
+            # A qualifier states the role itself; without one the label is the
+            # person's role toward the owner, never the owner's toward the person.
+            role = _owner_role(edge)
+            label = edge.qualifier or ("" if role == "other" else role)
             terms = recall_term_lexemes(label, fold=True)
             if not terms or not all(lexical_term_matched(forms, tokens) for forms in terms):
                 continue

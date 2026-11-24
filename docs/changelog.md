@@ -33,6 +33,11 @@ title: Changelog
   gained nothing by itself.
 - You accepted the rule on 2026-11-23. It is tested in the sandboxes and is
   not delivered yet.
+- Found in review on 2026-11-24: a relationship stored without a label of its
+  own was named from your side of it, so "my parent" could choose your child.
+  It is now named from the other person's side. A one-way relationship that
+  starts from you, such as someone you invest in, is no longer chosen by that
+  word.
 
 ## 2026-11-23 — Scripts are on for app chats, and a script may name a tool as the model sees it (ADR-0342)
 

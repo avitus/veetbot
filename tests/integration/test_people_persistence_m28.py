@@ -36,6 +36,10 @@ from tests.contract.test_people_store_contract import (
     people_transitive_visibility_contract,
 )
 from tests.integration.m2_support import database_settings
+from tests.unit.test_people_context import (
+    OWNER_SIDE_LABEL_CASES,
+    owner_side_label_recall_contract,
+)
 
 
 @pytest.mark.parametrize("case", ["role_word", "stored_label", "shared_word"])
@@ -52,6 +56,23 @@ async def test_postgres_an_unnamed_tie_selects_no_person_and_hides_no_fact(case:
             await uow.agents.put(agent())
             await uow.sessions.create(session())
         await unnamed_tie_recall_contract(clock, app.uow_factory, case)
+
+
+@pytest.mark.parametrize("case", sorted(OWNER_SIDE_LABEL_CASES))
+async def test_postgres_an_unqualified_tie_is_named_by_the_persons_role_toward_the_owner(
+    case: str,
+) -> None:
+    from agent_core.bootstrap import build
+    from tests.contract.support import agent, session
+
+    clock = FixedClock(NOW)
+    async with build(
+        settings=database_settings(), storage="postgres", clock=clock, principal=principal()
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+        await owner_side_label_recall_contract(clock, app.uow_factory, case)
 
 
 @pytest.mark.parametrize("role", ["portfolio CEO", "tennis coach", "estate accountant"])

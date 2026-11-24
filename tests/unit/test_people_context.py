@@ -109,6 +109,51 @@ async def test_an_unnamed_tie_selects_no_person_and_hides_no_fact(case: str) -> 
     await unnamed_tie_recall_contract(clock, factory, case)
 
 
+# Each case: the ties as (name, owner is the subject, predicate, qualifier), the
+# role word the question uses, and the one person it names (None for nobody).
+# `subject --predicate--> object` says the subject is the object's predicate:
+# owner --parent--> Ava makes Ava the owner's child (ADR-0259).
+_OwnerTie = tuple[str, bool, str, str]
+OWNER_SIDE_LABEL_CASES: dict[str, tuple[tuple[_OwnerTie, ...], str, str | None]] = {
+    # Both ties formed owner-first: the owner is Ava's parent and Noor's child.
+    "owner_first_parent": (
+        (("Ava", True, "parent", ""), ("Noor", True, "child", "")),
+        "parent",
+        "Noor",
+    ),
+    "owner_first_child": (
+        (("Ava", True, "parent", ""), ("Noor", True, "child", "")),
+        "child",
+        "Ava",
+    ),
+    # The shape `agent people link-kinship` writes: one predicate, two directions.
+    "linked_kinship_parent": (
+        (("Ava", True, "parent", ""), ("Noor", False, "parent", "")),
+        "parent",
+        "Noor",
+    ),
+    "linked_kinship_child": (
+        (("Ava", True, "parent", ""), ("Noor", False, "parent", "")),
+        "child",
+        "Ava",
+    ),
+    "person_first_child": ((("Ava", False, "child", ""),), "child", "Ava"),
+    # The owner invests in Pat; no stored word says what that makes Pat.
+    "owner_first_one_way": ((("Pat", True, "investor", ""),), "investor", None),
+    "person_first_one_way": ((("Pat", False, "investor", ""),), "investor", "Pat"),
+    "owner_first_mutual": ((("Quinn", True, "sibling", ""),), "sibling", "Quinn"),
+    # A qualifier already states the person's role and stays the whole label.
+    "qualified_by_its_qualifier": ((("Ava", True, "parent", "daughter"),), "daughter", "Ava"),
+    "qualified_not_by_predicate": ((("Ava", True, "parent", "daughter"),), "child", None),
+}
+
+
+@pytest.mark.parametrize("case", sorted(OWNER_SIDE_LABEL_CASES))
+async def test_an_unqualified_tie_is_named_by_the_persons_role_toward_the_owner(case: str) -> None:
+    clock, factory = await memory_uow_factory()
+    await owner_side_label_recall_contract(clock, factory, case)
+
+
 @pytest.mark.parametrize("inactive_label", ["expired", "future"])
 async def test_focused_role_label_must_be_current(inactive_label: str) -> None:
     clock, factory = await memory_uow_factory()
@@ -279,6 +324,104 @@ async def unnamed_tie_recall_contract(
     focal = {person_id for item in result.people for person_id in item.person_ids}
     assert other.id not in focal
     assert (named.id in focal) == (case == "stored_label")
+
+
+async def owner_side_label_recall_contract(
+    clock: FixedClock, factory: UnitOfWorkFactory, case: str
+) -> None:
+    """An unqualified tie is named by the person's role toward the owner (ADR-0348).
+
+    The stored predicate is the subject's role, so an owner-first edge names its
+    person by the inverse: a child for `parent`, a parent for `child`, the same
+    word for a mutual tie, and nothing for a one-way tie that has no inverse.
+    """
+    from typing import cast
+
+    from agent_core.domain.memory import BeliefType
+    from agent_core.domain.people import (
+        PeopleEndpoint,
+        RelationshipAssertion,
+        RelationshipPredicate,
+    )
+    from agent_core.memory.profiles import DEFAULT_RETRIEVAL_PROFILE
+
+    ties, role, expected = OWNER_SIDE_LABEL_CASES[case]
+    owner = principal().model_copy(update={"scopes": {"people.read"}})
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    people: dict[str, Person] = {}
+    facts: dict[str, MemoryRecord] = {}
+    async with factory() as uow:
+        for index, (name, owner_first, predicate, qualifier) in enumerate(ties):
+            person = people[name] = Person(id=uuid4(), display_name=name, **common)
+            # Every tie shares the question's topic word, so each proposes its person.
+            tie = memory(
+                belief_id=901 + 2 * index, statement=f"{name} and the user trade a gift each year."
+            ).model_copy(
+                update={
+                    "subject": name,
+                    "belief_type": BeliefType.RELATIONSHIP,
+                    "store_position": 1 + 2 * index,
+                }
+            )
+            fact = facts[name] = memory(
+                belief_id=902 + 2 * index, statement=f"{name} would love a gift of rare tea."
+            ).model_copy(
+                update={
+                    "subject": name,
+                    "belief_type": BeliefType.USER_MODEL_ATTR,
+                    "store_position": 2 + 2 * index,
+                }
+            )
+            await uow.people.put(person, expected_revision=0)
+            for belief in (tie, fact):
+                await uow.memories.upsert_belief(belief)
+                await uow.people.put(
+                    PersonMemoryLink(
+                        id=uuid4(), person_id=person.id, belief_id=belief.id, **common
+                    ),
+                    expected_revision=0,
+                )
+            ends = (PeopleEndpoint(kind="owner"), PeopleEndpoint(kind="person", id=person.id))
+            subject, object_ = ends if owner_first else ends[::-1]
+            await uow.people.put(
+                RelationshipAssertion(
+                    id=uuid4(),
+                    subject=subject,
+                    object=object_,
+                    predicate=cast(RelationshipPredicate, predicate),
+                    qualifier=qualifier,
+                    belief_id=tie.id,
+                    **common,
+                ),
+                expected_revision=0,
+            )
+    profile = DEFAULT_RETRIEVAL_PROFILE.model_copy(
+        update={"candidate_selection": "relevance", "reranking": "relevance"}
+    )
+    service = PeopleContextService(
+        factory,
+        HybridMemoryRetriever(
+            factory, clock, ids(), owner, profile=profile, reranking_admitted=lambda: True
+        ),
+    )
+    query = recall_query(text=f"Choose a gift for my {role}.", budget_tokens=2000).model_copy(
+        update={"candidate_selection": "relevance"}
+    )
+    result = await service.automatic_recall(owner, query, session_id=SESSION_ID)
+    focal = {person_id for item in result.people for person_id in item.person_ids}
+    recalled = {item.belief_id for item in result.items}
+    if expected is None:
+        # Nobody is named: ordinary recall runs and hides no person-linked fact.
+        assert focal == set()
+        assert {fact.id for fact in facts.values()} <= recalled
+        return
+    assert focal == {people[expected].id}
+    assert facts[expected].id in recalled
 
 
 async def relationship_recall_contract(
