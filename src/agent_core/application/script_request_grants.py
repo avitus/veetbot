@@ -14,11 +14,11 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import UUID
 
+from agent_core.application.browser_request_grants import approval_allowed_for_request
 from agent_core.application.job_request_grants import run_allows_job_request_grant
 from agent_core.domain.agents import Principal
-from agent_core.domain.approvals import ApprovalRequest, ApprovalResolutionType
+from agent_core.domain.approvals import ApprovalRequest
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.execution import SANDBOX_RUN_CODE_TOOL_NAME
 from agent_core.domain.policies import (
@@ -44,9 +44,6 @@ from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 logger = logging.getLogger(__name__)
-
-# Above any event sequence: latest_before reads the newest matching event.
-_NEWEST = 2**62
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,29 +136,13 @@ async def script_request_approval_for_run(
 ) -> ApprovalRequest | None:
     """The run's script request approval, found through its creation event."""
 
-    created = await uow.events.latest_before(
-        run.session_id, _NEWEST, SCRIPT_REQUEST_GRANT_CREATED_EVENT, principal, run_id=run.id
+    approval = await approval_allowed_for_request(
+        uow, run, principal, SCRIPT_REQUEST_GRANT_CREATED_EVENT
     )
-    if created is None or created.run_id != run.id:
-        return None
-    # ADR-0324: a follow-up the run read after the approval is a later owner
-    # message, and a later owner message asks again.
-    later = await uow.events.list_after(run.session_id, created.sequence, principal, run_id=run.id)
-    if any(
-        event.event_type == "user.message.created" and "pending_input_id" in event.payload
-        for event in later
-    ):
-        return None
-    try:
-        approval = await uow.approvals.get(UUID(str(created.payload["approval_id"])), principal)
-    except (KeyError, ValueError, NotFoundError):
-        return None
     if (
-        approval.run_id != run.id
+        approval is None
         or approval.tool_name != SANDBOX_RUN_CODE_TOOL_NAME
-        or approval.resolution is not ApprovalResolutionType.APPROVE_FOR_REQUEST
         or approval.script_request_grant_offer is None
-        or approval.resolved_at is None
     ):
         return None
     return approval
