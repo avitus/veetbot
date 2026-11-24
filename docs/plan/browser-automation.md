@@ -2249,8 +2249,8 @@ as `observed_failure` or `unverified` before approval or dispatch, with no
 further call. A branch that skipped the navigation carries no requirement, and
 the wait is never repeated once the action is sent.
 
-Only that first window carries the evidence, so the action takes its target
-from it alone. A focus or continuation read is a fresh capture of the live
+By default only that first window carries the evidence, so the action takes its
+target from it alone. A focus or continuation read is a fresh capture of the live
 page: the provider ties it to the capture before it (the exact revision for
 `region_ref`, a reference or cursor only the latest capture issued for `after`
 and `cursor`) and to the same document, counting history moves, but compares no
@@ -2261,10 +2261,31 @@ the first control window stops as `target_not_observed`, and a `target_region`
 action stops as `unverified` once its region is matched, both before approval.
 That is the cost: such targets cannot be acted on directly after a conditioned
 navigation. No deployed recipe declares a navigation condition, and actions in
-any other position keep their later windows. Letting later windows carry or
-re-prove the evidence (a local check, an observe version that accepts `wait_for`
-with a continuation, or provider capture identity) is undecided and left open in
-ADR-0347.
+any other position keep their later windows. ADR-0350 adds the reviewed opt-in
+below; carrying evidence without rechecking or extracting rows in another capture
+remains outside that contract.
+
+Under [ADR-0350](../adr/0350-recheck-browser-destinations-in-target-windows.md),
+an action directly after a conditioned navigation may declare the strict boolean
+`recheck_destination: true`. Later focus and advertised control continuations then
+use their ordinary tool arguments. Before accepting each returned window's target,
+region or next continuation, the runner checks the destination against that
+window's content using the same pure evaluator as ordinary completion checks.
+A condition-status field or earlier capture cannot stand in for current evidence.
+Missing/conflicting evidence stops `unverified`; declared failure stops
+`observed_failure`, before approval. No local check polls or captures again.
+Only complete text, non-truncated regions, exact locations and unique control/state
+predicates qualify; opted-in recipes with typed-row destination conditions are
+rejected because extraction would require separate evidence. A marker outside the
+returned window cannot be inferred. The same four-window allowance, approvals,
+revision fences, budgets and non-replay rules apply. Later checks require text
+coverage for text success/failure predicates and refuse location predicates when
+the returned URL occupies at least 4,093 UTF-8 bytes, because the 4,096-byte
+projection may have clipped a partial character without reporting truncation.
+Default false preserves
+existing recipe identities and the conservative stop; true changes the binding.
+Branches that skipped navigation keep their existing behavior. No public schema
+or deployed recipe changes.
 
 An action's optional `precondition` requests a bounded readiness wait before
 target discovery ([ADR-0333](../adr/0333-browser-workflow-action-readiness.md)).

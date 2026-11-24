@@ -145,3 +145,8 @@ the unrepaired runner read a later window and, in four of them, requested
 approval from it. Afterwards the browser-workflow unit modules passed all 303
 cases and the real-Chromium workflow modules all 71, eleven of them in the
 navigation module.
+
+[ADR-0350](0350-recheck-browser-destinations-in-target-windows.md) subsequently
+selects the local-check alternative for explicit reviewed opt-in actions. The
+first-window-only behavior above remains the default; typed-row destination
+conditions still cannot use later target windows.

@@ -39,6 +39,7 @@ class BrowserWorkflowStep(BaseModel):
     postcondition: BrowserCondition | None = None
     precondition: BrowserCondition | None = None
     target_region: BrowserRegionEvidence | None = None
+    recheck_destination: bool = Field(default=False, strict=True)
     collection_kind: Literal["table", "list", "form"] | None = None
     index: int = Field(default=0, ge=0, le=15)
     fields: list[BrowserExtractionField] = Field(default_factory=list, max_length=8)
@@ -63,6 +64,7 @@ class BrowserWorkflowStep(BaseModel):
                 "postcondition",
                 "precondition",
                 "target_region",
+                "recheck_destination",
             },
             "extract": {
                 "kind",
@@ -144,6 +146,21 @@ class BrowserWorkflowRecipe(BaseModel):
         ):
             raise ValueError("workflow navigation leaves its origin")
         for index, step in enumerate(self.steps):
+            if step.recheck_destination:
+                previous = self.steps[index - 1] if index else None
+                if (
+                    previous is None
+                    or previous.kind != "navigate"
+                    or previous.postcondition is None
+                ):
+                    raise ValueError(
+                        "destination rechecks require a preceding conditioned navigation"
+                    )
+                if (
+                    previous.postcondition.evidence is not None
+                    and previous.postcondition.evidence.kind == "row"
+                ):
+                    raise ValueError("destination rechecks require capture-local evidence")
             if step.branches is not None and any(
                 not index < target <= len(self.steps)
                 for target in (step.branches.satisfied, step.branches.failed)

@@ -22,6 +22,7 @@ title: Architecture Decisions
 - [ADR-0347: Verify reviewed browser navigation before advancing (Accepted)](0347-browser-workflow-navigation-verification.md)
 - [ADR-0348: A tie selects a person only when the question names it (Accepted)](0348-a-tie-selects-a-person-only-when-the-question-names-it.md)
 - [ADR-0349: Pack more ranked facts within the turn budget (Proposed)](0349-pack-more-ranked-facts-within-the-turn-budget.md)
+- [ADR-0350: Recheck browser destinations in later target windows (Accepted)](0350-recheck-browser-destinations-in-target-windows.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Literal
+from typing import Any
 
 from agent_core.domain.browser import (
     BrowserCondition,
@@ -12,7 +12,7 @@ from agent_core.domain.browser import (
     BrowserProviderError,
 )
 from agent_core.domain.browser_diagnostics import browser_phase
-from agent_core.domain.browser_evidence import BrowserRowEvidence, evidence_status
+from agent_core.domain.browser_evidence import BrowserRowEvidence, browser_condition_status
 from agent_core.domain.browser_extraction import BrowserExtractionScope
 from agent_core.ports.browser import BrowserProvider, extract_browser_observation
 
@@ -67,44 +67,6 @@ def browser_condition_schema() -> dict[str, Any]:
         },
         "oneOf": [{"required": ["role", "name"]}, {"required": ["evidence"]}],
     }
-
-
-def _control_status(
-    observation: BrowserObservation, condition: BrowserCondition
-) -> Literal["satisfied", "not_observed", "ambiguous"]:
-    matches = [
-        element
-        for element in observation.elements
-        if element.role == condition.role and element.name == condition.name
-    ]
-    if len(matches) > 1:
-        return "ambiguous"
-    if not matches:
-        return "not_observed"
-    target = matches[0]
-    if condition.disabled is not None and target.disabled != condition.disabled:
-        return "not_observed"
-    if condition.checked is not None and target.checked != condition.checked:
-        return "not_observed"
-    return "satisfied"
-
-
-def _status(
-    observation: BrowserObservation, condition: BrowserCondition, row_scope: BrowserExtractionScope
-) -> Literal["satisfied", "not_observed", "ambiguous", "failed"]:
-    success = (
-        evidence_status(observation, condition.evidence, row_scope=row_scope)
-        if condition.evidence is not None
-        else _control_status(observation, condition)
-    )
-    failure = (
-        evidence_status(observation, condition.failure_evidence)
-        if condition.failure_evidence is not None
-        else "not_observed"
-    )
-    if failure == "ambiguous" or (failure == "satisfied" and success != "not_observed"):
-        return "ambiguous"
-    return "failed" if failure == "satisfied" else success
 
 
 async def check_browser_condition(
@@ -174,7 +136,7 @@ async def check_browser_condition(
         if row is not None and condition.timeout_ms > 0:
             observation = await capture(observation)
         while True:
-            status = _status(observation, condition, row_scope)
+            status = browser_condition_status(observation, condition, row_scope=row_scope)
             remaining = deadline - loop.time()
             if status in {"satisfied", "failed"} or remaining <= 0.25 or count >= 21:
                 break

@@ -1,3 +1,6 @@
+# ADR-0350: Owner-authorized W4/W6 continuation adds reviewed opt-in destination
+# rechecks within each later target capture. Existing defaults, authority and
+# four-window bounds remain; no deployed recipe, milestone or gate moves.
 # ADR-0347: Owner-authorized W4/W6 continuation adds optional reviewed
 # navigation completion checks through bounded ordinary observations. Later
 # steps require positive evidence; no deployed recipe, milestone or gate moves.

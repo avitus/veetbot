@@ -317,15 +317,25 @@ async def test_covered_workflow_completes_without_any_user_interruption(
 
 
 @pytest.mark.parametrize("change", ["generation", "definition", "cancelled", "expired"])
+@pytest.mark.parametrize("destination_recheck", [False, True])
 async def test_pending_workflow_does_not_act_after_its_binding_changes(
     monkeypatch: pytest.MonkeyPatch,
     change: str,
+    destination_recheck: bool,
 ) -> None:
     import agent_core.runtime.browser_workflows as workflows
 
+    catalog = deepcopy(CATALOG)
+    if destination_recheck:
+        catalog["recipes"][0]["steps"][0]["postcondition"] = {
+            "evidence": {"kind": "text", "text": "Account overview"},
+            "timeout_ms": 0,
+        }
+        catalog["recipes"][0]["steps"][1]["recheck_destination"] = True
+
     def load(settings: Any, relative: str) -> dict[str, Any]:
         return (
-            CATALOG
+            catalog
             if relative == "runtime/browser-workflows.yaml"
             else load_config_document(settings, relative)
         )

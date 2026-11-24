@@ -253,6 +253,14 @@ stops; sign-in resumption preserves earlier completed effects. ADR-0347 records
 the contract and construction evidence. Deployed recipes and broader live-site
 acceptance remain unchanged.
 
+The next W4/W6 slice lets reviewed actions opt into destination rechecks in later
+target windows ([ADR-0350](adr/0350-recheck-browser-destinations-in-target-windows.md)).
+Focused regions and control continuations can proceed only when their own capture
+contains positive destination evidence. Missing or conflicting proof stops before
+approval; no old target or condition result can substitute. The existing default
+restriction, four-window bound and uncertain-effect handling remain. Typed-row
+conditions and broader live-site acceptance remain outside this slice.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12
