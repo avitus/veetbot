@@ -50,7 +50,7 @@ class BrowserWorkflowStep(BaseModel):
     @model_validator(mode="after")
     def closed_step(self) -> BrowserWorkflowStep:
         permitted = {
-            "navigate": {"kind", "url"},
+            "navigate": {"kind", "url", "postcondition"},
             "observe": {"kind", "postcondition", "branches"},
             "act": {
                 "kind",

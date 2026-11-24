@@ -84,6 +84,8 @@ def _supports_recipe(
     for step in recipe.steps:
         if step.kind == "navigate":
             calls.append(("browser.navigate", {"url": step.url}))
+            if step.postcondition is not None:
+                calls.append(("browser.observe", {"wait_for": _condition(step.postcondition)}))
             continue
         if step.kind == "observe":
             calls.append(
@@ -376,7 +378,21 @@ class BrowserWorkflowRunner:
                 }
             # An interrupted write is reconciled below. Only pre-action reads can restart.
             if state["phase"] not in {"action", "verify"}:
-                state.update(phase="start", call_id=None)
+                index = state.get("next_step", state["completed_steps"])
+                pending = context.checkpoint.pending_tool_calls
+                if (
+                    state["phase"] == "verify_navigation"
+                    and index < len(recipe.steps)
+                    and recipe.steps[index].kind == "navigate"
+                    and len(pending) == 1
+                    and pending[0].get("name") == "browser.navigate"
+                    and pending[0].get("arguments") == {"url": recipe.steps[index].url}
+                ):
+                    # Verified sign-in already queued this exact fresh navigation.
+                    # Dispatch it normally, then verify it instead of loading twice.
+                    state.update(phase="read", call_id=pending[0]["call_id"])
+                else:
+                    state.update(phase="start", call_id=None)
         while state["status"] == "running" and state.get(
             "next_step", state["completed_steps"]
         ) < len(recipe.steps):
@@ -457,6 +473,21 @@ class BrowserWorkflowRunner:
                 ):
                     await self._stop(context, state, "unverified")
                     return None
+                if (
+                    step.kind == "navigate"
+                    and state["phase"] == "read"
+                    and step.postcondition is not None
+                ):
+                    # Loading a same-origin page is not proof of the reviewed
+                    # destination state. Verify in a separate, persisted read.
+                    await self._queue(
+                        context,
+                        state,
+                        "verify_navigation",
+                        "browser.observe",
+                        {"wait_for": _condition(step.postcondition)},
+                    )
+                    continue
                 if state["phase"] == "before_ready":
                     assert step.precondition is not None
                     if observed.condition is None or observed.condition.status != "satisfied":
