@@ -2191,6 +2191,12 @@ on a fresh clone at the base revision and at the change, and keep the two
 summaries with the change: expected evidence delivered, facts missed, and the
 furthest stage each missed fact reached. An expected text that matches no stored
 belief reports `not_stored`, which is a formation finding, not a recall one.
+A fact named by text is delivered when any live memory that contains the text
+is delivered (ADR-0346); pin a memory when one particular memory is meant.
+Reports say which rule scored them: `owner-recall-probes@2` follows every live
+memory that holds the text, `@1` followed the newest alone. Compare two runs
+only under the same rule, and record an `@2` report on production only once
+the release that carries the rule is live there.
 
 The set lives in the database once `AGENT_RECALL_QUESTIONS_ENABLED=1` is set for
 the API (and for the operator environment that runs the commands below); the

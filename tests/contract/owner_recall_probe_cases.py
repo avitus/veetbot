@@ -12,6 +12,7 @@ from agent_core.domain.memory import (
     BeliefType,
     MemoryRecord,
     MemoryStatus,
+    Portability,
     RecallMoment,
     RecallTrace,
     Sensitivity,
@@ -320,6 +321,54 @@ async def post_snapshot_home_case(app: Composition, *, finish: Finish = _wait) -
     assert delta.query.min_store_position == plan.snapshot_watermark
     assert deploys.id in delta.returned
     assert residence.id in base.returned
+
+
+async def shared_text_case(
+    app: Composition, script: FakeModelScript, *, finish: Finish = _wait
+) -> tuple[ProbeReport, MemoryRecord, MemoryRecord]:
+    """One fact in two live memories: the older is delivered, the newer cannot be.
+
+    An expected text names a fact, and every live memory that contains it
+    states that fact. The owner's question set was scored against the newest
+    such memory alone, so a later memory that only mentions the car's model
+    turned a delivered fact into a miss.
+    """
+
+    session_id = await app.sessions.create()
+    car = await stated(app, session_id, "User has a 2026 Aster S8.", "car")
+    # Local to another project: a hard filter keeps it out of this chat.
+    mention = await app.memory.remember(
+        session_id=session_id,
+        run_id=None,
+        statement="The dealer newsletter advertised the Aster S8.",
+        subject="newsletter",
+        scope="another-project",
+        portability=Portability.LOCAL,
+        belief_type=BeliefType.FACT,
+        sensitivity=Sensitivity.INTERNAL,
+        source_event_ids=list(car.source_event_ids),
+        explicit=True,
+    )
+    assert mention.store_position > car.store_position
+    probe = Probe(
+        id="car-twice",
+        incident="car",
+        family="attributes",
+        question="What fuel should I use for my car?",
+        paths=("automatic",),
+        expected=(ExpectedEvidence(statement_contains="Aster S8"),),
+    )
+    report = await observe_probes(app, script, (probe,), finish=finish)
+    (observation,) = report.probes
+    (path,) = observation.paths
+    (evidence,) = path.evidence
+    assert path.run_status == "COMPLETED"
+    assert evidence.stage == "delivered"
+    assert evidence.belief_id == car.id
+    assert evidence.rank is not None and evidence.rank >= 1
+    assert path.required_delivered == 1
+    assert report.summary.required_delivered == 1 and report.summary.facts_missed == 0
+    return report, car, mention
 
 
 def assert_delivery_report(report: ProbeReport, car: MemoryRecord) -> None:

@@ -55,6 +55,8 @@ _SHORT_ID = re.compile(r"\[m:([0-9a-f]{8})\]")
 # The store's largest browse page; the locator walks every page.
 _BROWSE_PAGE = 200
 SCRIPTED_ANSWER = "Answered from the delivered evidence."
+# Orders a memory the ranking never listed behind every one it did.
+_UNRANKED = 1_000_000_000
 Finish = Callable[[Any, UUID], Awaitable[Run]]
 
 
@@ -262,28 +264,44 @@ async def _observe_path(
     evidence: list[EvidenceObservation] = []
     store = _StoreSnapshot(app)
     for index, expected in enumerate(probe.expected):
-        record = await _resolve(app, expected.belief_id, expected.statement_contains, store)
-        located, stages = _locate(record, traces, results)
-        stage = evidence_stage(
-            record,
-            stages,
-            located,
-            delivered=delivered,
-            answer=answer,
-            ceiling=located.sensitivity_ceiling if located is not None else Sensitivity.RESTRICTED,
-        )
-        rank = None
-        if record is not None and stages is not None and record.id in stages.ranked_ids:
-            rank = stages.ranked_ids.index(record.id) + 1
-        evidence.append(
-            EvidenceObservation(
-                expected_index=index,
-                required=expected.required,
-                belief_id=None if record is None else record.id,
-                stage=stage,
-                rank=rank,
+        # A text names a fact, and every live memory that contains it states
+        # that fact: the fact got as far as the memory that got furthest. The
+        # newest one alone can be a later mention that no question asks for
+        # (ADR-0346).
+        holders: list[MemoryRecord | None] = [
+            *await _holders(app, expected.belief_id, expected.statement_contains, store)
+        ]
+        furthest: tuple[tuple[int, int], EvidenceObservation] | None = None
+        for holder in holders or [None]:
+            located, stages = _locate(holder, traces, results)
+            stage = evidence_stage(
+                holder,
+                stages,
+                located,
+                delivered=delivered,
+                answer=answer,
+                ceiling=located.sensitivity_ceiling
+                if located is not None
+                else Sensitivity.RESTRICTED,
             )
-        )
+            rank = None
+            if holder is not None and stages is not None and holder.id in stages.ranked_ids:
+                rank = stages.ranked_ids.index(holder.id) + 1
+            # Holders come newest first, so the newest keeps an exact tie.
+            reached = (stage_rank(stage), -(rank if rank is not None else _UNRANKED))
+            if furthest is None or reached > furthest[0]:
+                furthest = (
+                    reached,
+                    EvidenceObservation(
+                        expected_index=index,
+                        required=expected.required,
+                        belief_id=None if holder is None else holder.id,
+                        stage=stage,
+                        rank=rank,
+                    ),
+                )
+        assert furthest is not None
+        evidence.append(furthest[1])
     required_delivered = sum(
         1
         for item in evidence
@@ -353,31 +371,51 @@ class _StoreSnapshot:
         return self._records
 
 
+async def _holders(
+    app: Any,
+    belief_id: UUID | None,
+    statement_contains: str | None,
+    store: _StoreSnapshot | None = None,
+) -> list[MemoryRecord]:
+    """The memories that can stand for one expected fact, newest first.
+
+    A pinned memory stands alone. An expected text is stated by every live
+    memory that contains it. When none is live, the newest retired or
+    superseded one stands for it, so the report can say why the fact is gone.
+    """
+
+    if belief_id is not None:
+        async with app.uow_factory() as uow:
+            try:
+                return [cast(MemoryRecord, await uow.memories.get(belief_id, app.principal))]
+            except NotFoundError:
+                return []
+    assert statement_contains is not None
+    needle = statement_contains.casefold()
+    records = await (store or _StoreSnapshot(app)).records()
+    matches = sorted(
+        (record for record in records if needle in record.statement.casefold()),
+        key=lambda record: record.store_position,
+        reverse=True,
+    )
+    live = [
+        record
+        for record in matches
+        if record.status in {MemoryStatus.ACTIVE, MemoryStatus.PROVISIONAL}
+    ]
+    return live or matches[:1]
+
+
 async def _resolve(
     app: Any,
     belief_id: UUID | None,
     statement_contains: str | None,
     store: _StoreSnapshot | None = None,
 ) -> MemoryRecord | None:
-    if belief_id is not None:
-        async with app.uow_factory() as uow:
-            try:
-                return cast(MemoryRecord, await uow.memories.get(belief_id, app.principal))
-            except NotFoundError:
-                return None
-    assert statement_contains is not None
-    needle = statement_contains.casefold()
-    records = await (store or _StoreSnapshot(app)).records()
-    matches = [record for record in records if needle in record.statement.casefold()]
-    live = [
-        record
-        for record in matches
-        if record.status in {MemoryStatus.ACTIVE, MemoryStatus.PROVISIONAL}
-    ]
-    chosen = live or matches
-    if not chosen:
-        return None
-    return max(chosen, key=lambda record: record.store_position)
+    """The newest memory that can stand for one expected fact, if any."""
+
+    holders = await _holders(app, belief_id, statement_contains, store)
+    return holders[0] if holders else None
 
 
 async def _every_belief(app: Any) -> list[MemoryRecord]:

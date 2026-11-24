@@ -904,13 +904,24 @@ citation, citations, charges, ambiguous identifiers — are diagnostics of the
 usage loop, never a quality gate: a correct answer may need no citation and a
 wrong one may cite perfectly.
 
-Owner recall probes (`agent memory probe`, `owner-recall-probes@1`) are the
+Owner recall probes (`agent memory probe`, `owner-recall-probes@2`) are the
 other half of the picture: fabricated or owner-private analogues of real
 incidents replayed through the composed run loop against a database clone,
 reporting per expected belief the furthest stage it reached — Saved, Stored,
 Eligible, Candidate, Ranked, Packed, Delivered, Used — and the primary
 outcomes of expected evidence delivered, facts missed, wrong or outdated
-recall and refused owner saves. A probe may also list names the delivered
+recall and refused owner saves. An expected fact is one pinned memory or a
+text. A text names a fact, not one memory: every live memory whose statement
+contains it states that fact, and the fact reaches the furthest stage any of
+them reached, reported with that memory's identifier and rank
+([ADR-0346](../adr/0346-a-fact-is-delivered-by-any-memory-that-states-it.md)).
+The newest keeps an exact tie. When none is live, the newest retired or
+superseded memory that contains the text stands for it, so the report says why
+the fact is gone. A pinned memory is followed alone. Reports written under
+`owner-recall-probes@1`, which followed only the newest memory containing a
+text, still load; where more than one live memory holds a text the two rules
+can differ, so a comparison names the rule each run was scored under. A probe
+may also list names the delivered
 recall must render as whole words, because an owner overview delivers family
 as People lines rather than one belief per person; the report keeps one flag
 per name, never the name. Probe files are never the frozen Milestone 16

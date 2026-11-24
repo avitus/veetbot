@@ -18,6 +18,10 @@ from uuid import UUID
 
 import pytest
 
+from agent_core.adapters.models.anthropic_messages import (
+    _wire_tool_name as anthropic_wire_name,
+)
+from agent_core.adapters.models.openai_responses import _wire_tool_name as openai_wire_name
 from agent_core.bootstrap import build
 from agent_core.config import ConfigurationError, load_settings
 from agent_core.domain.execution import ExecutionCommand, ExecutionResult
@@ -498,6 +502,121 @@ async def test_the_bridge_refuses_control_and_sandbox_tools_and_still_runs_ordin
     assert script.responses[:2] == [refusal, refusal]
     assert script.responses[2]["status"] == "succeeded"
     assert (nested.executions, ordinary.executions) == (0, 1)
+
+
+# --- a script may spell a tool the way the model is shown it ------------------
+
+
+def _dotless(name: str) -> str:
+    """A dotted name as a provider shows it, before any cut or digest."""
+    return name.replace(".", "_")
+
+
+async def _bridged(tmp_path: Path, tools: list[_Probe], calls: list[str]) -> tuple[_Script, Any]:
+    """Run one script that makes `calls` over the bridge; return it and the run's events."""
+    script = _Script(calls)
+    model = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[ScriptedToolCall(name="demo.script", arguments={}, call_id="script")],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="Done.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    names = ["conversation.ask_user", "demo.script", *(tool.spec.name for tool in tools)]
+    async with build(settings=_settings(tmp_path), script=model, enabled_tools=names) as built:
+        registry = cast(StaticToolRegistry, built.tool_pipeline._registry)
+        for tool in tools:
+            registry.register(tool)
+        registry.register(script)
+        run_id = await built.runs.submit("Run the script.")
+        run = await built.runs.wait_terminal(run_id)
+        events = await built.runs.events(run_id)
+    assert run.status is RunStatus.COMPLETED
+    return script, events
+
+
+@pytest.mark.parametrize("wire_name", [openai_wire_name, anthropic_wire_name])
+async def test_a_script_reaches_a_tool_by_the_spelling_the_model_is_shown(
+    tmp_path: Path, wire_name: Any
+) -> None:
+    ordinary = _Probe(_spec("demo.ordinary"))
+    # The longest name a tool may have: both providers cut the stem they show.
+    long_name = "demo.long_" + "x" * 86
+    long = _Probe(_spec(long_name))
+    shown = wire_name(long_name)
+    assert shown != _dotless(long_name)
+    stem = shown.rsplit("_", 1)[0]
+
+    script, events = await _bridged(
+        tmp_path,
+        [ordinary, long],
+        # The digest dropped, the provider's own spelling, and the cut stem alone.
+        [_dotless("demo.ordinary"), wire_name("demo.ordinary"), shown, stem],
+    )
+
+    assert [response["status"] for response in script.responses] == ["succeeded"] * 4
+    assert (ordinary.executions, long.executions) == (2, 2)
+    # The pipeline, the audit trail and the charge all carry the tool's own name.
+    bridged = [
+        event.payload["name"]
+        for event in events
+        if event.event_type == "tool.call.completed" and event.payload["name"] != "demo.script"
+    ]
+    assert bridged == ["demo.ordinary", "demo.ordinary", long_name, long_name]
+
+
+async def test_a_shown_spelling_of_a_control_or_sandbox_tool_is_still_refused(
+    tmp_path: Path,
+) -> None:
+    nested = _Probe(
+        _spec(
+            "demo.nested_script",
+            target_kind="sandbox",
+            side_effect=SideEffectClass.CODE_EXECUTION,
+            output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
+        )
+    )
+
+    script, _events = await _bridged(
+        tmp_path,
+        [nested],
+        [
+            _dotless("conversation.ask_user"),
+            openai_wire_name("conversation.ask_user"),
+            _dotless("demo.nested_script"),
+        ],
+    )
+
+    refusal = {"status": "denied", "reason_code": "bridge.tool_not_bridgeable", "retryable": False}
+    assert script.responses == [refusal, refusal, refusal]
+    assert nested.executions == 0
+
+
+async def test_a_spelling_that_fits_no_tool_or_two_tools_reaches_none(tmp_path: Path) -> None:
+    first = _Probe(_spec("demo.alike_b"))
+    second = _Probe(_spec("demo.alike.b"))
+    single = _Probe(_spec("demo.single"))
+
+    script, _events = await _bridged(
+        tmp_path,
+        [first, second, single],
+        [
+            "demo_alike_b",  # two tools are shown under this spelling
+            "demo_missing",
+            "demo_single_" + "0" * 32,  # another name's digest
+            "demo_sing",  # shorter than any stem a provider shows
+            "demo.alike_b",
+        ],
+    )
+
+    unknown = [response["reason_code"] for response in script.responses[:4]]
+    assert unknown == ["policy.matrix.unknown_tool"] * 4
+    assert (second.executions, single.executions) == (0, 0)
+    # A tool's own name always reaches it, whatever else is spelled alike.
+    assert script.responses[4]["status"] == "succeeded"
+    assert first.executions == 1
 
 
 # --- activation ---------------------------------------------------------------

@@ -9,8 +9,11 @@
 # real tool passed on 2026-11-22. On 2026-11-23 the owner decided that one
 # approval covers every script in a request; a script card offers "Allow for
 # this request" (decision 11), built on the server and the Apple approval
-# card. Production latency evidence and activation remain open. No milestone
-# or gate moves.
+# card. On 2026-11-23 the owner turned the setting on in production for app
+# chats; a script's first run took 2.2 to 4.4 s there. That run found that a
+# script could not name a tool the way the model is shown it, which decision
+# 12 repairs. Schedules and inbound surfaces stay off. No milestone or gate
+# moves.
 # ADR-0337: On 2026-11-20 an archive made 38 seconds after a reply failed in
 # production because the refresh that synced the owner's sent message staled
 # the gesture. The owner asked for the repair: an Inbox gesture stays current
@@ -127,6 +130,15 @@
 # saved jobs. Each schedule names its servers, the approval lists them, and a
 # job's grant names what it may read. Implemented, not yet delivered: the schedule
 # environment must mirror AGENT_SVP_ENABLED first. No milestone or gate moves.
+# ADR-0346 (Accepted, 2026-11-23): diagnosing the owner question set found
+# that the probe driver followed only the newest memory containing an expected
+# text, so a later mention in mail hid a delivered fact. The driver now follows
+# every live memory that states the fact (report version owner-recall-probes@2).
+# On a production clone of 2026-11-23, recall unchanged: 99 of 114 questions
+# pass, not 81. No ranking change: four replayed formulas helped neither half
+# reliably. The owner accepted the rule the same day. Built on the local
+# recall-ranking branch, sandbox tests only, not delivered. No milestone or
+# gate moves.
 # ADR-0343 (Accepted, 2026-11-22): a release that added a model to the model
 # list silently turned semantic recall off in the owner's chats, because the
 # query authority still admitted one reviewed reader although the standing

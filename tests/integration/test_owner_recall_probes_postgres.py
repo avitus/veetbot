@@ -19,6 +19,7 @@ from tests.contract.owner_recall_probe_cases import (
     family_names_case,
     post_snapshot_home_case,
     save_case,
+    shared_text_case,
 )
 from tests.integration.test_memory_postgres_m9 import _settings
 
@@ -34,6 +35,12 @@ async def test_probes_observe_delivery_and_retirement_postgres(tmp_path: Path) -
     script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
     async with build(settings=_settings(tmp_path), storage="postgres", script=script) as app:
         await delivery_case(app, script, finish=_finish)
+
+
+async def test_a_fact_in_two_live_memories_is_delivered_by_either_postgres(tmp_path: Path) -> None:
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with build(settings=_settings(tmp_path), storage="postgres", script=script) as app:
+        await shared_text_case(app, script, finish=_finish)
 
 
 async def test_write_probe_reports_the_save_outcome_postgres(tmp_path: Path) -> None:
