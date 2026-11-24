@@ -562,17 +562,17 @@ class BrowserWorkflowRunner:
                         ),
                         None,
                     )
-                    # A focus or continuation read extends the window before it, and the
-                    # provider binds it to that capture. The first window must itself
-                    # show the reviewed destination, so an action names a revision
-                    # where that evidence held, not a page loaded since.
-                    continued = bool(asked and "wait_for" not in asked)
+                    # Only this first window can show the reviewed destination in the
+                    # capture that names the target. A focus or continuation read is a
+                    # fresh capture of the live page: the provider ties it to the
+                    # capture before it and to the same document, but compares no
+                    # content. None is issued for this action, and none is accepted.
                     status = (
                         observed.condition.status
                         if asked == destination and observed.condition is not None
                         else None
                     )
-                    if not continued and status != "satisfied":
+                    if status != "satisfied":
                         await self._stop(
                             context,
                             state,
@@ -596,6 +596,11 @@ class BrowserWorkflowRunner:
                             context, state, "ambiguous_region" if regions else "region_not_observed"
                         )
                         return None
+                    if destination is not None:
+                        # The region's controls need a focus read, which cannot carry the
+                        # destination evidence: as for any region target read without focus.
+                        await self._stop(context, state, "unverified")
+                        return None
                     if not await self._read_target_window(
                         context,
                         state,
@@ -615,7 +620,11 @@ class BrowserWorkflowRunner:
                         and not element.disabled
                     ]
                     if not targets:
-                        continuation = _control_continuation(result, observed)
+                        continuation = (
+                            None
+                            if destination is not None
+                            else _control_continuation(result, observed)
+                        )
                         if continuation is None:
                             await self._stop(context, state, "target_not_observed")
                             return None

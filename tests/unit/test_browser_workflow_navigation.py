@@ -571,3 +571,125 @@ async def test_an_action_on_the_last_permitted_call_is_neither_reconciled_nor_re
         assert state["completed_steps"] == 1
         assert saved.working_state["browser_workflow_report_only"]
     assert len(provider.actions) == 1 and provider.observation_count == 1
+
+
+@pytest.mark.parametrize(
+    ("shape", "direct", "status"),
+    [
+        ("continuation", True, "target_not_observed"),
+        ("region", True, "unverified"),
+        # Guards: an action after any other step keeps its later windows.
+        ("continuation", False, "verified"),
+        ("region", False, "verified"),
+    ],
+)
+async def test_action_directly_after_verified_navigation_uses_only_the_proving_window(
+    monkeypatch: pytest.MonkeyPatch, shape: str, direct: bool, status: str
+) -> None:
+    """A later window is a fresh capture that cannot carry the destination evidence."""
+    from agent_core.domain.browser import (
+        BrowserElement,
+        BrowserObservationExpansion,
+        BrowserObservationFocus,
+        BrowserRegionCoverage,
+        BrowserSemanticRegion,
+    )
+    from tests.unit.test_browser_workflow_target_discovery import WindowProvider
+
+    catalog = navigation_catalog()
+    steps = catalog["recipes"][0]["steps"]
+    if shape == "region":
+        steps[1]["target_region"] = {
+            "kind": "region",
+            "region_kind": "form",
+            "text": "Account activity",
+        }
+    if not direct:
+        steps.insert(1, {"kind": "observe"})
+    monkeypatch.setattr(
+        bootstrap,
+        "load_config_document",
+        lambda settings, path: (
+            catalog
+            if path == "runtime/browser-workflows.yaml"
+            else load_config_document(settings, path)
+        ),
+    )
+
+    class Provider(WindowProvider):
+        """The target is offered only by the second control window or the region focus."""
+
+        def _observation(self, url: str) -> BrowserObservation:
+            text = "Report ready" if self.actions else "Account ready"
+            observed = super()._observation(url).model_copy(update={"text": text})
+            if shape != "region":
+                return observed
+            return observed.model_copy(
+                update={
+                    "elements": (
+                        BrowserElement(
+                            ref=f"control-{self.window}", role="link", name="Open activity"
+                        ),
+                    ),
+                    "regions": (
+                        BrowserSemanticRegion(
+                            ref="current-region", kind="form", text="Account activity"
+                        ),
+                    ),
+                    "region_coverage": BrowserRegionCoverage(scanned_nodes=10),
+                    "coverage": None,
+                    "focus": BrowserObservationFocus(
+                        region_ref="rotated-focus",
+                        text_offset=0,
+                        text_total_bytes=len(text),
+                        text_cursor="a" * 32,
+                    )
+                    if self.expansions
+                    else None,
+                }
+            )
+
+        async def expand(self, request: BrowserObservationExpansion) -> BrowserObservation:
+            if shape != "region":
+                return await super().expand(request)
+            assert request.region_ref == "current-region"
+            self.expansions.append(request)
+            self.window += 1
+            return self._observation("https://example.org/account")
+
+    provider = Provider(target_window=1)
+    async with bootstrap.build(
+        settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+        script=FakeModelScript(turns=[ScriptedTurn(text="Reported observed progress.")]),
+        enabled_tools=["browser.navigate", "browser.observe", "browser.act"],
+        browser_provider_override=provider,
+    ) as app:
+        await seed_browser_authority(app)
+        session = await app.services.sessions.create(
+            app.principal, "general", {}, browser_profile_id=PROFILE_ID
+        )
+        run_id = await app.runs.submit("Read my saved report.", session.id)
+        approvals = await app.approvals.list_pending(run_id=run_id)
+        assert len(approvals) == int(not direct)
+        assert not provider.actions
+        if approvals:
+            await app.approvals.resolve(approvals[0].id, ApprovalResolutionType.APPROVE_ONCE)
+        assert (await app.runs.wait_terminal(run_id)).status is RunStatus.COMPLETED
+        async with app.uow_factory() as uow:
+            saved = await uow.checkpoints.latest(run_id)
+        assert saved is not None
+        state = saved.working_state["browser_workflow"]
+        assert state["status"] == status
+        assert state["completed_steps"] == (1 if direct else 3)
+        assert state["target_search"]["windows"] == (1 if direct else 2)
+        assert saved.working_state["browser_workflow_report_only"]
+        if direct:
+            calls = [item for item in saved.conversation if isinstance(item, ToolCallItem)]
+            wait = {"wait_for": steps[0]["postcondition"]}
+            assert [(call.name, call.arguments) for call in calls[1:]] == [
+                ("browser.observe", wait),
+                ("browser.observe", wait),
+            ]
+    # No focus or continuation read is issued for the action that needs the proof.
+    assert len(provider.expansions) == int(not direct)
+    assert len(provider.actions) == int(not direct)

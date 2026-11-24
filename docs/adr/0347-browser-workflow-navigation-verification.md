@@ -96,9 +96,8 @@ version, event type or recipe field, and the decisions above stand.
   the condition `satisfied`, so the revision the action names is a capture where
   the reviewed evidence held. Otherwise the run stops as `observed_failure` or
   `unverified` before approval or dispatch, with the navigation still complete.
-  Focus and continuation windows stay bound by the provider to the capture
-  before them, inside the same four-window allowance. A branch that skipped the
-  navigation carries no requirement. Once the action is sent the wait is never
+  The action takes its target from that window alone; see the second review
+  pass below. A branch that skipped the navigation carries no requirement. Once the action is sent the wait is never
   repeated. A navigation condition directly followed by an action must therefore
   describe state that lasts until the target is read.
 - **A bound stops new work, not a finished read.** The time, call and step
@@ -111,10 +110,38 @@ version, event type or recipe field, and the decisions above stand.
   stops `bounded_stop`, report-only and unreplayed, where the budget check
   previously failed the run.
 
+Second review pass, 2026-11-24, pull request 265. A focus or continuation read
+is a fresh capture of the live page. The provider ties it to the capture before
+it (the exact revision for `region_ref`, a reference or cursor only the latest
+capture issued for `after` and `cursor`) and to the same document, counting
+history moves. It compares no page content. In real Chromium a change inside the
+document after the first window supplied a target through a cursor continuation
+and through a region focus; a history move was refused. Every pinned
+`browser.observe` version rejects `wait_for` combined with a continuation, so a
+later window cannot repeat the wait. An earlier sentence here overstated the
+binding.
+
+The runner therefore issues no focus or continuation read for an action directly
+after a verified navigation: its target must be in the destination-proving
+window. A target beyond the first control window stops as `target_not_observed`,
+the existing outcome for a target with no usable continuation. A `target_region`
+action stops as `unverified` once its region is matched, the existing outcome
+for a region target read without focus. Both stop before approval. This costs
+reach: such targets cannot be acted on in that position. No deployed recipe
+declares a navigation condition, and actions in any other position keep their
+later windows.
+
+The fuller repair is undecided and left open: let later windows carry or
+re-prove the evidence by a local check of the condition, by an observe version
+that accepts `wait_for` with a continuation, or by provider capture identity.
+
 Construction evidence in the local Linux sandbox: six unit cases and one real
 Chromium case first failed because the unrepaired runner requested approval for,
 or looked for a region on, the changed page. Twelve more failed because a reached
 tool-call, step, workflow-call or time bound hid a completed verification, and
 one because the run failed after an action on its last permitted call.
-Afterwards the browser-workflow unit modules passed all 299 cases and the
-real-Chromium workflow modules all 68, eight of them in the navigation module.
+For the second pass, two unit and three real-Chromium cases first failed because
+the unrepaired runner read a later window and, in four of them, requested
+approval from it. Afterwards the browser-workflow unit modules passed all 303
+cases and the real-Chromium workflow modules all 71, eleven of them in the
+navigation module.

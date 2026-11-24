@@ -12,6 +12,7 @@ from agent_core.domain.browser import (
     BrowserAction,
     BrowserDispatchConstraint,
     BrowserObservation,
+    BrowserObservationExpansion,
     BrowserProfile,
     BrowserProfileStatus,
     BrowserProviderError,
@@ -191,3 +192,137 @@ async def test_real_navigation_verification_precedes_any_later_effect(
             assert provider.navigations == [site.url("/entry")]
         assert effects == ([True] if verified else [])
         assert len(provider.actions) == int(verified)
+
+
+@pytest.mark.parametrize(
+    ("mode", "status"),
+    [
+        ("after_dom", "target_not_observed"),
+        ("after_history", "target_not_observed"),
+        ("region_dom", "unverified"),
+    ],
+)
+async def test_real_action_after_verified_navigation_reads_no_later_window(
+    monkeypatch: pytest.MonkeyPatch, mode: str, status: str
+) -> None:
+    """A later window is a fresh capture: a changed document could supply its target."""
+    effects: list[bool] = []
+
+    async def home(request: Request) -> Response:
+        del request
+        body = (
+            '<p id="ready">Account ready</p><form><p>Account activity</p>'
+            '<button type="button" id="target">Open activity</button></form>'
+            if mode == "region_dom"
+            # The target lies beyond the first control window.
+            else '<p id="ready">Account ready</p>'
+            + "".join(f"<button>Choice {i}</button>" for i in range(300))
+            + '<button id="target">Open activity</button>'
+        )
+        return html(
+            body,
+            script="document.querySelector('#target').onclick = () => "
+            "fetch('/effect', {method:'POST'});",
+        )
+
+    async def effect(request: Request) -> Response:
+        del request
+        effects.append(True)
+        return Response("ok")
+
+    async with browsing(
+        [Route("/account", home), Route("/other", home), Route("/effect", effect, methods=["POST"])]
+    ) as (site, runtime):
+        catalog = navigation_catalog()
+        recipe = catalog["recipes"][0]
+        recipe["origin"] = site.origin
+        recipe["steps"][0]["url"] = site.url("/account")
+        recipe["steps"][1]["role"] = "button"
+        if mode == "after_history":
+            recipe["steps"][0]["postcondition"]["evidence"] = {
+                "kind": "location",
+                "url": site.url("/account"),
+            }
+        if mode == "region_dom":
+            recipe["steps"][1]["target_region"] = {
+                "kind": "region",
+                "region_kind": "form",
+                "text": "Account activity Open activity",
+            }
+        monkeypatch.setattr(
+            bootstrap,
+            "load_config_document",
+            lambda settings, path: (
+                catalog
+                if path == "runtime/browser-workflows.yaml"
+                else load_config_document(settings, path)
+            ),
+        )
+
+        class Provider(FakeBrowserProvider):
+            expansions: int = 0
+
+            async def navigate(self, url: str) -> BrowserObservation:
+                return await runtime.navigate(url)
+
+            async def observe(self) -> BrowserObservation:
+                self.observation_count += 1
+                result = await runtime.observe()
+                if self.observation_count == 2:
+                    # After the window that proved the destination, the same
+                    # document changes before any later window could be read.
+                    await runtime._current_page().evaluate(
+                        "history.pushState({}, '', '/other')"
+                        if mode == "after_history"
+                        else "document.querySelector('#ready').textContent = 'Signed out'"
+                    )
+                return result
+
+            async def expand(self, request: BrowserObservationExpansion) -> BrowserObservation:
+                self.expansions += 1
+                return await runtime.expand(request)
+
+        provider = Provider(allowed_origins=(site.origin,))
+        async with bootstrap.build(
+            settings=load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"}),
+            script=FakeModelScript(turns=[ScriptedTurn(text="Reported observed progress.")]),
+            enabled_tools=["browser.navigate", "browser.observe", "browser.act"],
+            browser_provider_override=provider,
+        ) as app:
+            async with app.uow_factory() as uow:
+                await uow.browser_profiles.create(
+                    BrowserProfile(
+                        id=PROFILE_ID,
+                        tenant_id=app.principal.tenant_id,
+                        principal_id=app.principal.principal_id,
+                        provider_name="hosted-isolated",
+                        provider_ref="fixture",
+                        allowed_origins=(site.origin,),
+                        status=BrowserProfileStatus.READY,
+                        generation=1,
+                        encryption_key_version="key-v1",
+                        created_at=app.clock.now(),
+                        updated_at=app.clock.now(),
+                    )
+                )
+            session = await app.services.sessions.create(
+                app.principal, "general", {}, browser_profile_id=PROFILE_ID
+            )
+            run_id = await app.runs.submit("Read my saved report.", session.id)
+            assert not await app.approvals.list_pending(run_id=run_id)
+            assert (await app.runs.wait_terminal(run_id)).status is RunStatus.COMPLETED
+            async with app.uow_factory() as uow:
+                saved = await uow.checkpoints.latest(run_id)
+            assert saved is not None
+            state = saved.working_state["browser_workflow"]
+            assert state["status"] == status
+            assert state["completed_steps"] == 1
+            assert saved.working_state["browser_workflow_report_only"]
+            calls = [item for item in saved.conversation if isinstance(item, ToolCallItem)]
+            wait = {"wait_for": recipe["steps"][0]["postcondition"]}
+            assert [(call.name, call.arguments) for call in calls[1:]] == [
+                ("browser.observe", wait),
+                ("browser.observe", wait),
+            ]
+        assert provider.expansions == 0
+    assert not effects and not provider.actions

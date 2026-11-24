@@ -2246,9 +2246,25 @@ read. The runner proposes the action only from an observation that itself
 reports the condition `satisfied`, so the action's revision names a capture
 where the reviewed evidence held. A page that changed since verification stops
 as `observed_failure` or `unverified` before approval or dispatch, with no
-further call. Focus and continuation windows stay bound by the provider to the
-capture before them. A branch that skipped the navigation carries no
-requirement, and the wait is never repeated once the action is sent.
+further call. A branch that skipped the navigation carries no requirement, and
+the wait is never repeated once the action is sent.
+
+Only that first window carries the evidence, so the action takes its target
+from it alone. A focus or continuation read is a fresh capture of the live
+page: the provider ties it to the capture before it (the exact revision for
+`region_ref`, a reference or cursor only the latest capture issued for `after`
+and `cursor`) and to the same document, counting history moves, but compares no
+page content. Every pinned `browser.observe` version rejects `wait_for` combined
+with a continuation, so a later window cannot repeat the wait. The runner
+therefore issues no focus or continuation read for this action. A target beyond
+the first control window stops as `target_not_observed`, and a `target_region`
+action stops as `unverified` once its region is matched, both before approval.
+That is the cost: such targets cannot be acted on directly after a conditioned
+navigation. No deployed recipe declares a navigation condition, and actions in
+any other position keep their later windows. Letting later windows carry or
+re-prove the evidence (a local check, an observe version that accepts `wait_for`
+with a continuation, or provider capture identity) is undecided and left open in
+ADR-0347.
 
 An action's optional `precondition` requests a bounded readiness wait before
 target discovery ([ADR-0333](../adr/0333-browser-workflow-action-readiness.md)).
