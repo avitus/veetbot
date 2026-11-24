@@ -2864,6 +2864,39 @@ request (ADR-0342 decision 11):
 still asks. `tests/unit/test_script_request_grant.py` covers the offer, the
 resolution, the coverage and the end of the grant.
 
+The owner decided on 2026-11-24 that a schedule's scripts are approved once,
+when the schedule is set up (ADR-0342 decision 13). A scheduled run has
+nobody to answer a card.
+
+- A scheduled run is offered `sandbox.run_code` only when its schedule
+  requests the scope `sandbox.execute`, because a run holds exactly its
+  schedule's requested scopes. The schedule role must hold that scope too, or
+  the occurrence is skipped (`scheduling.md`).
+- A schedule revision records the approval as `scripts_approved`. The service
+  refuses it unless the revision requests `sandbox.execute`
+  (`schedule.scripts_scope_required`) and its pinned agent version lists the
+  script tool (`schedule.scripts_unavailable`). A job schedule cannot hold it.
+- With `AGENT_SCHEDULE_SCRIPTS_ENABLED` on, `schedule.create` requests the
+  scope and records the approval whenever the agent it pins has the script
+  tool. Its card says "its runs may run scripts without asking", lists the
+  scope and carries `scripts_approved`. The model supplies neither.
+- A standing authorizer then lets a `sandbox.run_code` call of that
+  schedule's own run start without a card, when outside content is its only
+  reason to ask. It finds the schedule through the stored link from the run
+  to its occurrence, never through session metadata. The run must be the
+  occurrence's own top-level run, its agent version must be the revision's,
+  and the newest user message must be trusted, as the schedule's instruction
+  is. Each use is recorded on `tool.call.authorized` with
+  `authorization_kind: "schedule_script_approval"` and the schedule id and
+  revision.
+- The approval is the revision's. A content change through `schedule.update`
+  keeps it, and a full-definition update keeps or drops it as it says.
+- It covers starting a script. It never covers a call a script makes, a
+  profile that asks before any code execution, or `sandbox.run_command`.
+
+`tests/unit/test_schedule_script_approval.py` covers the scheduled run, the
+rule, the validation and the card.
+
 ### Budget
 
 **Bridged calls count against the run's tool-call limit.** This holds for
@@ -2966,11 +2999,13 @@ session pins:
 
 - A new app chat takes the version its API process composed.
 - A schedule keeps the version it pinned when it was created or last
-  re-pinned (`scheduling.md`). One made after the setting was turned on has
-  the script tool. An older one keeps `sandbox.run_command`.
+  re-pinned (`scheduling.md`). Its runs hold only the scopes the schedule
+  requests, so they are offered neither sandbox tool unless the schedule
+  requests `sandbox.execute` (see "Approval").
 - A new inbound-surface chat takes the newest registered version, so it has
   the script tool once the setting is on.
 - The call services run no model.
 
 Production has the setting on since 2026-11-23 (ADR-0342, Implementation
-status).
+status). `AGENT_SCHEDULE_SCRIPTS_ENABLED` is separate and off by default; it
+needs the code mode setting and a schedule role that holds `sandbox.execute`.

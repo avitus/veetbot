@@ -13,6 +13,7 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalPresentation
 from agent_core.domain.browser_task_grants import TaskGrantNotCovered
 from agent_core.domain.errors import AuthorizationError, ConflictError, ScheduleValidationError
+from agent_core.domain.execution import SANDBOX_EXECUTE_SCOPE, SANDBOX_RUN_CODE_TOOL_NAME
 from agent_core.domain.mcp import MCP_SERVER_ID_PATTERN
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import (
@@ -24,6 +25,7 @@ from agent_core.domain.policies import (
 )
 from agent_core.domain.runs import Run, RunLimits
 from agent_core.domain.schedules import (
+    SCHEDULE_SCRIPTS_APPROVAL_SUMMARY,
     Cadence,
     CallPlan,
     IntervalCadence,
@@ -329,9 +331,16 @@ class ScheduleCreateTool:
         uow_factory: UnitOfWorkFactory | None = None,
         *,
         calling_enabled: bool = False,
+        approve_scripts: bool = False,
     ) -> None:
         self._service = service
         self._agent = agent
+        # ADR-0342 decision 13: where the deployment allows it and the pinned
+        # agent has the script tool, creating the schedule approves its
+        # scripts. The card says so and lists the sandbox scope.
+        self._approves_scripts = (
+            approve_scripts and SANDBOX_RUN_CODE_TOOL_NAME in agent.enabled_tools
+        )
         self._limits = limits
         self._uow_factory = uow_factory
         self._calling_enabled = calling_enabled
@@ -352,7 +361,11 @@ class ScheduleCreateTool:
         tenant_id: str,
     ) -> tuple[str, dict[str, Any]]:
         title = str(arguments["title"])
-        scopes = _requested_scopes(arguments) | await self._server_scopes(arguments, tenant_id)
+        scopes = (
+            _requested_scopes(arguments)
+            | await self._server_scopes(arguments, tenant_id)
+            | self._script_scopes()
+        )
         proposal: dict[str, Any] = {
             "title": title,
             "instruction": str(arguments["instruction"]),
@@ -363,6 +376,7 @@ class ScheduleCreateTool:
                 else {}
             ),
             **({"use_website": True} if arguments.get("use_website") else {}),
+            **({"scripts_approved": True} if self._approves_scripts else {}),
             **({"place_call": True} if arguments.get("place_call") else {}),
             **({"publish_cockpit_feed": True} if arguments.get("publish_cockpit_feed") else {}),
             **(
@@ -375,7 +389,7 @@ class ScheduleCreateTool:
             cadence = parse_cadence(arguments, interval=self.offers_interval)
         except CadenceInputError:
             proposal.update({key: arguments[key] for key in ("at", "cadence") if key in arguments})
-            return f"Create schedule {title!r}", proposal
+            return self._with_scripts(f"Create schedule {title!r}"), proposal
         if isinstance(cadence, OnceCadence):
             proposal["at"] = cadence.at.isoformat()
             summary = f"Create one-time schedule {title!r} for {cadence.at.isoformat()}"
@@ -386,9 +400,19 @@ class ScheduleCreateTool:
             proposal["cadence"] = cadence.model_dump(mode="json")
             summary = f"Create {cadence.kind.value.lower()} schedule {title!r}"
         return (
-            summary,
+            self._with_scripts(summary),
             proposal,
         )
+
+    def _script_scopes(self) -> frozenset[str]:
+        """The scope a run needs to be offered the script tool at all."""
+        return frozenset({SANDBOX_EXECUTE_SCOPE}) if self._approves_scripts else frozenset()
+
+    def _with_scripts(self, summary: str) -> str:
+        """Say on the card that this approval also covers the schedule's scripts."""
+        if not self._approves_scripts:
+            return summary
+        return f"{summary}; {SCHEDULE_SCRIPTS_APPROVAL_SUMMARY}"
 
     async def approval_view_in_session(
         self,
@@ -470,10 +494,12 @@ class ScheduleCreateTool:
             instruction=str(arguments["instruction"]),
             cadence=cadence,
             requested_scopes=_requested_scopes(arguments)
-            | await self._server_scopes(arguments, context.tenant_id),
+            | await self._server_scopes(arguments, context.tenant_id)
+            | self._script_scopes(),
             mcp_servers=frozenset(arguments.get("use_mcp_servers", ())),
             browser_profile_id=UUID(selected_profile) if selected_profile else None,
             call_plan=call_plan,
+            scripts_approved=self._approves_scripts,
             # ADR-0254: a feed's widget is its report, so its upkeep stays quiet.
             notify=(
                 ScheduleNotify.ATTENTION_ONLY

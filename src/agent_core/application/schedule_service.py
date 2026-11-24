@@ -16,6 +16,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.browser import BrowserProfileStatus
 from agent_core.domain.errors import ConflictError, NotFoundError, ScheduleValidationError
 from agent_core.domain.events import ProcessEvent
+from agent_core.domain.execution import SANDBOX_EXECUTE_SCOPE, SANDBOX_RUN_CODE_TOOL_NAME
 from agent_core.domain.mcp import schedule_may_name
 from agent_core.domain.recurrence import RecurrenceCalculator
 from agent_core.domain.schedules import (
@@ -569,6 +570,7 @@ def _revision(
         created_at=now,
         call_plan=definition.call_plan,
         mcp_servers=definition.mcp_servers,
+        scripts_approved=definition.scripts_approved,
     )
 
 
@@ -638,6 +640,7 @@ def _definition_from_revision(revision: ScheduleRevision) -> ScheduleDefinition:
         call_plan=revision.call_plan,
         notify=revision.notify,
         mcp_servers=revision.mcp_servers,
+        scripts_approved=revision.scripts_approved,
     )
 
 
@@ -788,6 +791,18 @@ async def _validate_definition(
             "schedule.policy_profile_mismatch",
             "schedule policy profile does not match the pinned agent version",
         )
+    if definition.scripts_approved:
+        # ADR-0342 decision 13: the approval is for a tool the run is offered.
+        if SANDBOX_RUN_CODE_TOOL_NAME not in agent.enabled_tools:
+            raise ScheduleValidationError(
+                "schedule.scripts_unavailable",
+                "The pinned agent version has no script tool.",
+            )
+        if SANDBOX_EXECUTE_SCOPE not in definition.requested_scopes:
+            raise ScheduleValidationError(
+                "schedule.scripts_scope_required",
+                "A schedule approved for scripts must request the sandbox scope.",
+            )
 
 
 def _expected(schedule: Schedule, expected_revision: int) -> None:

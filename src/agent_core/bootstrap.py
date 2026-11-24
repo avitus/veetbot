@@ -405,6 +405,7 @@ from agent_core.application.recall_questions import PublicRecallQuestionService
 from agent_core.application.reconsolidation import PublicReconsolidationService
 from agent_core.application.records import RecordsService
 from agent_core.application.run_service import RunService
+from agent_core.application.schedule_script_approvals import ScheduleScriptAuthorizer
 from agent_core.application.schedule_service import ScheduleService
 from agent_core.application.script_request_grants import (
     ScriptRequestGrantAuthorizer,
@@ -3868,6 +3869,8 @@ async def _compose(
     if settings.delegation_enabled:
         registry.register(DelegateRunTool())
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:
+        # ADR-0342 decision 13: creating a schedule approves its scripts.
+        schedule_scripts = settings.code_mode_enabled and settings.schedule_scripts_enabled
         registry.register(
             SingleCallScheduleCreateTool(
                 schedule_service,
@@ -3875,6 +3878,7 @@ async def _compose(
                 schedule_definition_limits,
                 uow_factory=uow_factory,
                 calling_enabled=settings.call_enabled,
+                approve_scripts=schedule_scripts,
             )
         )
         registry.register(
@@ -3884,6 +3888,7 @@ async def _compose(
                 schedule_definition_limits,
                 uow_factory=uow_factory,
                 calling_enabled=settings.call_enabled,
+                approve_scripts=schedule_scripts,
             )
         )
         if settings.cockpit_enabled:
@@ -3898,6 +3903,7 @@ async def _compose(
                         schedule_definition_limits,
                         uow_factory=uow_factory,
                         calling_enabled=settings.call_enabled,
+                        approve_scripts=schedule_scripts,
                     )
                 )
         # ADR-0291: the deployment's newest versions register last, so they are offered.
@@ -3913,6 +3919,7 @@ async def _compose(
                     schedule_definition_limits,
                     uow_factory=uow_factory,
                     calling_enabled=settings.call_enabled,
+                    approve_scripts=schedule_scripts,
                 )
             )
         registry.register(PreviousScheduleListTool(schedule_service))
@@ -5292,6 +5299,8 @@ async def _compose(
             standing_authorizers.append(
                 ScriptRequestGrantAuthorizer(uow_factory=uow_factory, now=clock.now)
             )
+            # ADR-0342 decision 13: a schedule's scripts, approved once at setup.
+            standing_authorizers.append(ScheduleScriptAuthorizer(uow_factory=uow_factory))
         standing_authorizer = (
             CompositeStandingAuthorizer(standing_authorizers) if standing_authorizers else None
         )

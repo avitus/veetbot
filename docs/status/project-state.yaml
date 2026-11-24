@@ -22,7 +22,10 @@
 # and pull request 264 decision 12, both on 2026-11-23, each with hosted CI
 # passing and every review thread resolved. On 2026-11-24 the owner had the
 # nine model-run schedules re-pinned to the activated agent version; job
-# schedules run no model. On 2026-11-24 two production runs failed
+# schedules run no model. A scheduled run is offered no script tool until its
+# schedule is approved for scripts at setup (decision 13), which is built
+# behind the default-off `AGENT_SCHEDULE_SCRIPTS_ENABLED` and not delivered.
+# On 2026-11-24 two production runs failed
 # after an approved script: session history held the results of the script's
 # own calls, which no model request may carry. `session-history@3` leaves
 # them out. No milestone or gate moves.

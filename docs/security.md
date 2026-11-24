@@ -258,6 +258,14 @@ page summarizes and does not claim a milestone complete.
   control tools and sandbox tools are refused. A script written for the
   owner's own message runs without a card only while the turn has read no
   outside content.
+- A schedule's scripts can be approved once, at setup (ADR-0342 decision 13),
+  behind the default-off `AGENT_SCHEDULE_SCRIPTS_ENABLED`. The approval is
+  stored on the schedule revision and shown on the setup card. In that
+  schedule's own runs a script then starts without a card, including one
+  written after the run read outside content. The script still runs in the
+  sandbox without network or credentials, and every call it makes is decided
+  by policy as before. A scheduled run is offered the script tool only when
+  its schedule requests `sandbox.execute`.
 - "Allow for this request" lets one approval cover later actions of the same
   kind in one request: actions on a signed-in website (ADR-0302), further
   scripts (ADR-0342 decision 11), and trials, saves, runs and schedule repins

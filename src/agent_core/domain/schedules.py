@@ -345,6 +345,11 @@ class ScheduleAdmissionLimits(BaseModel):
     monthly_cost: Decimal = Field(gt=0)
 
 
+# ADR-0342 decision 13: what a setup card says when its approval covers the
+# schedule's scripts.
+SCHEDULE_SCRIPTS_APPROVAL_SUMMARY = "its runs may run scripts without asking"
+
+
 class ScheduleDefinitionLimits(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -440,6 +445,9 @@ class ScheduleRevision(BaseModel):
     call_plan: CallPlan | None = None
     # ADR-0291: the MCP servers this schedule's runs may use; absent while empty.
     mcp_servers: frozenset[str] = Field(default=frozenset(), exclude_if=lambda servers: not servers)
+    # ADR-0342 decision 13: the owner approved this schedule's scripts at setup;
+    # absent while false.
+    scripts_approved: bool = Field(default=False, exclude_if=lambda approved: not approved)
 
     @field_serializer("mcp_servers")
     def sorted_mcp_servers(self, servers: frozenset[str]) -> list[str]:
@@ -459,6 +467,8 @@ class ScheduleRevision(BaseModel):
             raise ValueError("A job task has no browser binding or call plan.")
         if job and self.mcp_servers:
             raise ValueError("A job task reads the MCP servers its grant names.")
+        if job and self.scripts_approved:
+            raise ValueError("A job task runs no script.")
         if (
             limits.max_steps <= 0
             or limits.max_model_calls < (0 if job else 1)
@@ -506,6 +516,9 @@ class ScheduleDefinition(BaseModel):
     notify: ScheduleNotify = ScheduleNotify.EVERY_REPORT
     # ADR-0291: the MCP servers this schedule's runs may use; absent while empty.
     mcp_servers: frozenset[str] = Field(default=frozenset(), exclude_if=lambda servers: not servers)
+    # ADR-0342 decision 13: the owner approved this schedule's scripts at setup;
+    # absent while false.
+    scripts_approved: bool = Field(default=False, exclude_if=lambda approved: not approved)
 
     @field_serializer("mcp_servers")
     def sorted_mcp_servers(self, servers: frozenset[str]) -> list[str]:
@@ -520,6 +533,8 @@ class ScheduleDefinition(BaseModel):
             raise ValueError("A job task has no browser binding or call plan.")
         if job and self.mcp_servers:
             raise ValueError("A job task reads the MCP servers its grant names.")
+        if job and self.scripts_approved:
+            raise ValueError("A job task runs no script.")
         if (
             limits.max_steps <= 0
             or limits.max_model_calls < (0 if job else 1)

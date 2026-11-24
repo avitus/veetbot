@@ -481,10 +481,16 @@ chats are offered it in place of `sandbox.run_command`: a script in the run's
 sandbox calls the chat's tools over the bridge, and each call still passes
 policy and approval. Set the flag in `/etc/veetbot/veetbot.env` and restart
 the API and the three workers. The schedule, surface, notify and call roles
-never read it, so their environment files need no change. Turning it on
-registers a new default agent version. Chats and schedules that already exist
-keep the version they pinned; a schedule or an inbound-surface chat made
-afterwards takes the new one. Every
+never read it. Turning it on registers a new default agent version. Chats
+and schedules that already exist keep the version they pinned; a schedule or
+an inbound-surface chat made afterwards takes the new one. A scheduled run is
+still offered no script tool, because it holds only the scopes its schedule
+requests. `AGENT_SCHEDULE_SCRIPTS_ENABLED=1` in the same file lets
+`schedule.create` request `sandbox.execute` and record the owner's approval
+of the schedule's scripts (ADR-0342 decision 13). Before turning it on, add
+`sandbox.execute` to `AUTH_SCOPES` in `/etc/veetbot/veetbot-schedule.env` and
+restart `veetbot-schedule`: an occurrence whose schedule requests a scope the
+schedule role does not hold is skipped. Every
 release builds `agent-core-sandbox`, which carries the script runner, so no
 image step is needed.
 

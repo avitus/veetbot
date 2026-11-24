@@ -170,6 +170,8 @@ class Settings:
     integration_secrets_key: SecretStr | None = None
     jobs_enabled: bool = False
     code_mode_enabled: bool = False
+    # ADR-0342 decision 13: a schedule's setup approval covers its scripts.
+    schedule_scripts_enabled: bool = False
     jobs_allowed_hosts: frozenset[str] | None = None
     jobs_github_app_id: int | None = None
     jobs_github_installation_id: int | None = None
@@ -2395,6 +2397,7 @@ def _load_settings(
         integration_secrets_key=_integration_secrets_key(values, require_execution_environment),
         jobs_enabled=_parse_flag(values, "AGENT_JOBS_ENABLED"),
         code_mode_enabled=_parse_flag(values, "AGENT_CODE_MODE_ENABLED"),
+        schedule_scripts_enabled=_parse_flag(values, "AGENT_SCHEDULE_SCRIPTS_ENABLED"),
         jobs_allowed_hosts=_job_hosts(values),
         jobs_github_app_id=_optional_positive_int(values, "AGENT_JOBS_GITHUB_APP_ID"),
         jobs_github_installation_id=_optional_positive_int(
