@@ -117,18 +117,18 @@ def test_do_i_possession_questions_browse_possessions(question: str) -> None:
 
 @pytest.mark.parametrize(
     "question",
-    ["Which car should I buy?", "What do I like for breakfast?", "Where do I live?"],
+    [
+        # Other "do I" questions name no possession.
+        "Which car should I buy?",
+        "What do I like for breakfast?",
+        "Where do I live?",
+        # Neither does an explicit relationship or preference question.
+        "Who is my mother?",
+        "Who is my emergency contact?",
+        "How do I like my coffee?",
+    ],
 )
-def test_other_do_i_questions_do_not_browse_possessions(question: str) -> None:
-    assert not DeterministicQueryFormer(principal()).from_text(question)[0].include_owned_resources
-
-
-@pytest.mark.parametrize(
-    "question", ["Who is my mother?", "Who is my emergency contact?", "How do I like my coffee?"]
-)
-def test_explicit_relationship_and_preference_queries_do_not_browse_possessions(
-    question: str,
-) -> None:
+def test_questions_that_name_no_possession_do_not_browse_possessions(question: str) -> None:
     assert not DeterministicQueryFormer(principal()).from_text(question)[0].include_owned_resources
 
 

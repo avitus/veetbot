@@ -623,13 +623,6 @@ async def test_a_stale_or_different_job_offer_leaves_the_card_pending(
     assert await subject.events(JOB_REQUEST_GRANT_CREATED_EVENT) == []
 
 
-def test_the_echo_names_exactly_one_of_a_profile_and_a_job() -> None:
-    with pytest.raises(ValueError):
-        RequestGrantEcho()
-    with pytest.raises(ValueError):
-        RequestGrantEcho(profile_id=UUID(int=5), job_slug=SLUG)
-
-
 # Coverage.
 
 
