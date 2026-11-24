@@ -19,7 +19,7 @@ architectural decisions; ADR-0061 records the authorization.
 The deployment page states the risk plainly: the single-server failure domain
 has "no required cloud firewall, off-host database, backup, restore rehearsal,
 monitoring, load balancer, rolling deployment, or high availability. Loss of
-the Droplet may mean unrecoverable data loss" (deployment.md:1702-1705). ADR-0046
+the Droplet may mean unrecoverable data loss" (deployment.md:1703-1706). ADR-0046
 accepted that at launch as an explicit decision, not a claim that the controls
 lack value. Milestone 15 converts "unrecoverable" into "recoverable within the
 backup window" and makes the owner aware when production degrades, and it
@@ -362,7 +362,7 @@ worth a credential and an egress path for a single-owner host.
 The policy is recorded in ADR-0065 and matches what the persistence design
 already says: rollback is code-only; migrations are forward-only; the
 migration round-trip gate proves downgrade *authoring*, not operational
-safety (event-log-and-persistence.md:1017-1028); a rollback across a migration
+safety (event-log-and-persistence.md:1028-1039); a rollback across a migration
 boundary is "restore the pre-release dump, then roll back the code"; and the
 startup revision assertion remains the fail-closed backstop.
 

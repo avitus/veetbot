@@ -479,11 +479,12 @@ have their own pages.
 With code mode on, the API and workers register `sandbox.run_code`, and new
 chats are offered it in place of `sandbox.run_command`: a script in the run's
 sandbox calls the chat's tools over the bridge, and each call still passes
-policy and approval. Set the flag in `/etc/veetbot/veetbot.env` only and
-restart the API and the three workers. The schedule, surface, notify and call
-roles read their own environment files, so schedules and inbound surfaces keep
-`sandbox.run_command`. Turning it on registers a new default agent version;
-chats and schedules that already exist keep the version they pinned. Every
+policy and approval. Set the flag in `/etc/veetbot/veetbot.env` and restart
+the API and the three workers. The schedule, surface, notify and call roles
+never read it, so their environment files need no change. Turning it on
+registers a new default agent version. Chats and schedules that already exist
+keep the version they pinned; a schedule or an inbound-surface chat made
+afterwards takes the new one. Every
 release builds `agent-core-sandbox`, which carries the script runner, so no
 image step is needed.
 

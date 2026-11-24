@@ -32,6 +32,9 @@ TOOL_RESULT_EVENTS = frozenset(
 # name, id and reason code alone, and its upcast result item is None (ADR-0142).
 TOOL_CALL_DENIED_PAYLOAD_VERSION = 2
 CONVERSATION_MESSAGE_EVENTS = frozenset({"user.message.created", "assistant.message.completed"})
+# Every call a script makes over the bridge is identified under this prefix
+# (ADR-0342). No provider's call identifier starts with it.
+BRIDGED_CALL_ID_PREFIX = "bridge:"
 SCHEDULE_INSTRUCTION_EVENT_TYPE = "user.message.created"
 SCHEDULE_INSTRUCTION_ACTOR_TYPE = "scheduler"
 # ADR-0325: the platform's note that a call placed from this conversation ended.
@@ -129,6 +132,26 @@ def is_context_only_seed_event(event: EventEnvelope) -> bool:
         event.event_type == SCHEDULE_INSTRUCTION_EVENT_TYPE
         and event.actor_type in CONTEXT_ONLY_SEED_ACTOR_TYPES
     )
+
+
+def history_items(event: EventEnvelope) -> list[ConversationItem]:
+    """The conversation items an event adds to its session's history.
+
+    A call a script made over the bridge is recorded like any other call, for
+    audit and for replay, but the model never proposed it and its result went
+    to the script. History holds the model's conversation, so that result is
+    no part of it (ADR-0342 decision 5). A history that kept it would hold a
+    result without a call, which no model request may carry.
+    """
+
+    call_id = event.payload.get("call_id")
+    if (
+        event.event_type in TOOL_RESULT_EVENTS
+        and isinstance(call_id, str)
+        and call_id.startswith(BRIDGED_CALL_ID_PREFIX)
+    ):
+        return []
+    return conversation_items(event)
 
 
 def conversation_items(event: EventEnvelope) -> list[ConversationItem]:

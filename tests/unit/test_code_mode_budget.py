@@ -17,6 +17,7 @@ import pytest
 from agent_core.adapters.determinism import SystemClock
 from agent_core.application.public_services import _run_view
 from agent_core.bootstrap import build
+from agent_core.context.history import validate_tool_pairs
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.delegations import derive_child_limits
 from agent_core.domain.errors import DelegationValidationError
@@ -27,6 +28,7 @@ from agent_core.domain.messages import (
     ScriptedTurn,
     StopReason,
     TextPart,
+    ToolResultItem,
 )
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass
 from agent_core.domain.runs import Run, RunCheckpoint, RunLimits, RunStatus, Step
@@ -98,8 +100,11 @@ def _source(call_id: str) -> str:
     return f"print('the {call_id} script')"
 
 
-def _turn(*calls: tuple[str, str]) -> ScriptedTurn:
+def _turn(*calls: tuple[str, str], reasoning: bool = False) -> ScriptedTurn:
     return ScriptedTurn(
+        # What a reasoning model returns with its tool calls; the next request
+        # must carry it back beside them.
+        provider_reasoning_payload={"id": "rs_script", "summary": []} if reasoning else None,
         tool_calls=[
             ScriptedToolCall(
                 name=name,
@@ -585,3 +590,36 @@ async def test_a_recovered_checkpoint_keeps_the_run_s_refunded_steps() -> None:
 
     # Two steps were given back, so the run's second counted step is its fourth.
     assert step_number_at(refunded.step_count + 1, seeded) == 4
+
+
+# --- the conversation ---------------------------------------------------------
+
+
+async def test_a_script_s_own_calls_stay_out_of_the_conversation_history(tmp_path: Path) -> None:
+    ordinary = _Probe(_spec("demo.ordinary"))
+    script = _Script(_RUN_CODE, [["demo.ordinary"] * 2])
+    model = FakeModelScript(
+        turns=[
+            _turn((SANDBOX_RUN_CODE_TOOL_NAME, "script")),
+            ScriptedTurn(text="Done.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    async with build(
+        settings=_settings(tmp_path),
+        script=model,
+        enabled_tools=[SANDBOX_RUN_CODE_TOOL_NAME, "demo.ordinary"],
+    ) as built:
+        registry = cast(StaticToolRegistry, built.tool_pipeline._registry)
+        registry.register(script)
+        registry.register(ordinary)
+        run = await built.runs.get(await built.runs.submit("Run this script."))
+        async with built.uow_factory() as uow:
+            history = await uow.history.catch_up(run.session_id)
+    assert run.status is RunStatus.COMPLETED, run.failure
+    assert ordinary.executions == 2
+
+    # The model proposed one call and was answered once. What the script asked
+    # for went to the script, so a run that reloads this history can go on.
+    results = [item.call_id for item in history.items if isinstance(item, ToolResultItem)]
+    assert results == ["script"]
+    validate_tool_pairs(history.items)

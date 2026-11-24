@@ -38,7 +38,7 @@ from agent_core.domain.events import (
     NewEvent,
     ProcessEvent,
     advances_session_activity,
-    conversation_items,
+    history_items,
     is_context_only_seed_event,
 )
 from agent_core.domain.folders import (
@@ -1474,12 +1474,12 @@ class InMemorySessionHistoryRepository:
 
     @staticmethod
     def _project(session_id: UUID, events: list[EventEnvelope]) -> SessionHistory:
-        items = [item for event in events for item in conversation_items(event)]
+        items = [item for event in events for item in history_items(event)]
         return SessionHistory(
             session_id=session_id,
             through_sequence=events[-1].sequence if events else 0,
             items=items,
-            builder_version="session-history-memory@2",
+            builder_version="session-history-memory@3",
         )
 
     async def catch_up(self, session_id: UUID) -> SessionHistory:

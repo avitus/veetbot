@@ -67,7 +67,12 @@ from agent_core.domain.errors import (
     UserInputRequiredError,
     WorkspaceEscape,
 )
-from agent_core.domain.events import TOOL_CALL_DENIED_PAYLOAD_VERSION, EventEnvelope, NewEvent
+from agent_core.domain.events import (
+    BRIDGED_CALL_ID_PREFIX,
+    TOOL_CALL_DENIED_PAYLOAD_VERSION,
+    EventEnvelope,
+    NewEvent,
+)
 from agent_core.domain.execution import SANDBOX_RUN_CODE_TOOL_NAME
 from agent_core.domain.failures import log_context, log_failure
 from agent_core.domain.job_request_grants import (
@@ -3005,6 +3010,10 @@ def _bridged_call_identity(position_id: str, name: str, arguments: dict[str, Any
         sort_keys=True,
         default=str,
     ).encode("utf-8")
+    # Session history tells a script's call from the model's by this prefix,
+    # which the bridge already gives every position.
+    if not position_id.startswith(BRIDGED_CALL_ID_PREFIX):
+        position_id = BRIDGED_CALL_ID_PREFIX + position_id
     return f"{position_id}:{hashlib.sha256(asked).hexdigest()[:16]}"
 
 

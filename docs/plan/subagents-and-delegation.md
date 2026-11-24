@@ -372,7 +372,7 @@ A child run cannot be inserted into its parent's session: the partial unique
 index that keeps one active run per session admits no row while the parent
 waits in `WAITING_FOR_APPROVAL`, and Section 27.6's "parent's session or a
 dedicated child session per policy" had no policy written
-(readiness.md:1029-1038). The resolution is the one the review log recorded as
+(readiness.md:1034-1038). The resolution is the one the review log recorded as
 a weak preference and ADR-0061 adopted: a dedicated child session, always. The
 index is untouched, which is the point; the branch is deleted rather than
 policed. Child sessions are principal-owned rows carrying the delegation

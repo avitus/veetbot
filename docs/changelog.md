@@ -4,6 +4,26 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-24 — A chat no longer fails after you approve a script (ADR-0342)
+
+- Two chats failed today with an internal error right after an approved
+  script finished. In both, an earlier script of the same request had called
+  a tool.
+- The cause: the calls a script makes are recorded in the event log, and the
+  stored conversation was keeping their results as if the model had made the
+  calls. A run reloads that conversation after an approval. It then held
+  results with no matching call and stopped.
+- A script's own calls now stay out of the stored conversation, as the design
+  already said. They are still recorded and still counted. Chats stored the
+  old way are rebuilt when they are next read.
+- The same fault had a quieter effect: a later message in a chat that had run
+  a tool-calling script lost its earlier turns to a summary. That stops too.
+- Correction: schedules, Telegram and calls do not have their own switch for
+  scripts. A schedule made before 2026-11-23 keeps the command tool until it
+  is re-pinned. One made since has the script tool.
+- Asked a twelve-city time question with no mention of scripts, the model
+  wrote a script by itself and answered correctly.
+
 ## 2026-11-24 — One approval for a job request now covers the job's later run (ADR-0344)
 
 - "Allow for this request" on a job card now covers the later test, save, run

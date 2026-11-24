@@ -18,6 +18,11 @@ unit and gate suites stop at an in-memory composition:
   pending, is safe to retry, and lets the later scripts of the same run start
   under the one approval after a worker restart.
 
+- docs/plan/event-log-and-persistence.md "Projections": a call a script made
+  is recorded but adds nothing to the session's history, so a run that
+  reloads its conversation after an approval can go on. Production runs
+  failed there on 2026-11-24.
+
 The scripts run through the same entry point the sandbox image runs, as a
 subprocess whose bridge is a local socket, so each tool call crosses the real
 bridge session and the real pipeline.
@@ -326,3 +331,46 @@ async def test_approving_a_script_once_over_http_leaves_the_next_script_asking()
         if event.event_type == "tool.call.authorized"
         and event.payload.get("authorization_kind") == GRANT_KIND
     ]
+
+
+async def test_a_run_goes_on_after_an_approval_that_follows_a_scripts_tool_calls() -> None:
+    """A script calls a tool, the next script asks, and the run still answers."""
+    model = FakeModelScript(
+        turns=[
+            _script_turn("first", 'tools.system_current_time(timezone="UTC")\nprint("first")'),
+            _script_turn("second", 'tools.system_current_time(timezone="UTC")\nprint("second")'),
+            _script_turn("third", "print('third')"),
+            _final("All three scripts ran."),
+        ]
+    )
+    async with _build(model) as composition, api_client(composition) as client:
+        run_id = await _ask(client, "Work it out with scripts.", "code-mode-reload")
+        assert await run_worker_once(composition, "code-mode-reload-parker")
+        parked = await client.get(f"/v1/runs/{run_id}")
+        assert parked.json()["status"] == RunStatus.WAITING_FOR_APPROVAL.value, parked.text
+        [card] = await _pending(client, run_id)
+        allowed = await client.post(
+            f"/v1/approvals/{card['id']}/resolve",
+            json={
+                "decision": "approve_for_request",
+                "request_grant": {"tool_name": SANDBOX_RUN_CODE_TOOL_NAME},
+            },
+        )
+        assert allowed.status_code == 200, allowed.text
+        # The resumed worker reloads the conversation from the session's history.
+        assert await run_worker_once(composition, "code-mode-reload-resumer")
+        run = (await client.get(f"/v1/runs/{run_id}")).json()
+        frames = await _frames(client, run_id)
+
+    assert run["status"] == RunStatus.COMPLETED.value, run["failure"]
+    printed = [
+        data["result_item"]["content"][0]["text"]
+        for event, data in frames
+        if event == "tool.call.completed" and data["name"] == SANDBOX_RUN_CODE_TOOL_NAME
+    ]
+    assert printed == ["first\n", "second\n", "third\n"]
+    # Both bridged calls are on the record and in the count; neither is history.
+    assert [data["name"] for event, data in frames if event == "tool.call.completed"].count(
+        TIME_TOOL
+    ) == 2
+    assert run["tool_call_count"] == 5
