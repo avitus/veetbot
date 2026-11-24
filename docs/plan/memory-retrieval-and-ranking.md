@@ -811,7 +811,8 @@ Two tools, both returning `TrustLevel.MEMORY` data:
   current blocks consume the allowance once; historical timestamps remain
   significant. Focused People allocation and complete stored role labels keep
   extra context and shared-topic identity matches from displacing requested facts
-  (ADR-0310). Existing versions retain their original semantics.
+  (ADR-0310). Existing versions retain their original semantics, except that the
+  stored-label requirement now governs every relevance recall (ADR-0348).
   Deliberate results pack whole evidence within both the token budget and the
   configured serialized inline byte allowance before creating their trace receipt.
   Headers and continuation instructions count toward those limits. Generic tool

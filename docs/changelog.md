@@ -4,6 +4,24 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-23 — A question about a relative no longer hides that relative's facts (ADR-0348, proposed)
+
+- When recall decides a question is about one person, it leaves out every fact
+  linked to anyone else. It was choosing the person too easily. A relative
+  recorded only by a role word, such as "mom", was chosen by that word, which
+  hid the facts on the named record of the same relative. A relationship memory
+  that merely shared an ordinary word with the question could choose a
+  different relative. Two loose matches hid every person-linked fact.
+- Recall now chooses a person from a relationship only when the question
+  contains the label that relationship is stored under, and a role-only record
+  is no longer chosen by its role word. When nobody is named, recall runs
+  normally and hides nothing. Two people who are both named still stop recall
+  from combining them.
+- On a copy of production from 2026-11-23, 103 of 114 questions pass instead
+  of 99, and none that passed now fails. Merging the role-only records by hand
+  gained nothing by itself.
+- Built on a local branch and tested in the sandboxes. It awaits your
+  acceptance and is not delivered.
 ## 2026-11-23 — Scripts are on for app chats, and a script may name a tool as the model sees it (ADR-0342)
 
 - Scripts were turned on in production for chats started in the app.
