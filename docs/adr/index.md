@@ -21,6 +21,7 @@ title: Architecture Decisions
 - [ADR-0346: A question's fact is delivered by any live memory that states it (Accepted)](0346-a-fact-is-delivered-by-any-memory-that-states-it.md)
 - [ADR-0347: Verify reviewed browser navigation before advancing (Accepted)](0347-browser-workflow-navigation-verification.md)
 - [ADR-0348: A tie selects a person only when the question names it (Accepted)](0348-a-tie-selects-a-person-only-when-the-question-names-it.md)
+- [ADR-0349: Pack more ranked facts within the turn budget (Proposed)](0349-pack-more-ranked-facts-within-the-turn-budget.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the

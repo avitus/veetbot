@@ -1064,8 +1064,8 @@ the answer window of an otherwise successful browser research run.
 [ADR-0309](../adr/0309-recall-continuity-and-phase-clocks.md) reserves five items
 and 500 tokens for fresh automatic evidence when `memory.search@2.3.0` is pinned.
 Validated whole deliberate blocks share the remaining fifteen items and 1,500
-tokens; unused space remains available to automatic recall. The combined ceiling
-stays twenty items and 2,000 tokens. No automatic evidence is cached across calls.
+tokens; unused space remains available to automatic recall. When a deliberate block is retained,
+the combined ceiling is twenty items and 2,000 tokens. No automatic evidence is cached across calls.
 [ADR-0310](../adr/0310-retain-both-deliberate-searches.md) gives newly pinned
 `memory.search@2.4.0` a seven-item, 750-token limit per deliberate result, so both
 permitted searches fit as validated whole blocks alongside the automatic reserve.
@@ -1078,6 +1078,14 @@ the duplicate's allowance for automatic recall. Historical queries and older
 receipts retain their existing behavior. No returned evidence is truncated.
 New runtime reservations time each durably admitted recall phase separately,
 bounded by the run deadline, so model thinking cannot exhaust a later phase.
+
+[ADR-0349](../adr/0349-pack-more-ranked-facts-within-the-turn-budget.md) proposes
+up to twenty extra slots for ranked beliefs when a current search pin retains
+no deliberate block and an automatic relevance query has its full twenty items
+and 2,000 tokens. The renderer charges every whole belief and any People context
+against the same token budget. Candidate selection, identity discovery and the
+attention-flagged belief quota use the original item count. Overviews, snapshots,
+deltas and deliberate results keep their existing limits.
 
 ## Ports and data model
 

@@ -992,6 +992,12 @@ class HybridMemoryRetriever:
         # they are retrievable and never dominant.
         attention_cap = math.ceil(effective_query.max_items / 3)
         attention_selected = 0
+        fact_limit = effective_query.max_items
+        if (
+            effective_query.profile is RecallProfile.TASK
+            and effective_query.relationship_group is None
+        ):
+            fact_limit += effective_query.extra_fact_slots
         for index, item in enumerate(collapsed):
             durable = item.belief_id in durable_ids
             # Measure what recall would return: markers only beside shown partners.
@@ -1025,7 +1031,7 @@ class HybridMemoryRetriever:
                 + people_rendered
             )
             if (
-                len(selected) + len(selected_people) + held >= effective_query.max_items
+                len(selected) + len(selected_people) + held >= fact_limit
                 or candidate_tokens > effective_query.budget_tokens
             ):
                 dropped.append(item.belief_id)
