@@ -35,6 +35,7 @@ from tests.unit.test_config import base_environment
         "failure",
         "ambiguous",
         "lost_response",
+        "moved",
     ],
 )
 async def test_real_navigation_verification_precedes_any_later_effect(
@@ -79,7 +80,7 @@ async def test_real_navigation_verification_precedes_any_later_effect(
         recipe["steps"][1]["role"] = "button"
         condition = recipe["steps"][0]["postcondition"]
         condition["timeout_ms"] = 1500
-        if mode in {"redirect", "expected_redirect"}:
+        if mode in {"redirect", "expected_redirect", "moved"}:
             condition["evidence"] = {"kind": "location", "url": site.url("/account")}
         monkeypatch.setattr(
             bootstrap,
@@ -114,6 +115,10 @@ async def test_real_navigation_verification_precedes_any_later_effect(
                         "document.querySelector('#ready').innerText = text; }, 100)",
                         text,
                     )
+                if self.observation_count == 1 and mode == "moved":
+                    # The verified page then loads another same-origin page that
+                    # offers the same control, before any target is read.
+                    await runtime._current_page().goto(site.url("/other"))
                 return result
 
             async def act(
@@ -171,11 +176,18 @@ async def test_real_navigation_verification_precedes_any_later_effect(
                 else "unverified"
             )
             assert state["status"] == expected
-            assert state["completed_steps"] == (2 if verified else 0)
+            assert state["completed_steps"] == (2 if verified else 1 if mode == "moved" else 0)
             assert saved.working_state["browser_workflow_report_only"]
             calls = [item for item in saved.conversation if isinstance(item, ToolCallItem)]
             assert calls[1].arguments == {"wait_for": condition}
-            assert sum(call.arguments == {"wait_for": condition} for call in calls) == 1
+            # Verified once, then required again by the read that finds the target;
+            # never repeated after the action, even when its response is lost.
+            waits = [
+                index
+                for index, call in enumerate(calls)
+                if call.arguments == {"wait_for": condition}
+            ]
+            assert waits == ([1, 2] if verified or mode == "moved" else [1])
             assert provider.navigations == [site.url("/entry")]
         assert effects == ([True] if verified else [])
         assert len(provider.actions) == int(verified)

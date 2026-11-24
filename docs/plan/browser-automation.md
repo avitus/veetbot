@@ -2204,7 +2204,10 @@ bindings and verified progress survive suspension; generation changes invalidate
 pending actions. An uncertain dispatched action gets read-only reconciliation,
 then a verified or explicitly unverified stop. Final reporting cannot issue more
 tools. The workflow cap is 64 calls and reserves one ordinary run step for the
-report. These are ceilings, not additional budget allowances.
+report. These are ceilings, not additional budget allowances. A reached ceiling
+refuses pending dispatch and every new call; an observation the last admitted
+call already returned is still read, so a recipe whose final check used that
+call can report `verified`.
 
 [ADR-0328](../adr/0328-browser-workflow-capability-preflight.md) checks the single
 unambiguous intent/origin match against the run's pinned advertised and deferred
@@ -2237,6 +2240,15 @@ sign-in recovery navigation may supply that fresh load only when its URL exactly
 matches the unfinished reviewed navigation; it still needs verification. Preflight
 checks the pinned wait capability even for navigation-only recipes. Omitted conditions
 preserve legacy behavior and identities; no public schema or deployed recipe changes.
+
+An action directly after that navigation repeats the wait in its first target
+read. The runner proposes the action only from an observation that itself
+reports the condition `satisfied`, so the action's revision names a capture
+where the reviewed evidence held. A page that changed since verification stops
+as `observed_failure` or `unverified` before approval or dispatch, with no
+further call. Focus and continuation windows stay bound by the provider to the
+capture before them. A branch that skipped the navigation carries no
+requirement, and the wait is never repeated once the action is sent.
 
 An action's optional `precondition` requests a bounded readiness wait before
 target discovery ([ADR-0333](../adr/0333-browser-workflow-action-readiness.md)).

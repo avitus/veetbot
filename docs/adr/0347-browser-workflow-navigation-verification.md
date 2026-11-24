@@ -80,3 +80,41 @@ Construction evidence in the local Linux ARM64 sandbox:
   all 447 cases in 465.96 seconds, with no skips or warnings. These are local
   construction checks; production and broader W4/W6 live-site acceptance remain
   separate, and the deployed recipe catalog is unchanged.
+
+## Review follow-up
+
+2026-11-24, found in review of pull request 265. Neither repair adds a call, tool
+version, event type or recipe field, and the decisions above stand.
+
+- **The target read keeps the destination evidence.** The verification read and
+  an action's target read were separate observations, so a same-origin page
+  change between them could supply the action's target; the action's revision
+  fence only binds dispatch to the target read. The first target read of an
+  action that directly follows a verified navigation now repeats that
+  navigation's `wait_for`, with or without a `precondition` or `target_region`.
+  The runner proposes the action only from an observation that itself reports
+  the condition `satisfied`, so the revision the action names is a capture where
+  the reviewed evidence held. Otherwise the run stops as `observed_failure` or
+  `unverified` before approval or dispatch, with the navigation still complete.
+  Focus and continuation windows stay bound by the provider to the capture
+  before them, inside the same four-window allowance. A branch that skipped the
+  navigation carries no requirement. Once the action is sent the wait is never
+  repeated. A navigation condition directly followed by an action must therefore
+  describe state that lasts until the target is read.
+- **A bound stops new work, not a finished read.** The time, call and step
+  bounds stopped the loop before it read an observation the last admitted call
+  had already returned, so a recipe whose final verification used the last
+  permitted call ended `bounded_stop`. The runner now reads that observation
+  first. A bound still fails a pending dispatch closed and refuses every new
+  call, and the queue now applies the run's tool-call limit itself. An approved
+  action that used the last permitted call without conclusive evidence therefore
+  stops `bounded_stop`, report-only and unreplayed, where the budget check
+  previously failed the run.
+
+Construction evidence in the local Linux sandbox: six unit cases and one real
+Chromium case first failed because the unrepaired runner requested approval for,
+or looked for a region on, the changed page. Twelve more failed because a reached
+tool-call, step, workflow-call or time bound hid a completed verification, and
+one because the run failed after an action on its last permitted call.
+Afterwards the browser-workflow unit modules passed all 299 cases and the
+real-Chromium workflow modules all 68, eight of them in the navigation module.

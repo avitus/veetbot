@@ -184,12 +184,17 @@ async def test_reviewed_workflow_uses_fresh_targets_and_never_replays_a_lost_wri
     assert checkpoint.working_state["browser_workflow_report_only"]
     from agent_core.domain.messages import ToolCallItem
 
-    assert sum(
-        isinstance(item, ToolCallItem)
-        and item.name == "browser.observe"
-        and item.arguments == {"wait_for": ready_condition}
-        for item in checkpoint.conversation
-    ) == int(readiness) + int(navigation_condition)
+    calls = [item for item in checkpoint.conversation if isinstance(item, ToolCallItem)]
+    waits = [
+        index
+        for index, item in enumerate(calls)
+        if item.name == "browser.observe" and item.arguments == {"wait_for": ready_condition}
+    ]
+    # A conditioned navigation is verified, then required again by the target read.
+    assert len(waits) == int(readiness) + 2 * int(navigation_condition)
+    # Neither wait is repeated once the action is sent, whatever became of its response.
+    sent = [index for index, item in enumerate(calls) if item.name == "browser.act"]
+    assert len(sent) == 1 and all(index < sent[0] for index in waits)
     assert sum(event.event_type == "run.waiting_for_user" for event in events) == int(signed_in)
     assert sum(event.event_type == "user.message.created" for event in events) == 1
     from agent_core.context.history import validate_tool_pairs
