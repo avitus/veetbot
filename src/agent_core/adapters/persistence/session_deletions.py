@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -548,6 +549,20 @@ class PostgresSessionDeletionRepository:
         ).one_or_none()
 
 
+@asynccontextmanager
+async def _held_together(*locks: asyncio.Lock) -> AsyncIterator[None]:
+    """Hold every distinct lock, taken in one stable order and released in reverse."""
+
+    ordered = sorted({id(lock): lock for lock in locks}.values(), key=id)
+    for lock in ordered:
+        await lock.acquire()
+    try:
+        yield
+    finally:
+        for lock in reversed(ordered):
+            lock.release()
+
+
 class InMemorySessionDeletionRepository:
     """Deterministic erasure over the in-process adapter's shared maps."""
 
@@ -690,33 +705,21 @@ class InMemorySessionDeletionRepository:
         run_ids: Sequence[UUID] = (),
         purge_generated: bool = True,
     ) -> PeopleCopyCleanup:
-        locks = sorted(
-            {
-                id(lock): lock
-                for lock in (
-                    self._lock,
-                    self._sessions._lock,
-                    self._events._lock,
-                    self._runs._lock,
-                    self._invocations._lock,
-                    self._checkpoints._lock,
-                    self._artifacts._lock,
-                    self._trajectory_exports._lock,
-                    self._knowledge._lock,
-                    self._traces._lock,
-                )
-            }.values(),
-            key=id,
-        )
-        for lock in locks:
-            await lock.acquire()
-        try:
+        async with _held_together(
+            self._lock,
+            self._sessions._lock,
+            self._events._lock,
+            self._runs._lock,
+            self._invocations._lock,
+            self._checkpoints._lock,
+            self._artifacts._lock,
+            self._trajectory_exports._lock,
+            self._knowledge._lock,
+            self._traces._lock,
+        ):
             return erase_memory_copies_locked(
                 self, principal, record_ids, erased_at, run_ids=run_ids
             )
-        finally:
-            for lock in reversed(locks):
-                lock.release()
 
     async def erase_call_source(
         self, principal: Principal, call_id: str, erased_at: datetime
@@ -727,35 +730,23 @@ class InMemorySessionDeletionRepository:
     async def _erase_call_source_locked(
         self, principal: Principal, call_id: str, erased_at: datetime
     ) -> dict[str, int]:
-        locks = sorted(
-            {
-                id(lock): lock
-                for lock in (
-                    self._lock,
-                    self._sessions._lock,
-                    self._runs._lock,
-                    self._events._lock,
-                    self._invocations._lock,
-                    self._checkpoints._lock,
-                    self._episodes._lock,
-                    self._artifacts._lock,
-                    self._memories._lock,
-                    self._traces._lock,
-                    self._trajectory_exports._lock,
-                    self._knowledge._lock,
-                )
-            }.values(),
-            key=id,
-        )
-        for lock in locks:
-            await lock.acquire()
-        try:
+        async with _held_together(
+            self._lock,
+            self._sessions._lock,
+            self._runs._lock,
+            self._events._lock,
+            self._invocations._lock,
+            self._checkpoints._lock,
+            self._episodes._lock,
+            self._artifacts._lock,
+            self._memories._lock,
+            self._traces._lock,
+            self._trajectory_exports._lock,
+            self._knowledge._lock,
+        ):
             return erase_memory_source_locked(
                 self, principal, "", call_id, frozenset(), erased_at, calling=True
             )
-        finally:
-            for lock in reversed(locks):
-                lock.release()
 
     async def erase_email_source(
         self,
@@ -781,29 +772,20 @@ class InMemorySessionDeletionRepository:
         message_ids: frozenset[str],
         erased_at: datetime,
     ) -> dict[str, int]:
-        locks = sorted(
-            {
-                id(lock): lock
-                for lock in (
-                    self._lock,
-                    self._sessions._lock,
-                    self._runs._lock,
-                    self._events._lock,
-                    self._invocations._lock,
-                    self._checkpoints._lock,
-                    self._episodes._lock,
-                    self._artifacts._lock,
-                    self._memories._lock,
-                    self._traces._lock,
-                    self._trajectory_exports._lock,
-                    self._knowledge._lock,
-                )
-            }.values(),
-            key=id,
-        )
-        for lock in locks:
-            await lock.acquire()
-        try:
+        async with _held_together(
+            self._lock,
+            self._sessions._lock,
+            self._runs._lock,
+            self._events._lock,
+            self._invocations._lock,
+            self._checkpoints._lock,
+            self._episodes._lock,
+            self._artifacts._lock,
+            self._memories._lock,
+            self._traces._lock,
+            self._trajectory_exports._lock,
+            self._knowledge._lock,
+        ):
             before = {
                 key[2]
                 for key in self._people._records
@@ -849,9 +831,6 @@ class InMemorySessionDeletionRepository:
                 sum(len(row.pending_artifact_ids) for row in pending),
             )
             return result
-        finally:
-            for lock in reversed(locks):
-                lock.release()
 
     async def delete(self, session_id: UUID, principal: Principal, deleted_at: datetime) -> bool:
         async with (
@@ -866,38 +845,26 @@ class InMemorySessionDeletionRepository:
         # Every collaborator normally protects its state with its own lock. Take
         # those locks in one stable order so cross-repository discovery and
         # erasure form one deterministic in-memory transaction.
-        locks = sorted(
-            {
-                id(lock): lock
-                for lock in (
-                    self._lock,
-                    self._sessions._lock,
-                    self._runs._lock,
-                    self._events._lock,
-                    self._invocations._lock,
-                    self._approvals._lock,
-                    self._checkpoints._lock,
-                    self._idempotency._lock,
-                    self._usage._lock,
-                    self._trajectory_exports._lock,
-                    self._artifacts._lock,
-                    self._memories._lock,
-                    self._episodes._lock,
-                    self._traces._lock,
-                    self._knowledge._lock,
-                    self._notification_outbox._lock,
-                    self._browser_task_grants._lock,
-                )
-            }.values(),
-            key=id,
-        )
-        for lock in locks:
-            await lock.acquire()
-        try:
+        async with _held_together(
+            self._lock,
+            self._sessions._lock,
+            self._runs._lock,
+            self._events._lock,
+            self._invocations._lock,
+            self._approvals._lock,
+            self._checkpoints._lock,
+            self._idempotency._lock,
+            self._usage._lock,
+            self._trajectory_exports._lock,
+            self._artifacts._lock,
+            self._memories._lock,
+            self._episodes._lock,
+            self._traces._lock,
+            self._knowledge._lock,
+            self._notification_outbox._lock,
+            self._browser_task_grants._lock,
+        ):
             return self._delete_locked(session_id, principal, deleted_at)
-        finally:
-            for lock in reversed(locks):
-                lock.release()
 
     def _delete_locked(self, session_id: UUID, principal: Principal, deleted_at: datetime) -> bool:
         session = self._sessions._sessions.get(session_id)
