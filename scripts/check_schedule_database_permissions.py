@@ -8,7 +8,6 @@ from collections.abc import Mapping
 from scripts.database_role_permissions import (
     DatabaseRole,
     check_database_role,
-    inspect_database_role,
 )
 from scripts.database_role_permissions import (
     permission_failures as role_permission_failures,
@@ -32,7 +31,6 @@ REQUIRED_TABLE_PRIVILEGES: Mapping[str, frozenset[str]] = {
 }
 
 ScheduleDatabaseRole = DatabaseRole
-inspect_schedule_database_role = inspect_database_role
 
 
 def permission_failures(role: ScheduleDatabaseRole) -> list[str]:
