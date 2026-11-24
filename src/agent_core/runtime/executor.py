@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -58,7 +59,12 @@ from agent_core.domain.runs import (
 )
 from agent_core.domain.sessions import Session
 from agent_core.domain.surfaces import SurfaceReply
-from agent_core.domain.tools import ToolInvocationStatus, ToolOutcome, ToolOutcomeStatus
+from agent_core.domain.tools import (
+    ToolInvocation,
+    ToolInvocationStatus,
+    ToolOutcome,
+    ToolOutcomeStatus,
+)
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.ports.context import (
     Compactor,
@@ -118,6 +124,45 @@ type TaskRunner = Callable[[RunContext], Awaitable[RunOutcome | None]]
 type TypedTaskProbe = Callable[[Run, Principal], Awaitable[bool]]
 logger = logging.getLogger(__name__)
 
+_CANCELLED_AWAITING_USER = "The run was cancelled while waiting for user input."
+_CANCELLED_AWAITING_CHILDREN = "The run was cancelled while waiting for delegated children."
+
+
+async def _fail_cancelled_invocation(
+    uow: RepositoryUnitOfWork, invocation: ToolInvocation, message: str, now: datetime
+) -> None:
+    """Close a suspended invocation whose run was cancelled: it fails with a
+    platform result that says what the run was waiting for."""
+
+    outcome = ToolOutcome(
+        status=ToolOutcomeStatus.FAILED,
+        action=invocation.tool_name,
+        reason_code="tool.run_cancelled",
+        message=message,
+        retryable=False,
+        remediation="none",
+    )
+    await uow.invocations.transition(
+        invocation.id,
+        ToolInvocationStatus.RUNNING,
+        invocation.model_copy(
+            update={
+                "status": ToolInvocationStatus.FAILED,
+                "suspended_kind": None,
+                "suspended_ref": None,
+                "outcome": outcome,
+                "result_item": ToolResultItem(
+                    call_id=invocation.call_id,
+                    content=[TextPart(text=outcome.message)],
+                    is_error=True,
+                    trust=TrustLevel.PLATFORM,
+                ),
+                "updated_at": now,
+            },
+            deep=True,
+        ),
+    )
+
 
 class SurfaceRunStateWriter:
     """Minimal run-state writer for the credential-isolated surface process."""
@@ -145,33 +190,8 @@ class SurfaceRunStateWriter:
                     or invocation.suspended_kind != "user_input"
                 ):
                     continue
-                outcome = ToolOutcome(
-                    status=ToolOutcomeStatus.FAILED,
-                    action=invocation.tool_name,
-                    reason_code="tool.run_cancelled",
-                    message="The run was cancelled while waiting for user input.",
-                    retryable=False,
-                    remediation="none",
-                )
-                await uow.invocations.transition(
-                    invocation.id,
-                    ToolInvocationStatus.RUNNING,
-                    invocation.model_copy(
-                        update={
-                            "status": ToolInvocationStatus.FAILED,
-                            "suspended_kind": None,
-                            "suspended_ref": None,
-                            "outcome": outcome,
-                            "result_item": ToolResultItem(
-                                call_id=invocation.call_id,
-                                content=[TextPart(text=outcome.message)],
-                                is_error=True,
-                                trust=TrustLevel.PLATFORM,
-                            ),
-                            "updated_at": self._clock.now(),
-                        },
-                        deep=True,
-                    ),
+                await _fail_cancelled_invocation(
+                    uow, invocation, _CANCELLED_AWAITING_USER, self._clock.now()
                 )
         cancelled = await uow.runs.transition(run.id, run.status, RunStatus.CANCELLED)
         await uow.events.append(
@@ -246,34 +266,7 @@ class SurfaceRunStateWriter:
             )
         now = self._clock.now()
         for invocation in suspended:
-            outcome = ToolOutcome(
-                status=ToolOutcomeStatus.FAILED,
-                action=invocation.tool_name,
-                reason_code="tool.run_cancelled",
-                message="The run was cancelled while waiting for delegated children.",
-                retryable=False,
-                remediation="none",
-            )
-            await uow.invocations.transition(
-                invocation.id,
-                ToolInvocationStatus.RUNNING,
-                invocation.model_copy(
-                    update={
-                        "status": ToolInvocationStatus.FAILED,
-                        "suspended_kind": None,
-                        "suspended_ref": None,
-                        "outcome": outcome,
-                        "result_item": ToolResultItem(
-                            call_id=invocation.call_id,
-                            content=[TextPart(text=outcome.message)],
-                            is_error=True,
-                            trust=TrustLevel.PLATFORM,
-                        ),
-                        "updated_at": now,
-                    },
-                    deep=True,
-                ),
-            )
+            await _fail_cancelled_invocation(uow, invocation, _CANCELLED_AWAITING_CHILDREN, now)
 
     async def requeue_after_approval(
         self,
@@ -519,35 +512,8 @@ class RunExecutor:
                     or invocation.suspended_kind != "user_input"
                 ):
                     continue
-                outcome = ToolOutcome(
-                    status=ToolOutcomeStatus.FAILED,
-                    action=invocation.tool_name,
-                    reason_code="tool.run_cancelled",
-                    message="The run was cancelled while waiting for user input.",
-                    retryable=False,
-                    remediation="none",
-                )
-                result_item = ToolResultItem(
-                    call_id=invocation.call_id,
-                    content=[TextPart(text=outcome.message)],
-                    is_error=True,
-                    trust=TrustLevel.PLATFORM,
-                )
-                failed = invocation.model_copy(
-                    update={
-                        "status": ToolInvocationStatus.FAILED,
-                        "suspended_kind": None,
-                        "suspended_ref": None,
-                        "outcome": outcome,
-                        "result_item": result_item,
-                        "updated_at": self._clock.now(),
-                    },
-                    deep=True,
-                )
-                await uow.invocations.transition(
-                    invocation.id,
-                    ToolInvocationStatus.RUNNING,
-                    failed,
+                await _fail_cancelled_invocation(
+                    uow, invocation, _CANCELLED_AWAITING_USER, self._clock.now()
                 )
         cancelled = await uow.runs.transition(run.id, run.status, RunStatus.CANCELLED)
         await uow.events.append(
@@ -626,35 +592,7 @@ class RunExecutor:
             )
         now = self._clock.now()
         for invocation in suspended:
-            outcome = ToolOutcome(
-                status=ToolOutcomeStatus.FAILED,
-                action=invocation.tool_name,
-                reason_code="tool.run_cancelled",
-                message="The run was cancelled while waiting for delegated children.",
-                retryable=False,
-                remediation="none",
-            )
-            failed = invocation.model_copy(
-                update={
-                    "status": ToolInvocationStatus.FAILED,
-                    "suspended_kind": None,
-                    "suspended_ref": None,
-                    "outcome": outcome,
-                    "result_item": ToolResultItem(
-                        call_id=invocation.call_id,
-                        content=[TextPart(text=outcome.message)],
-                        is_error=True,
-                        trust=TrustLevel.PLATFORM,
-                    ),
-                    "updated_at": now,
-                },
-                deep=True,
-            )
-            await uow.invocations.transition(
-                invocation.id,
-                ToolInvocationStatus.RUNNING,
-                failed,
-            )
+            await _fail_cancelled_invocation(uow, invocation, _CANCELLED_AWAITING_CHILDREN, now)
 
     async def execute(self, run_id: UUID) -> None:
         """Execute an in-process queued run after its creating commit."""
