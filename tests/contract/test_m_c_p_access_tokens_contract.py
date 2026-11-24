@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
-from agent_core.adapters.mcp.sealing import AESGCMSecretSealer
+from agent_core.adapters.sealing import AESGCMSecretSealer
 from agent_core.application.mcp_servers import MCPServerSettingsService
 from agent_core.domain.mcp import MCPServerAccess
 from agent_core.ports.mcp import MCPAccessTokens
