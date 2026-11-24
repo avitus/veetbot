@@ -245,6 +245,14 @@ records the contract and construction evidence. This does not claim hidden or
 virtualized rows are complete, change deployed recipes or establish live-site
 acceptance.
 
+The next W4/W6 slice verifies reviewed navigation outcomes before completing a
+step or starting later work. An optional expected-page condition uses a separate
+bounded observation, so an unexpected same-origin redirect cannot masquerade as
+verified navigation. Positive failure and inconclusive evidence retain distinct
+stops; sign-in resumption preserves earlier completed effects. ADR-0347 records
+the contract and construction evidence. Deployed recipes and broader live-site
+acceptance remain unchanged.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12

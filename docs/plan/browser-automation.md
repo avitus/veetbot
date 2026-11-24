@@ -2221,6 +2221,23 @@ differences never disambiguate matching intents. Started workflows retain their
 existing resume and binding rules, and actual calls still revalidate current
 policy, schemas, budgets, revisions and approvals.
 
+A navigation step may declare an optional `postcondition`
+([ADR-0347](../adr/0347-browser-workflow-navigation-verification.md)). After a
+successful, uninterrupted, same-origin navigation, a separate ordinary
+`browser.observe(wait_for=...)` in the persisted `verify_navigation` phase must
+return satisfied evidence before the step completes or later work begins.
+Declared positive failure stops as `observed_failure`; missing/conflicting or
+failed verification stops `unverified`, with authentication retaining its existing
+suspension and verified resumption. A same-origin redirect or quiet page is not
+itself proof of the expected destination state. The read uses the existing
+five-second/21-read bound and ordinary workflow/run budgets; it cannot retry a
+navigation on verification failure or replay earlier actions. A generation change
+restarts only unfinished reading, preserving completed steps. An already-queued
+sign-in recovery navigation may supply that fresh load only when its URL exactly
+matches the unfinished reviewed navigation; it still needs verification. Preflight
+checks the pinned wait capability even for navigation-only recipes. Omitted conditions
+preserve legacy behavior and identities; no public schema or deployed recipe changes.
+
 An action's optional `precondition` requests a bounded readiness wait before
 target discovery ([ADR-0333](../adr/0333-browser-workflow-action-readiness.md)).
 The runner queues an ordinary `browser.observe(wait_for=...)`; only `satisfied`
