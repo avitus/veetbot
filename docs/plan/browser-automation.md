@@ -2204,7 +2204,10 @@ bindings and verified progress survive suspension; generation changes invalidate
 pending actions. An uncertain dispatched action gets read-only reconciliation,
 then a verified or explicitly unverified stop. Final reporting cannot issue more
 tools. The workflow cap is 64 calls and reserves one ordinary run step for the
-report. These are ceilings, not additional budget allowances.
+report. These are ceilings, not additional budget allowances. A reached ceiling
+refuses pending dispatch and every new call; an observation the last admitted
+call already returned is still read, so a recipe whose final check used that
+call can report `verified`.
 
 [ADR-0328](../adr/0328-browser-workflow-capability-preflight.md) checks the single
 unambiguous intent/origin match against the run's pinned advertised and deferred
@@ -2220,6 +2223,48 @@ planning with no partial execution or report-only restriction. Capability
 differences never disambiguate matching intents. Started workflows retain their
 existing resume and binding rules, and actual calls still revalidate current
 policy, schemas, budgets, revisions and approvals.
+
+A navigation step may declare an optional `postcondition`
+([ADR-0347](../adr/0347-browser-workflow-navigation-verification.md)). After a
+successful, uninterrupted, same-origin navigation, a separate ordinary
+`browser.observe(wait_for=...)` in the persisted `verify_navigation` phase must
+return satisfied evidence before the step completes or later work begins.
+Declared positive failure stops as `observed_failure`; missing/conflicting or
+failed verification stops `unverified`, with authentication retaining its existing
+suspension and verified resumption. A same-origin redirect or quiet page is not
+itself proof of the expected destination state. The read uses the existing
+five-second/21-read bound and ordinary workflow/run budgets; it cannot retry a
+navigation on verification failure or replay earlier actions. A generation change
+restarts only unfinished reading, preserving completed steps. An already-queued
+sign-in recovery navigation may supply that fresh load only when its URL exactly
+matches the unfinished reviewed navigation; it still needs verification. Preflight
+checks the pinned wait capability even for navigation-only recipes. Omitted conditions
+preserve legacy behavior and identities; no public schema or deployed recipe changes.
+
+An action directly after that navigation repeats the wait in its first target
+read. The runner proposes the action only from an observation that itself
+reports the condition `satisfied`, so the action's revision names a capture
+where the reviewed evidence held. A page that changed since verification stops
+as `observed_failure` or `unverified` before approval or dispatch, with no
+further call. A branch that skipped the navigation carries no requirement, and
+the wait is never repeated once the action is sent.
+
+Only that first window carries the evidence, so the action takes its target
+from it alone. A focus or continuation read is a fresh capture of the live
+page: the provider ties it to the capture before it (the exact revision for
+`region_ref`, a reference or cursor only the latest capture issued for `after`
+and `cursor`) and to the same document, counting history moves, but compares no
+page content. Every pinned `browser.observe` version rejects `wait_for` combined
+with a continuation, so a later window cannot repeat the wait. The runner
+therefore issues no focus or continuation read for this action. A target beyond
+the first control window stops as `target_not_observed`, and a `target_region`
+action stops as `unverified` once its region is matched, both before approval.
+That is the cost: such targets cannot be acted on directly after a conditioned
+navigation. No deployed recipe declares a navigation condition, and actions in
+any other position keep their later windows. Letting later windows carry or
+re-prove the evidence (a local check, an observe version that accepts `wait_for`
+with a continuation, or provider capture identity) is undecided and left open in
+ADR-0347.
 
 An action's optional `precondition` requests a bounded readiness wait before
 target discovery ([ADR-0333](../adr/0333-browser-workflow-action-readiness.md)).

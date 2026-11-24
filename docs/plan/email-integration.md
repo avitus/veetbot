@@ -100,7 +100,7 @@ the explicit ids `gmail_{account_id}_read`, `gmail_{account_id}_write`, and
 
 `gmail_write`:
 
-- `create_draft(to, cc?, bcc?, subject, body, thread_id?)` — a draft,
+- `create_draft(to, cc?, bcc?, subject, body, thread_id?, in_reply_to?, references?)` — a draft,
   optionally attached to an existing thread as a reply.
 - `modify_labels(thread_ids[], add_label_ids?, remove_label_ids?)` — batch
   label changes over at most twenty-five threads; archive is removing
@@ -112,7 +112,7 @@ the explicit ids `gmail_{account_id}_read`, `gmail_{account_id}_write`, and
 
 `gmail_send`:
 
-- `send_message(to, cc?, bcc?, subject, body, thread_id?)` — sends one
+- `send_message(to, cc?, bcc?, subject, body, thread_id?, in_reply_to?, references?)` — sends one
   plain-text message, threading as a reply when `thread_id` is given. There
   is deliberately no send-a-draft tool: a send is proposed by value, so the
   complete outbound content sits in the proposed action's arguments where the
@@ -264,11 +264,11 @@ The default deterministic matrix already decides this milestone's actions:
 downgrade the write or send decision for these servers (ADR-0071 decision 8);
 standing grants remain roadmap B8.
 
-One condition must learn one shape it does not yet hold. `host_on_allowlist`
-recognizes only the web-provider and browser-provider fixed targets, so every
+One condition had to learn one shape it did not hold. `host_on_allowlist`
+recognized only the web-provider and browser-provider fixed targets, so every
 `NETWORK_READ` tool executing against an `mcp` target — including the
-adapter's own `read_resource` — is denied by the default ruleset today. The
-condition gains an MCP arm: it holds for an `mcp` target when the executing
+adapter's own `read_resource` — was denied by the default ruleset. The
+condition gained an MCP arm: it holds for an `mcp` target when the executing
 tool's specification declares `NETWORK_READ` and `READ_ONLY`. The
 justification is the web-provider arm's own: that classification is
 operator-declared at configuration time and can never be model-authored or
@@ -279,7 +279,7 @@ the worker no outbound reach it did not already have, and leaves the
 destination that ultimately serves a read governed on its own path — the
 operator-configured command line for stdio, the platform's own no-redirect
 HTTP transport and the egress allowlist for HTTP. A model-authored argument
-can select neither. The arm lands with the change that implements it, amending
+can select neither. The arm landed with the change that implemented it, amending
 [policy-and-approvals.md](policy-and-approvals.md) in the same commit, and
 every non-read MCP call remains exactly as gated as before.
 
@@ -289,7 +289,7 @@ Nothing here runs with networking disabled, and the specification says which
 process is which rather than leaving it to be inferred. The Milestone 8
 adapter spawns a stdio server as an ordinary child process of the worker, and
 [tool-system.md](tool-system.md) states the consequence
-(tool-system.md:1155-1157): a stdio child inherits the worker's network
+(tool-system.md:1157-1159): a stdio child inherits the worker's network
 position, which in this platform is a privileged one, which is why stdio
 servers are operator-configured only. The restriction that applies to the
 worker is that the worker itself dials nothing on a `gmail_*` call; the child
@@ -407,21 +407,21 @@ request has been dispatched, and the corpus already owns the machinery that
 says so. The executor watermarks every call whose side effect is not `NONE`
 before the tool implementation runs — the conservative rule
 [ADR-0040](../adr/0040-milestone-4-policy-and-tool-seams.md) records and
-`mark_effect_sent` implements (tool-system.md:726-729) — so `effect_sent_at`
+`mark_effect_sent` implements (tool-system.md:728-731) — so `effect_sent_at`
 is set on every write and send before its request leaves the worker, and the
 recovery table's answer for a `NON_IDEMPOTENT` call whose watermark is set is
-`UNCERTAIN` (tool-system.md:741). A rate limit, a 5xx, or a lost response
+`UNCERTAIN` (tool-system.md:743). A rate limit, a 5xx, or a lost response
 observed after dispatch is therefore reported by the server as the
 undetermined-outcome code, resolves to the platform's `uncertain` outcome with
-`tool.outcome_unknown` and `retryable: false` (tool-system.md:904-908), and is
+`tool.outcome_unknown` and `retryable: false` (tool-system.md:906-910), and is
 blocked from being proposed again in the run by the unified breaker's
-threshold-of-one row (tool-system.md:947). This is the rule
+threshold-of-one row (tool-system.md:949). This is the rule
 [tool-system.md](tool-system.md) already applies to a mid-session 401 arriving
-after the watermark (tool-system.md:2108-2110) and the one
+after the watermark (tool-system.md:2110-2112) and the one
 [browser-automation.md](browser-automation.md) reached for the same reason
 (browser-automation.md:1486-1490), generalized from those two cases to every
-failure a dispatched non-idempotent MCP call can return. It lands as an
-amendment to [tool-system.md](tool-system.md) in the change that implements
+failure a dispatched non-idempotent MCP call can return. It landed as an
+amendment to [tool-system.md](tool-system.md) in the change that implemented
 it, keyed on the declared idempotency class rather than on any `gmail_*` name,
 because a rule that named this milestone's servers would be a rule the next
 non-idempotent server does not get.
@@ -598,7 +598,9 @@ milestone. It widens the read server's closed header projection by one bounded
 `bulk` block on thread summaries and adds one application-only read tool,
 `get_unsubscribe`. The roster above carries the `bulk` block, and
 `get_unsubscribe` joins the application-only synchronization tools Milestone
-26 added, never advertised to a model. The package still dials only its two
+26 added, never advertised to a model. The application-only `get_thread_page`
+also names each message's `sender_check`, `list_id` and `unsubscribe_offer`,
+never an unsubscribe address. The package still dials only its two
 fixed endpoints, follows no
 redirect, and imports nothing from `agent_core`: the unsubscribe request is
 sent by a builtin tool through the platform's own egress proxy and never by

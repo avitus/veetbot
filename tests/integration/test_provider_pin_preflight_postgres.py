@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
@@ -62,14 +64,22 @@ async def test_deployment_inventory_covers_every_active_state_and_ignores_termin
 async def test_tenant_filtered_database_role_cannot_report_false_compatibility() -> None:
     settings = database_settings()
     engine = create_engine(settings.database_url)
+    # The role signs in with its own password, so the test does not depend on
+    # the server trusting the connection's address (CI's localhost is trusted;
+    # a database reached over a container network is not).
+    password = uuid4().hex
     try:
         async with engine.begin() as connection:
-            await connection.execute(text("CREATE ROLE pin_preflight_reader LOGIN"))
+            await connection.execute(
+                text(f"CREATE ROLE pin_preflight_reader LOGIN PASSWORD '{password}'")
+            )
             await connection.execute(text("GRANT SELECT ON runs TO pin_preflight_reader"))
             # Runs normally use repository scoping. Exercise the guard against
             # a database policy that would otherwise silently hide all rows.
             await connection.execute(text("ALTER TABLE runs ENABLE ROW LEVEL SECURITY"))
-        restricted_url = make_url(settings.database_url).set(username="pin_preflight_reader")
+        restricted_url = make_url(settings.database_url).set(
+            username="pin_preflight_reader", password=password
+        )
         with pytest.raises(DBAPIError, match="row-level security"):
             await inspect_provider_pins(restricted_url.render_as_string(hide_password=False))
     finally:

@@ -6,7 +6,7 @@ import base64
 
 import pytest
 
-from agent_core.adapters.mcp.sealing import AESGCMSecretSealer
+from agent_core.adapters.sealing import AESGCMSecretSealer
 from agent_core.ports.mcp import SecretSealer
 
 KEY = base64.urlsafe_b64encode(bytes(range(32))).decode("ascii")

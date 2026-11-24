@@ -6,8 +6,9 @@ It is a transport-only client of the public `/v1` HTTP API; the shared core
 remains authoritative for sessions, runs, approvals, events, and artifacts.
 
 Open `Veetbot.xcodeproj` in a full Xcode installation and select an iOS or macOS
-destination. Before the first signed build, select the `Veetbot` target, open
-Signing & Capabilities, and choose your Apple development team. The target has
+destination. The tracked project names the owner's development team; another
+developer selects the `Veetbot` target before the first signed build, opens
+Signing & Capabilities, and chooses their own team. The target has
 no third-party dependencies. On first launch, enter an HTTPS API base URL and a
 static bearer token. The base URL is stored as a preference; the token is stored
 only in Keychain.
@@ -17,7 +18,8 @@ conversation history load. Settings appears only after startup determines that
 the connection is missing or cannot be restored. Sending and attaching files
 remain disabled until the connection is ready, including file drops into the
 composer; drafts can be typed while it loads. Settings is also available from
-the sidebar.
+the Mac window toolbar (the sidebar's bottom row in Email) and from the More
+menu on iPhone and iPad.
 
 After a connection is configured, the application delegate requests notification
 permission and registers with APNs. A client-minted installation identifier is
@@ -67,7 +69,9 @@ references, subject to the same 32 MiB upload limit. The server includes UTF-8
 SVG source in the model context as untrusted text, within the text-attachment
 budget; it does not rasterize SVGs for model vision. A server
 without the upload route shows each file as not accepted, and an answer to a
-clarifying question stays text: staged files wait for the next message.
+clarifying question stays text: staged files wait for the next message. The
+same holds for a follow-up sent while a run is working, which joins that run
+when the server allows it (ADR-0324; see `docs/apple-client.md`).
 
 A file the agent exports arrives as a button under its answer and opens the
 artifact viewer with a preview and Download (ADR-0122). On Mac, the viewer uses
@@ -80,7 +84,8 @@ Markdown symbols), and Select Text, which opens the message in a native text vie
 where any range can be selected.
 
 Settings shows one group at a time — Connection, Models, Website access, MCP
-servers, Notifications, Appearance, SMS integration (iOS) and Data & privacy —
+servers, Integration keys, Notifications, Appearance, SMS integration (iOS) and
+Data & privacy —
 from a sidebar on Mac and iPad and a list on iPhone. The Connect or Update Connection action sits in
 the Connection card, while device-local text-size and font-style controls save
 automatically and apply immediately throughout the client. The Models card reads
@@ -98,7 +103,7 @@ draft history and send review, 560 for call results and 540 for email learning.
 On compact iOS layouts, the sidebar exposes Memory, Schedules, Persona, and
 Settings in an accessible More menu. Regular-width iPad puts global utilities
 in the active mode’s top-right More menu, also including People.
-Below New conversation, a collapsible Recent chats section lists the five most
+Below search and New chat, a collapsible Recent section lists the five most
 recently active chats, including those inside closed folders; a schedule with
 two or more sessions collapses into one row in the Scheduled section
 (ADR-0113). In Memory, the flag toggle shows memories that need review, and a
@@ -160,7 +165,11 @@ two hundred actions. A banner above the composer counts them, and Stop ends
 the permission at once; Website Access lists active permissions in a compact
 Task permissions row whose menu stops each one. Passwords, payments,
 purchases, account changes and messages still ask every time. The card shows the
-site scope, limits and exceptions before the task permission is selected.
+site scope, limits and exceptions before the task permission is selected. When
+the server instead offers one approval for the request (ADR-0302), the card
+leads with Allow for this request beside Allow once and Deny. A generic
+approval card makes the same offer, beside Approve once and Deny, for the
+scripts of a request (ADR-0342) and for changes to one saved job (ADR-0344).
 
 When automatic Email processing reaches its budget, the sidebar shows a compact
 pause reason, the next check time, and Check again. Details expands the daily and
@@ -324,8 +333,9 @@ Adjacent terminal tool calls share one compact, expandable summary, including
 alternating tools or Gmail accounts and mixed successful/failed outcomes. The
 summary shows total calls and outcome counts together and uses the highest risk.
 Expanding reveals every exact tool name, status, argument, result, and individual
-risk. Messages, unknown names, approvals, unfinished calls, denials, and uncertain
-outcomes remain separate. Error results are counted as failed, including when the
+risk. Messages, unknown names, pending approvals, unfinished calls, policy
+denials, and uncertain outcomes remain separate; a call the owner denied at its
+approval joins the summary as denied. Error results are counted as failed, including when the
 wire event says completed; corrected retries retain their specific status.
 On iOS, tapping Send or pressing Return immediately clears the submitted draft
 and dismisses the software keyboard, before waiting for the server. A persistent

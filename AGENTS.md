@@ -98,10 +98,10 @@ checks it per commit; no trailer means lane A.
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
 - Milestones 0 through 14, 16, 17, 19, 20, 22, 23, and 29 are complete. Milestone 15 proceeds next (ADR-0061);
-  18 through 35 are parallel workstreams (ADRs in project state). Scope: 21 memory distillation; 22 persona; 23 schedule lifecycle;
+  16 through 35 are parallel workstreams (ADRs in project state). Scope: 21 memory distillation; 22 persona; 23 schedule lifecycle;
   24 SMS via the owner's iPhone; 25 WhatsApp business; 26 client modes and email; 27 Bland calling; 28 People memory;
   29 chat folders, typed judgment; 30 advisory approval; 31 email unsubscribe; 32 memory reconsolidation (unattended activation
-  evidence-gated, ADRs 0169/0174); 33 recall (ADR-0178, activation needs evidence); 34 owner records (ADR-0239); 35 Cockpit (ADR-0240). Model routing and other roadmap items are not authorized. Open items: `docs/status/milestones.md`.
+  evidence-gated, ADRs 0169/0174); 33 recall (ADR-0178, evidence-gated; ADR-0290); 34 owner records (ADR-0239); 35 Cockpit (ADR-0240). Model routing and other roadmap items are not authorized. Open items: `docs/status/milestones.md`.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
 - Prefer the smallest coherent implementation that satisfies the active acceptance criteria.

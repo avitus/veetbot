@@ -84,8 +84,10 @@ unknown until discovered; a record or passage cap reports partial coverage.
 Unavailable bodies, changed messages, and provider failures do not count as a
 complete mailbox. Cancellation fences further source registration and analysis.
 Resume a failed or paused job through its saved receipt; unresolved model charges
-must be settled before a retry can spend more. Synthetic tests exercise these
-paths without accessing a live mailbox.
+must be settled before a retry can spend more. An import is bound to the People
+implementation it was previewed under: a release that changes that
+implementation stops an open import and refuses its resume, so start a new
+import. Synthetic tests exercise these paths without accessing a live mailbox.
 
 `waiting_for_chat` means the import yielded to this owner's foreground work.
 Progress and reservations remain saved; the next background slice is scheduled
@@ -228,7 +230,9 @@ With `--confirm` the repair runs three steps:
 
 1. It projects the headers of retained mail from the last 90 days again, one
    message per transaction and without model calls. Bulk, excluded,
-   suppressed, and unverifiable mail is skipped and counted.
+   suppressed, and unverifiable mail is skipped and counted. The same pass
+   records the contact details a known sender's own signature states, only
+   where Gmail's sender check passed (ADR-0336).
 2. It adds the owner-confirmed name aliases, recorded as owner assertions in
    a new People management session.
 3. It removes each listed person that still qualifies, in its own transaction
@@ -286,9 +290,9 @@ things:
   correspondents share;
 - withdraws suggestions that no longer match.
 
-The owner answers suggestions in the People browser under Needs review. A
-dismissed suggestion, an undone merge, or a split keeps that pair apart for
-good.
+The owner answers suggestions in the People browser under Possible
+duplicates, with Merge or Keep separate. A dismissed suggestion, an undone
+merge, or a split keeps that pair apart for good.
 
 Entries named like a group, service or address, such as “Investment Team”,
 stay until the directory repair runs again. Rerun `agent people

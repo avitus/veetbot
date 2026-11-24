@@ -26,7 +26,7 @@ platform through the native client.
 
 The retrieval design already drew the line this milestone builds on. A recall
 trace explains one answer; browsing everything the agent believes is *a
-different surface* (memory-retrieval-and-ranking.md:875-876), and that surface
+different surface* (memory-retrieval-and-ranking.md:881-882), and that surface
 has never existed anywhere but the command line. Milestone 17 builds it: two
 GET routes, one exact scope, one default-off flag, and a browser in the Apple
 client.
@@ -67,7 +67,7 @@ find it here should find the reason here.
    not safe behind a route at any ceiling. That predicate must be added, and
    the trace store's contract suite must observe it, before a trace route is
    designed. Beyond the defect, a trace view owes the minimum-of-two-ceilings
-   rule (memory-retrieval-and-ranking.md:880-886), which is a second ceiling
+   rule (memory-retrieval-and-ranking.md:886-892), which is a second ceiling
    mechanism in a milestone whose whole ceiling story is one parameter.
 3. **Consolidation and formation audit routes.** `formations` and `diagnose`
    expose model selection, watermarks, and attempt audits — operator-tier
@@ -193,11 +193,11 @@ because its corrections belong to reconsolidation (ADR-0224).
 the supplied ceiling, that belongs to another principal or another tenant, or
 that does not exist at all is uniformly `not_found` with status 404. This
 extends the existing cross-tenant-404 rule
-(http-api-and-streaming.md:336-354) to the ceiling, because the alternative
+(http-api-and-streaming.md:350-368) to the ceiling, because the alternative
 distinguishes *exists but is too sensitive for you* from *does not exist*, and
 that distinction is an oracle over the subject line of every restricted belief.
 Transparency must not become a disclosure path
-(memory-retrieval-and-ranking.md:880-886).
+(memory-retrieval-and-ranking.md:886-892).
 
 ### `GET /v1/memories/{memory_id}/evidence`
 
@@ -327,7 +327,7 @@ integer is refused, as `malformed_request`.
 The four pagination rules stated in
 [http-api-and-streaming.md](http-api-and-streaming.md) — keyset never offset,
 opaque base64url, `limit` defaulting to 50 and capping at 200, `next_cursor`
-null on the last page (http-api-and-streaming.md:1862-1879) — apply unchanged.
+null on the last page (http-api-and-streaming.md:1894-1911) — apply unchanged.
 This surface fixes their two free parameters:
 
 ```text
@@ -466,8 +466,9 @@ the device surface.
   review queue through the `flagged` parameter. A row can be swiped to delete,
   behind a confirmation, and the detail view carries a Review menu with Looks
   right (the `dismiss` outcome), Still true (`confirm`, ADR-0247, also offered
-  for a retired belief), Not true, Not relevant here, and Delete; a
-  flagged belief also asks "Is this right?" with those three as buttons. On the
+  for a retired belief), Edit wording (`changed`, ADR-0224), Not true, Not
+  relevant here, and Delete; a flagged belief also asks "Is this right?" with
+  Looks right, Fix the wording, Not true and Not relevant here as buttons. On the
   Mac a group sidebar (Review, Browse by type, Maintenance) replaces the
   collection picker and the review and type filters. Each action sends a fresh
   idempotency key, removes or replaces the row from the server's response, and
@@ -476,7 +477,8 @@ the device surface.
   memory changes yet*, the way browsing already degrades; a belief that is
   person-linked shows the person's name as its subject rather than the raw
   `person:` key. The operator's `agent memory review --outcome` offers the
-  same three review outcomes over the ordinary composition.
+  same five review outcomes (`changed` with `--replacement`) over the ordinary
+  composition.
 - **Rendering.** A row shows the statement as its primary text, subject and
   belief type as secondary text, a text-labeled sensitivity badge, and a
   status tag when the belief's status is not `active`; a belief that is

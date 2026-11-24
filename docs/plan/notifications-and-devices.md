@@ -26,8 +26,8 @@ mechanism behind it, lands the `Device` table the audit placed
 pairing of untrusted senders, no device-scoped tool, no presence-based routing.
 Those are Milestone 14 and the roadmap.
 
-Milestones 10 through 12 are complete.
-Milestone 13 is the next sequential authorized milestone and has not started.
+Milestones 10 through 14 are complete. `docs/status/project-state.yaml` names
+the milestones that proceed now.
 
 ## Scope
 
@@ -420,9 +420,11 @@ For each claimed row it:
    resolved or expired, a question already answered, a run no longer waiting,
    or a session that no longer exists settles the row `superseded` with no
    transport call. A `run_failed` row for a server-marked `email_operational`
-   session is also superseded: its failure belongs to Email refresh status,
-   never a Chat conversation. So is a `run_failed` row for a session marked
-   `cockpit_entry_refresh`: the widget's tile reports a failed refresh on
+   session that records no `email_thread_id` is also superseded: its failure
+   belongs to Email refresh status, never a Chat conversation. An operational
+   session that records its thread is a one-press reply send (ADR-0345); its
+   `run_failed` row is delivered and opens the reply. A `run_failed` row for a
+   session marked `cockpit_entry_refresh` is superseded too: the widget's tile reports a failed refresh on
    entry, and the accountant enqueues no `schedule_run_finished` for one
    (ADR-0320). The triggering event and transactional outbox
    remain audited. Delivered-notification reconciliation applies this same

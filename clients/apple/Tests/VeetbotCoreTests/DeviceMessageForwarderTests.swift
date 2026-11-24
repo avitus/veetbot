@@ -110,12 +110,17 @@ import Testing
     @Test
     func testAFailureInAttemptForwardIsSwallowedRatherThanPropagated() async throws {
         struct BoomError: Error {}
+        let spy = AttemptForwardSpy()
         let runner = ForwardMessageRunner {
+            await spy.recordCall()
             throw BoomError()
         }
 
         // Must not throw: the run() call itself has no `try`.
         await runner.run(integrationEnabled: true)
+
+        // The attempt that failed was really made, and the run ended with it.
+        #expect(await spy.callCount == 1)
     }
 }
 

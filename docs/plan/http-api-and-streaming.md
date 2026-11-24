@@ -174,7 +174,17 @@ rate_limited                429  reserved; see "Limits" below
 
 `rate_limited` is declared and never returned by version 0.1. Fixing its
 shape now is free; discovering after release that clients cannot
-distinguish it from `conflict` is not.
+distinguish it from `conflict` is not. Later bounded owner actions do return
+it, with `details.reason` naming the allowance that ran out: schedule drafts
+and Run now ([scheduling.md](scheduling.md)) and persona previews
+([persona-surface.md](persona-surface.md)).
+
+Three later codes each carry `{"reason": ...}` and nothing else:
+`schedule_validation_error` with HTTP `422`, for a schedule definition that
+fails a boundary rule ([scheduling.md](scheduling.md));
+`device_validation_error` with HTTP `422`, for a device registration that
+fails one; and `device_channel_unavailable` with HTTP `503`, for a
+device-scoped call that cannot reach the device it names.
 
 ADR-0255 adds `mcp_server_unavailable` with HTTP `502`, for an owner-added MCP
 server or its authorization server that could not be used, and
@@ -227,9 +237,13 @@ conflict   request_grant_offer_mismatch  approval_id
 ```
 
 `tool_validation_error` carries `{"tool_name": ..., "errors": [...]}`
-where `errors` is the validator's path-and-message list. Together with the
-automatic-email `budget_exceeded` case below, these are the only codes with
-populated `details`; adding another is a minor version change.
+where `errors` is the validator's path-and-message list. `conflict`,
+`tool_validation_error` and the automatic-email `budget_exceeded` case below
+are the only codes whose `details` carry more than a `reason`; adding another
+is a minor version change.
+`rate_limited`, `schedule_validation_error`, `device_validation_error`,
+`device_ingest_error` and `device_channel_unavailable` carry
+`{"reason": ...}` alone.
 
 Milestone 26 adds typed automatic-email budget details under ADR-0096:
 `budget_exceeded` with `reason: email_aggregate_cost` carries decimal-string
@@ -359,11 +373,15 @@ Scopes are dotted `resource.action` strings, and the set is enumerated:
 
 ```text
 session.read      session.write
-run.read          run.write        run.cancel
+run.read          run.write        run.cancel         run.delegate
 approval.read     approval.resolve
 artifact.read     artifact.write
 media.generate
 skill.write
+workspace.read    workspace.write    sandbox.execute
+demo.write        knowledge.write
+jobs.write        jobs.run
+code.read         code.write
 browser.profile.read   browser.profile.write
 browser.grant.read     browser.grant.write
 schedule.read     schedule.write     schedule.cancel
@@ -371,12 +389,21 @@ device.read       device.write       notification.read    notification.write
 memory.read       memory.write
 records.read      records.write
 cockpit.read      cockpit.write
+schedule.run
+surface.read      surface.write
+persona.read      persona.write
+email.read        email.write
+call.read         call.cancel        call.delete
+people.read       people.write
+settings.read     settings.write
 ```
 
 `records.read` and `records.write` gate no route; they are the
-`required_scopes` of the five `records.*` tools in
+`required_scopes` of the six `records.*` tools in
 [owner-records.md](owner-records.md), enumerated here because the vocabulary
-is one closed list. `approval.resolve` is the one the corpus already names; the rest follow
+is one closed list. `run.delegate`, the `workspace`, `sandbox`, `demo`,
+`knowledge`, `jobs` and `code` scopes likewise gate no route and are required
+only by tools. `approval.resolve` is the one the corpus already names; the rest follow
 its form. Membership is exact string equality against the principal's
 scope set. There is no wildcard, no prefix rule, and no hierarchy in
 which `run.write` implies `run.read`.
@@ -453,7 +480,10 @@ GET    /v1/schedules/{schedule_id}/occurrences    schedule.read
 
 The schedule specification owns their request and response schemas,
 idempotency, revision preconditions, and fifteen gates. This document's
-Milestone 5 route census remains historical and is not rewritten.
+Milestone 5 route census remains historical and is not rewritten. ADR-0225
+later adds `POST /v1/schedules/drafts` (`schedule.write`) and
+`POST /v1/schedules/{schedule_id}/run` (`schedule.run`), specified in the
+same document.
 
 Submitting a message requires `run.write` rather than `session.write`
 because submitting is what creates a run; `session.write` gates creating
@@ -506,7 +536,9 @@ POST   /v1/notifications/sync                       notification.write
 ```
 
 Device views never carry a push token; the notification inbox is the durable
-offline record of every enqueued notification and its delivery outcomes.
+offline record of every enqueued notification and its delivery outcomes. The
+last row, `POST /v1/notifications/sync` under `notification.write`, is the
+eighth route and fourth scope, added by ADR-0143.
 
 ### The Milestone 14 surface extension
 
@@ -2391,7 +2423,7 @@ provider call ID before private reconciliation. See [bland-calling.md](bland-cal
 ## Milestone 28 People routes
 
 [people-and-relationships.md](people-and-relationships.md#http-routes) owns the
-nineteen People routes and their closed request/response contracts. ADR-0125
+twenty People routes and their closed request/response contracts. ADR-0125
 added the two merge-suggestion routes. They are
 absent unless `AGENT_PEOPLE_ENABLED=1`. Reads require `people.read`; writes
 require `people.write`, a bounded `Idempotency-Key`, and the documented exact
@@ -2404,7 +2436,7 @@ binds as a sorted set; `review=true` selects Needs review (ADR-0121). An
 unknown state is a `400` request validation error. Import discovery uses
 its own owner-bound cursor and restores an existing job without widening its
 source scope. Static import and operation routes precede dynamic person IDs.
-The `/v1/memories` table is unchanged by People: two reads and the two
+The `/v1/memories` table is unchanged by People: its four reads and the two
 ADR-0117 writes.
 
 ## Milestone 29 thread folder routes
@@ -2641,14 +2673,16 @@ sent or that an external write may be replayed.
 
 ## Milestone 35 Cockpit routes
 
-[cockpit.md](cockpit.md#the-routes-and-the-stream) owns nine routes under
+[cockpit.md](cockpit.md#the-routes-and-the-stream) owns eleven routes under
 `/v1/cockpit`, and their contracts. They are:
 
 - the snapshot;
 - a server-sent event stream;
 - immutable assets by content hash;
 - widget detail;
-- owner writes for settings, layouts, revert, delete and restore.
+- owner writes for settings, layouts, revert, delete and restore;
+- a device's failure report for a widget (ADR-0273);
+- a refresh of every assistant feed (ADR-0254).
 
 They are absent unless `AGENT_COCKPIT_ENABLED=1`. They require the new
 `cockpit.read` or `cockpit.write` scope, which joins the closed vocabulary.

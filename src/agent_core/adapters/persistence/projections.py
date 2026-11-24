@@ -10,10 +10,6 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_core.adapters.persistence.conversation import (
-    CONVERSATION_ADAPTER,
-    conversation_items,
-)
 from agent_core.adapters.persistence.mappers import event_to_domain
 from agent_core.adapters.persistence.people_erasure import redact
 from agent_core.adapters.persistence.sqlalchemy_models import (
@@ -23,7 +19,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     TrajectoryProjectionRow,
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
-from agent_core.domain.events import EventEnvelope
+from agent_core.domain.events import CONVERSATION_ADAPTER, EventEnvelope, conversation_items
 from agent_core.domain.persistence import ProjectionCursor, SessionHistory, TrajectoryProjection
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.ports.determinism import Clock

@@ -101,7 +101,6 @@ from agent_core.adapters.mcp.memory import InMemoryMCPServerRepository
 from agent_core.adapters.mcp.oauth import HTTPMCPOAuthGateway
 from agent_core.adapters.mcp.persistence import PostgresMCPServerRepository
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
-from agent_core.adapters.mcp.sealing import AESGCMSecretSealer
 from agent_core.adapters.media.tensorscale import TensorScaleMediaProvider
 from agent_core.adapters.memory.dreaming import InMemoryDreamingSchedule
 from agent_core.adapters.memory.in_memory import (
@@ -283,7 +282,7 @@ from agent_core.adapters.schedule_wakeup import (
     InMemoryScheduleWakeup,
     PostgresScheduleWakeup,
 )
-from agent_core.adapters.sealing import AESGCMSecretSealer as IntegrationSecretSealer
+from agent_core.adapters.sealing import AESGCMSecretSealer
 from agent_core.adapters.skills.memory import InMemorySkillRepository
 from agent_core.adapters.skills.stores import (
     FilesystemSkillPackageStore,
@@ -3655,7 +3654,7 @@ async def _compose(
             raise ConfigurationError("Integration keys require the configured master key")
         integration_secrets = IntegrationSecrets(
             uow_factory,
-            IntegrationSecretSealer(
+            AESGCMSecretSealer(
                 base64.urlsafe_b64decode(settings.integration_secrets_key.get_secret_value()),
                 purpose="veetbot.integration-secret",
             ),

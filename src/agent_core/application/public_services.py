@@ -2259,17 +2259,7 @@ class PublicApprovalService:
             uow.browser_task_grants.locked_scopes(principal) as scope_policy,
         ):
             visible = await uow.approvals.get(approval_id, principal)
-            if visible.principal_id != principal.principal_id:
-                # The grant belongs to the owner of the chat: another principal
-                # cannot allow a task for it, and does not learn it exists.
-                raise NotFoundError("approval not found")
-            if visible.status in {ApprovalStatus.EXPIRED, ApprovalStatus.CANCELLED}:
-                raise ConflictError(
-                    "The approval is no longer pending.",
-                    details={"status": visible.status.value},
-                )
-            if not self._self_approval_enabled:
-                raise AuthorizationError("approval requires a distinct resolver")
+            self._require_owner_may_allow(visible, principal)
             offer = visible.task_grant_offer
             if visible.status is not ApprovalStatus.PENDING:
                 return self._already_resolved_for_task(visible, echo)
@@ -2406,16 +2396,7 @@ class PublicApprovalService:
         dispatch_run: UUID | None = None
         async with self._uow_factory() as uow:
             visible = await uow.approvals.get(approval_id, principal)
-            if visible.principal_id != principal.principal_id:
-                # Only the chat's owner can allow its request.
-                raise NotFoundError("approval not found")
-            if visible.status in {ApprovalStatus.EXPIRED, ApprovalStatus.CANCELLED}:
-                raise ConflictError(
-                    "The approval is no longer pending.",
-                    details={"status": visible.status.value},
-                )
-            if not self._self_approval_enabled:
-                raise AuthorizationError("approval requires a distinct resolver")
+            self._require_owner_may_allow(visible, principal)
             offer = visible.request_grant_offer
             if visible.status is not ApprovalStatus.PENDING:
                 return self._already_resolved_for_request(visible, echo)
@@ -2460,37 +2441,19 @@ class PublicApprovalService:
             if outcome.state is not ApprovalResolutionState.APPLIED:
                 return self._already_resolved_for_request(outcome.approval, echo)
             resolved_at = outcome.approval.resolved_at or now
-            await uow.events.append(
-                NewEvent(
-                    session_id=run.session_id,
-                    run_id=run.id,
-                    event_type="approval.resolved",
-                    actor_type="principal",
-                    actor_id=principal.principal_id,
-                    payload={
-                        "approval_id": str(approval_id),
-                        "resolution": ApprovalResolutionType.APPROVE_FOR_REQUEST.value,
-                    },
-                )
+            dispatch_run = await self._record_request_grant(
+                uow,
+                principal,
+                run,
+                approval_id,
+                REQUEST_GRANT_CREATED_EVENT,
+                {
+                    "approval_id": str(approval_id),
+                    "profile_id": str(offer.profile_id),
+                    "origins": list(offer.origins),
+                    "expires_at": (resolved_at + REQUEST_GRANT_DURATION).isoformat(),
+                },
             )
-            await uow.events.append(
-                NewEvent(
-                    session_id=run.session_id,
-                    run_id=run.id,
-                    event_type=REQUEST_GRANT_CREATED_EVENT,
-                    actor_type="principal",
-                    actor_id=principal.principal_id,
-                    payload={
-                        "approval_id": str(approval_id),
-                        "profile_id": str(offer.profile_id),
-                        "origins": list(offer.origins),
-                        "expires_at": (resolved_at + REQUEST_GRANT_DURATION).isoformat(),
-                    },
-                )
-            )
-            if run.status is RunStatus.WAITING_FOR_APPROVAL:
-                await self._resume_waiting_run(uow, run)
-                dispatch_run = run.id
         if dispatch_run is not None:
             await self._dispatcher.resume(dispatch_run)
         return _approval_view(outcome.approval)
@@ -2509,16 +2472,7 @@ class PublicApprovalService:
         dispatch_run: UUID | None = None
         async with self._uow_factory() as uow:
             visible = await uow.approvals.get(approval_id, principal)
-            if visible.principal_id != principal.principal_id:
-                # Only the chat's owner can allow its request.
-                raise NotFoundError("approval not found")
-            if visible.status in {ApprovalStatus.EXPIRED, ApprovalStatus.CANCELLED}:
-                raise ConflictError(
-                    "The approval is no longer pending.",
-                    details={"status": visible.status.value},
-                )
-            if not self._self_approval_enabled:
-                raise AuthorizationError("approval requires a distinct resolver")
+            self._require_owner_may_allow(visible, principal)
             offer = visible.job_request_grant_offer
             if visible.status is not ApprovalStatus.PENDING:
                 return self._already_resolved_for_job_request(visible, echo)
@@ -2548,36 +2502,18 @@ class PublicApprovalService:
             if outcome.state is not ApprovalResolutionState.APPLIED:
                 return self._already_resolved_for_job_request(outcome.approval, echo)
             resolved_at = outcome.approval.resolved_at or now
-            await uow.events.append(
-                NewEvent(
-                    session_id=run.session_id,
-                    run_id=run.id,
-                    event_type="approval.resolved",
-                    actor_type="principal",
-                    actor_id=principal.principal_id,
-                    payload={
-                        "approval_id": str(approval_id),
-                        "resolution": ApprovalResolutionType.APPROVE_FOR_REQUEST.value,
-                    },
-                )
+            dispatch_run = await self._record_request_grant(
+                uow,
+                principal,
+                run,
+                approval_id,
+                JOB_REQUEST_GRANT_CREATED_EVENT,
+                {
+                    "approval_id": str(approval_id),
+                    "slug": offer.slug,
+                    "expires_at": (resolved_at + JOB_REQUEST_GRANT_DURATION).isoformat(),
+                },
             )
-            await uow.events.append(
-                NewEvent(
-                    session_id=run.session_id,
-                    run_id=run.id,
-                    event_type=JOB_REQUEST_GRANT_CREATED_EVENT,
-                    actor_type="principal",
-                    actor_id=principal.principal_id,
-                    payload={
-                        "approval_id": str(approval_id),
-                        "slug": offer.slug,
-                        "expires_at": (resolved_at + JOB_REQUEST_GRANT_DURATION).isoformat(),
-                    },
-                )
-            )
-            if run.status is RunStatus.WAITING_FOR_APPROVAL:
-                await self._resume_waiting_run(uow, run)
-                dispatch_run = run.id
         if dispatch_run is not None:
             await self._dispatcher.resume(dispatch_run)
         return _approval_view(outcome.approval)
@@ -2595,16 +2531,7 @@ class PublicApprovalService:
         dispatch_run: UUID | None = None
         async with self._uow_factory() as uow:
             visible = await uow.approvals.get(approval_id, principal)
-            if visible.principal_id != principal.principal_id:
-                # Only the chat's owner can allow its request.
-                raise NotFoundError("approval not found")
-            if visible.status in {ApprovalStatus.EXPIRED, ApprovalStatus.CANCELLED}:
-                raise ConflictError(
-                    "The approval is no longer pending.",
-                    details={"status": visible.status.value},
-                )
-            if not self._self_approval_enabled:
-                raise AuthorizationError("approval requires a distinct resolver")
+            self._require_owner_may_allow(visible, principal)
             offer = visible.script_request_grant_offer
             if offer is None or visible.tool_name != offer.tool_name:
                 raise _request_grant_unavailable(approval_id)
@@ -2632,39 +2559,71 @@ class PublicApprovalService:
             if outcome.state is not ApprovalResolutionState.APPLIED:
                 return self._already_resolved_for_script_request(outcome.approval)
             resolved_at = outcome.approval.resolved_at or now
-            await uow.events.append(
-                NewEvent(
-                    session_id=run.session_id,
-                    run_id=run.id,
-                    event_type="approval.resolved",
-                    actor_type="principal",
-                    actor_id=principal.principal_id,
-                    payload={
-                        "approval_id": str(approval_id),
-                        "resolution": ApprovalResolutionType.APPROVE_FOR_REQUEST.value,
-                    },
-                )
+            dispatch_run = await self._record_request_grant(
+                uow,
+                principal,
+                run,
+                approval_id,
+                SCRIPT_REQUEST_GRANT_CREATED_EVENT,
+                {
+                    "approval_id": str(approval_id),
+                    "tool_name": offer.tool_name,
+                    "expires_at": (resolved_at + SCRIPT_REQUEST_GRANT_DURATION).isoformat(),
+                },
             )
-            await uow.events.append(
-                NewEvent(
-                    session_id=run.session_id,
-                    run_id=run.id,
-                    event_type=SCRIPT_REQUEST_GRANT_CREATED_EVENT,
-                    actor_type="principal",
-                    actor_id=principal.principal_id,
-                    payload={
-                        "approval_id": str(approval_id),
-                        "tool_name": offer.tool_name,
-                        "expires_at": (resolved_at + SCRIPT_REQUEST_GRANT_DURATION).isoformat(),
-                    },
-                )
-            )
-            if run.status is RunStatus.WAITING_FOR_APPROVAL:
-                await self._resume_waiting_run(uow, run)
-                dispatch_run = run.id
         if dispatch_run is not None:
             await self._dispatcher.resume(dispatch_run)
         return _approval_view(outcome.approval)
+
+    def _require_owner_may_allow(self, visible: ApprovalRequest, principal: Principal) -> None:
+        """Refuse an allow-for-task or allow-for-request the caller may not give.
+
+        The grant belongs to the owner of the chat: another principal cannot
+        allow a task or a request for it, and does not learn it exists.
+        """
+
+        if visible.principal_id != principal.principal_id:
+            raise NotFoundError("approval not found")
+        if visible.status in {ApprovalStatus.EXPIRED, ApprovalStatus.CANCELLED}:
+            raise ConflictError(
+                "The approval is no longer pending.",
+                details={"status": visible.status.value},
+            )
+        if not self._self_approval_enabled:
+            raise AuthorizationError("approval requires a distinct resolver")
+
+    async def _record_request_grant(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        run: Run,
+        approval_id: UUID,
+        created_event: str,
+        grant: dict[str, object],
+    ) -> UUID | None:
+        """Record an applied allow-for-request and its grant in the caller's
+        unit of work, and resume the run that waited on it. Returns the run to
+        dispatch once that unit of work has committed."""
+
+        resolved = {
+            "approval_id": str(approval_id),
+            "resolution": ApprovalResolutionType.APPROVE_FOR_REQUEST.value,
+        }
+        for event_type, payload in (("approval.resolved", resolved), (created_event, grant)):
+            await uow.events.append(
+                NewEvent(
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    event_type=event_type,
+                    actor_type="principal",
+                    actor_id=principal.principal_id,
+                    payload=payload,
+                )
+            )
+        if run.status is not RunStatus.WAITING_FOR_APPROVAL:
+            return None
+        await self._resume_waiting_run(uow, run)
+        return run.id
 
     @staticmethod
     def _already_resolved_for_script_request(approval: ApprovalRequest) -> ApprovalView:

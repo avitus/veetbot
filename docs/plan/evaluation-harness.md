@@ -174,7 +174,7 @@ they do not look like tests.
 
 ### Where the declared gates land
 
-Seventeen specs, the milestone map, and one engineering-plan section declare
+Thirty-eight specs, the milestone map, and one engineering-plan section declare
 gates, and they declare them in prose. Sorting them by kind is what tells an
 implementer which harness facility each one needs, and it is the first
 concrete deliverable of this document.
@@ -191,27 +191,49 @@ restates a gate another spec owns.
 | Tool system | 8 | 1 | 1 | 5 | 15 |
 | Builtin tools | 7 | 4 | 0 | 4 | 15 |
 | Model gateway | 8 | 0 | 1 | 3 | 12 |
-| Policy and approvals | 7 | 3 | 1 | 2 | 13 |
+| Policy and approvals | 10 | 4 | 1 | 3 | 18 |
 | Event log and persistence | 9 | 2 | 0 | 3 | 14 |
 | Context engine | 2 | 3 | 1 | 0 | 6 |
-| Memory formation | 11 | 2 | 2 | 1 | 16 |
+| Memory formation | 14 | 2 | 2 | 2 | 20 |
 | Memory retrieval | 6 | 2 | 1 | 0 | 9 |
 | Evaluation harness | 3 | 0 | 0 | 8 | 11 |
 | HTTP API and streaming | 7 | 0 | 0 | 3 | 10 |
 | Sandbox and artifacts | 8 | 1 | 0 | 4 | 13 |
 | Skills | 12 | 1 | 1 | 2 | 16 |
-| Knowledge documents | 8 | 3 | 1 | 0 | 12 |
+| Knowledge documents | 8 | 3 | 2 | 0 | 13 |
 | Web access | 6 | 1 | 0 | 0 | 7 |
 | Authenticated browser automation | 8 | 2 | 0 | 0 | 10 |
-| Scheduled runs | 16 | 4 | 1 | 2 | 23 |
+| Scheduled runs | 34 | 6 | 1 | 5 | 46 |
+| Notifications and devices | 16 | 1 | 1 | 2 | 20 |
+| Subagents and delegation | 19 | 1 | 0 | 1 | 21 |
+| Inbound surfaces | 17 | 0 | 1 | 3 | 21 |
+| Operational hardening | 11 | 1 | 0 | 4 | 16 |
+| Memory evaluation and lifecycle | 15 | 2 | 0 | 3 | 20 |
+| Memory read API and browser | 6 | 1 | 0 | 3 | 10 |
+| Adaptive memory distillation | 22 | 3 | 0 | 6 | 31 |
+| Memory reconsolidation | 20 | 2 | 0 | 2 | 24 |
+| General memory recall | 10 | 0 | 0 | 2 | 12 |
+| Persona surface | 13 | 0 | 0 | 1 | 14 |
+| Email integration | 13 | 2 | 0 | 2 | 17 |
+| Email experience | 33 | 0 | 0 | 0 | 33 |
+| Email unsubscribe | 18 | 3 | 0 | 2 | 23 |
+| Bland calling | 14 | 0 | 0 | 0 | 14 |
+| People and relationships | 36 | 0 | 0 | 0 | 36 |
+| Thread folders | 10 | 2 | 0 | 1 | 13 |
+| Typed judgment | 3 | 1 | 0 | 0 | 4 |
+| Device channel and SMS | 9 | 1 | 0 | 2 | 12 |
+| WhatsApp surface | 10 | 0 | 0 | 2 | 12 |
+| Owner records | 7 | 2 | 0 | 1 | 10 |
+| Cockpit | 21 | 1 | 0 | 1 | 23 |
 | Engineering plan | 0 | 0 | 0 | 2 | 2 |
 | Milestone map | 0 | 0 | 0 | 7 | 7 |
-| **Total** | **133** | **31** | **10** | **49** | **223** |
+| **Total** | **480** | **57** | **13** | **92** | **642** |
 
 The counts are the useful output, not the individual assignments:
-**ninety of the two hundred and twenty-three owned registry entries are not case
-gates**, and a harness that only runs cases would report a green build with
-those ninety of the plan's stated invariants unchecked. Two of the
+**one hundred and sixty-two of the six hundred and forty-two owned registry
+entries are not case gates**, and a harness that only runs cases would report a
+green build with those one hundred and sixty-two of the plan's stated invariants
+unchecked. Two of the
 four kinds — property and structural — need no runtime at all and can be
 built in Milestone 0, before there is an agent to evaluate.
 
@@ -229,7 +251,7 @@ that implement them.
   statement: >
     Every SideEffectClass value has exactly one rule in every loaded
     profile, and every 9.2 row maps to exactly one value.
-  check: tests/gates/policy/test_totality.py::test_totality
+  check: tests/gates/test_policy_m4.py::test_totality
   trials: 1000
 ```
 
@@ -242,7 +264,7 @@ that implement them.
     Across the injection corpus, untrusted content instructing a
     REQUIRE_APPROVAL action produces an approval request in every
     case and an execution in none.
-  check: tests/gates/policy/test_injection.py::test_corpus
+  check: tests/gates/test_policy_m4.py::test_prompt_not_authz
   corpus: evals/corpora/injection/
   minimum_members: 40
 ```
@@ -301,12 +323,12 @@ approval expiry testable in milliseconds, and it is the only way to test the
 memory decay curve at all, since the alternative is a test that waits ninety
 days.
 
-**Identifiers come from a seeded generator.** A `IdFactory` port with a
-deterministic mode that produces UUIDv7-shaped values from a seed. Pinned
-identifiers are what make the `expected` block of a case writable at all: an
-assertion on event ordering that has to ignore every id is an assertion on very
-little. The seed is the case name, so two cases never collide and a case's ids
-do not shift when a sibling case is added.
+**Identifiers come from a pinned generator.** A `IdFactory` port with a
+deterministic mode, `SequenceIdFactory`, that issues a fixed sequence of UUIDs
+counted up from one. Pinned identifiers are what make the `expected` block of
+a case writable at all: an assertion on event ordering that has to ignore
+every id is an assertion on very little. Each case builds its own composition and starts the sequence again, so
+a case's ids do not shift when a sibling case is added.
 
 **Model output is the fixture.** This is the one Section 20 already has, and the
 next section gives it a resolution rule.
@@ -490,7 +512,7 @@ one `expected` block cannot express one. Case 27 was described in prose as
 "one scripted task twice" with nothing in the schema behind it. This is the
 mechanism that sentence assumed.
 
-A case declares either `input` and `expected`, or `arms`, and never both.
+A case declares either `expected` or `arms`, and never both.
 
 ```yaml
 name: skill_changes_outcome
@@ -969,10 +991,10 @@ without getting stronger.
 The table carries no gate column, and the binding runs the other way: a case
 gate names its case in the registry's `check` field, so a gate finds its case
 rather than a case finding its gates. The direction is worth stating because
-the two counts do not match. Ninety-five of the hundred and seventy-two
-registered gates declare kind `case`, against the thirty-one cases this
-document enumerates, so the enumeration is the floor Section 20.3 asks for
-and not the size of the finished suite.
+the two counts do not match. Four hundred and eighty of the six hundred and
+forty-two registered gates declare kind `case`, against the thirty-one cases
+this document enumerates, so the enumeration is the floor Section 20.3 asks
+for and not the size of the finished suite.
 
 | # | Case | M | Kind | What only this case proves |
 | --- | --- | --- | --- | --- |
@@ -1563,10 +1585,12 @@ cannot store as specified. `events.session_id` is `NOT NULL`, and a harness
 event has no session: the suite is not a run, and the span root below is not
 `agent.run`. The consolidated catalogue in
 [runtime-loop.md](runtime-loop.md) therefore lists them apart from the
-fifty-three session-scoped types rather than in with them.
+sixty-three session-scoped types rather than in with them.
 [multi-device-and-surfaces.md](multi-device-and-surfaces.md) reaches the same
-constraint for device lifecycle events and leaves it open; one answer should
-cover both, and it is open question 8 below.
+constraint for device lifecycle events, which Milestone 12 records as process
+events. The capability track appends `eval.scenario.scored`, `eval.ceiling.hit`
+and `eval.suite.completed` to the same `process_events` stream, which is the
+answer open question 8 below records.
 
 Spans follow Section 19's hierarchy with two additions under the harness's own
 root, which is not `agent.run` — the harness drives runs and is not one:
@@ -1718,7 +1742,7 @@ invariants stop being prose.
    the build. Gates live in a registry, and a gate declared in a spec but
    absent from the registry fails the docs check.
 2. Gates come in four kinds — case, property, corpus, structural — because
-   roughly a third of the declared gates cannot be expressed as eval cases and
+   roughly a quarter of the declared gates cannot be expressed as eval cases and
    a case-only harness would report green with them unchecked.
 3. A gate before its milestone is `pending` and is printed. A gate at or past
    its milestone may not skip.
@@ -1778,7 +1802,7 @@ invariants stop being prose.
 25. The capability track stores per-criterion scores in their own table, keyed
     by scenario, build, judge version, and repeat. The deterministic suite
     stores nothing.
-26. A case that measures a difference declares `arms` rather than `input` and
+26. A case that measures a difference declares `arms` rather than
     `expected`. Arms are isolated by default, only the memory store and the
     skill catalog may be carried between them, and `delta` asserts relations
     rather than numbers.
@@ -1836,8 +1860,8 @@ invariants stop being prose.
    before the first published score, not before Milestone 3.
 
 7. **Whether a case gate should name its case in the registry, or whether the
-   case table should gain a gate column.** Ninety-five gates declare kind
-   `case` and thirty-one cases are enumerated, so most case gates have no
+   case table should gain a gate column.** Four hundred and eighty gates declare
+   kind `case` and thirty-one cases are enumerated, so most case gates have no
    named case yet and nothing reconciles the two. The registry's `check`
    field can carry the reference with no schema change, which is the cheaper
    direction and the one the paragraph above assumes. A column in the table
@@ -1854,4 +1878,8 @@ invariants stop being prose.
    nullable, give the events their own table, or synthesize a session to
    charge them to — and calls the second the smallest. That reasoning
    applies here unchanged, which is the argument for one decision covering
-   both rather than two tables arrived at separately.
+   both rather than two tables arrived at separately. The implementation
+   took the second way for both: the capability track appends
+   `eval.scenario.scored`, `eval.ceiling.hit` and `eval.suite.completed` to
+   `process_events`, the session-free stream ADR-0040 introduced and device
+   lifecycle events also use. Nothing emits `eval.gate.failed` yet.

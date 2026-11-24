@@ -59,8 +59,10 @@ before restarting PostgreSQL or migrating. The entrypoint uses Alpine’s packag
 `gosu` to drop privileges to the database user. It retains the existing PostgreSQL 16
 Alpine locale environment and volume path; it does not switch an existing volume
 to the hosted CI image. Follow the existing backup and migration rehearsal before
-production delivery. Semantic retrieval remains disabled: this schema and image
-change does not activate a provider, backfill private memory or enable recall.
+production delivery. This schema and image change by itself activates no
+provider, backfills no private memory and enables no recall; semantic retrieval
+is activated separately, as described in
+[Standing owner activation of semantic retrieval](#standing-owner-activation-of-semantic-retrieval-adr-0290).
 
 ## Release flow
 
@@ -93,17 +95,20 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 3. installs a release-local `.venv` from `uv.lock` using a shared download
    cache, and compiles the bytecode of its dependencies and of `src`, because
    the units' read-only filesystem keeps Python from caching it at run time;
-4. builds `agent-core-sandbox:<release-id>`,
-   `veetbot-cockpit-builder:<release-id>` and
-   `veetbot-code-sandbox:<release-id>` (ADR-0281; the preflight requires it, and
-   it has no canary), then requires the builder to build
+4. builds the PostgreSQL image above, `agent-core-sandbox:<release-id>`,
+   `veetbot-cockpit-builder:<release-id>`,
+   `veetbot-code-sandbox:<release-id>` (ADR-0281; the preflight requires it
+   when `AGENT_CODE_TOOLS_ENABLED=1`, and it has no canary) and
+   `veetbot-browser-profile-service:<release-id>`, then requires the builder to build
    a reference widget under runsc with no network, a read-only root and the
    sandbox's flags (the Cockpit canary, `docs/plan/cockpit.md`). It copies the
    board's content-addressed runtime out of the builder image into
    `$AGENT_ARTIFACT_ROOT/cockpit-runtime`, never rewriting an asset already
    there;
 5. checks active provider pins against the staged registry on an existing
-   installation, then ensures the local PostgreSQL service is running;
+   installation, then brings the local PostgreSQL service up and recreates the
+   browser-profile service from this release's image, waiting for both to be
+   healthy;
 6. reconciles owner permissions into the staged `.owner-scopes.env`, applies
    `alembic upgrade head`, and runs the production preflight;
 7. stops both run workers, rechecks active provider pins, then switches
@@ -278,7 +283,7 @@ the Docker group and their units expose no Docker socket; application services
 have no Docker-socket access. Only the credential-free `veetbot-exec` execution
 service receives Docker access at application runtime and owns sandbox
 lifecycle. The separate deploy identity retains delivery-time Docker access
-because the audited release contract builds and tags both images, reconciles the
+because the audited release contract builds and tags the release images, reconciles the
 browser-profile service, and prunes stale release images and build cache. That
 trusted operator
 boundary is the explicit tradeoff in ADR-0067 decision 1; it is never an
@@ -460,10 +465,27 @@ working run, ADR-0324; leave off until an Apple client that supports it is
 released), `AGENT_MEMORY_API_ENABLED` (the `/v1/memories`
 routes), `AGENT_PERSONA_API_ENABLED` (the persona routes),
 `AGENT_THREAD_FOLDERS_API_ENABLED` (the chat-folder routes),
-`AGENT_SKILL_AUTHORING_ENABLED` (the `skill.manage` tool) and
-`AGENT_SKILL_BACKGROUND_REVIEW_ENABLED` (background skill review);
+`AGENT_SKILL_AUTHORING_ENABLED` (the `skill.manage` tool),
+`AGENT_SKILL_BACKGROUND_REVIEW_ENABLED` (background skill review, which needs
+skill authoring on), `AGENT_CODE_TOOLS_ENABLED` (Veetbot reads the running
+release's source, ADR-0281) and `AGENT_CODE_MODE_ENABLED` (code mode, ADR-0342);
 `AGENT_SCHEDULE_DRAFTS_ENABLED` (plain-words schedule drafts) defaults to
-`1`. Each takes effect for the API and the workers after a restart.
+`1`. Each takes effect for the API and the workers after a restart. Jobs
+(`AGENT_JOBS_ENABLED`, [jobs.md](jobs.md)), Calendar (`AGENT_CALENDAR_ENABLED`,
+[calendar-setup.md](calendar-setup.md)) and integration keys
+(`AGENT_INTEGRATION_SECRETS_ENABLED`, [integration-keys.md](integration-keys.md))
+have their own pages.
+
+With code mode on, the API and workers register `sandbox.run_code`, and new
+chats are offered it in place of `sandbox.run_command`: a script in the run's
+sandbox calls the chat's tools over the bridge, and each call still passes
+policy and approval. Set the flag in `/etc/veetbot/veetbot.env` only and
+restart the API and the three workers. The schedule, surface, notify and call
+roles read their own environment files, so schedules and inbound surfaces keep
+`sandbox.run_command`. Turning it on registers a new default agent version;
+chats and schedules that already exist keep the version they pinned. Every
+release builds `agent-core-sandbox`, which carries the script runner, so no
+image step is needed.
 
 New platform scopes must be classified in `test_deployment_scopes.py` and
 added to the template when owner-facing, so adding a feature cannot silently
@@ -533,7 +555,10 @@ must match the application notification flags"); `AGENT_COCKPIT_ENABLED`
 ("schedule worker AGENT_COCKPIT_ENABLED must match the application
 environment"); `AGENT_SVP_ENABLED` ("schedule worker AGENT_SVP_ENABLED must
 match the application environment", ADR-0291), never with
-`SVP_CREDENTIAL_FILE`; `AGENT_EMAIL_ENABLED` with `GMAIL_ACCOUNTS_FILE` as above; and
+`SVP_CREDENTIAL_FILE`; `AGENT_CALENDAR_ENABLED` ("schedule worker
+AGENT_CALENDAR_ENABLED must match the application environment",
+[calendar-setup.md](calendar-setup.md)), never with a Calendar credential;
+`AGENT_EMAIL_ENABLED` with `GMAIL_ACCOUNTS_FILE` as above; and
 `AGENT_CALL_ENABLED` with the non-secret `BLAND_CONFIGURATION_FILE` path,
 because the scheduler derives a schedule's calling scopes from
 `AGENT_CALL_ENABLED` (ADR-0213). The template
@@ -624,7 +649,8 @@ sudo chmod 0640 /etc/veetbot/veetbot-schedule.env
 ```
 
 Do not add `VEETBOT_RELEASE_ID` to that shared file. The release script writes
-it, the fixed host-native execution-service socket, and the two webhook-route
+it, the fixed host-native execution-service socket, the code sandbox image
+`AGENT_CODE_SANDBOX_IMAGE=veetbot-code-sandbox:production` (ADR-0281), and the two webhook-route
 flags `AGENT_SURFACE_WHATSAPP_ENABLED` and `AGENT_CALL_INGRESS_ENABLED` (which
 the `deploy-nginx` job reads to decide whether the `/webhooks/whatsapp` and
 `/webhooks/bland` locations are rendered) to
@@ -1197,7 +1223,8 @@ deliberately prevents the deploy identity from dereferencing that process's
 `/proc` working directory. A post-promotion failure prints bounded systemd
 status for each managed unit before reporting the manual rollback target.
 
-The manual and nightly `live-model` workflows remain tests; they do not deploy.
+The manual `live_manual` and nightly `live_nightly` workflows, which use the
+`live-model` context, remain tests; they do not deploy.
 The TestFlight upload job does not claim that Apple's asynchronous processing or
 device installation has completed; verify those external states in App Store
 Connect after the first automated delivery.
@@ -1252,8 +1279,9 @@ precedent (`plan/email-integration.md`, "Credentials and the bootstrap
 ceremony"): a documented, owner-run, one-time setup step with its own
 verification, rather than something CI or the server can perform for them.
 
-1. Confirm prerequisites on the owner's iPhone: iOS 17 or later — the
-   Shortcuts "When I get a message" personal automation trigger requires it;
+1. Confirm prerequisites on the owner's iPhone: iOS 27.0 or later, the app's
+   minimum (ADR-0211) — the Shortcuts "When I get a message" personal
+   automation trigger itself needs only iOS 17;
    the device already paired to Veetbot and push-verified through
    `POST /v1/devices` and the authenticated
    `POST /v1/devices/{device_id}/test-notification` route; and, in the app's
@@ -1835,7 +1863,8 @@ it on `avitus/veetbot` only, then note the App id and the installation id.
 - no CircleCI workflow and no CodeRabbit review applies to `cockpit/widgets`.
 
 Code proposals (ADR-0281) need two more grants, and only when
-`AGENT_CODE_PROPOSALS_ENABLED=1`: the App's **Pull requests: Read and write**
+`AGENT_CODE_PROPOSALS_ENABLED=1` (which startup accepts only with
+`AGENT_CODE_TOOLS_ENABLED=1` and `AGENT_COCKPIT_ENABLED=1`): the App's **Pull requests: Read and write**
 permission, and an exception to the first ruleset that lets the App create and
 update branches matching `veetbot/**`. The adapter never writes another branch,
 and it has no merge or review call.
@@ -2289,7 +2318,8 @@ formed between September and October 2026 are the first production case.
 
 ### Chat upload ingestion retry (ADR-0284)
 
-`agent knowledge retry <artifact id>` returns a chat upload whose automatic
+`agent knowledge retry <artifact id>` returns a chat upload or a saved email
+attachment (ADR-0296) whose automatic
 ingestion failed or was refused to pending with a fresh attempt count, and
 refuses a pending or ingested upload or an artifact of another origin; the
 maintenance sweep ingests it on its next round and records the outcome on the

@@ -4,6 +4,41 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-23 — Three repairs where the code disagreed with its documents
+
+- `agent run --idempotency-key`, retried after its run was approved and
+  finished, prints the final message instead of the run identifier.
+- Listing the sign-in ceremonies of a website profile that is not yours
+  answers 404 instead of an empty list.
+- Deleting a memory now answers with the header
+  `Cache-Control: private, no-store`.
+- In the Apple client, a withdrawn "Allow for this request" on a job or script
+  card names that card's own button, Approve once, instead of Allow once.
+
+## 2026-11-23 — A question about a relative no longer hides that relative's facts (ADR-0348)
+
+- When recall decides a question is about one person, it leaves out every fact
+  linked to anyone else. It was choosing the person too easily. A relative
+  recorded only by a role word, such as "mom", was chosen by that word, which
+  hid the facts on the named record of the same relative. A relationship memory
+  that merely shared an ordinary word with the question could choose a
+  different relative. Two loose matches hid every person-linked fact.
+- Recall now chooses a person from a relationship only when the question
+  contains the label that relationship is stored under, and a role-only record
+  is no longer chosen by its role word. When nobody is named, recall runs
+  normally and hides nothing. Two people who are both named still stop recall
+  from combining them.
+- On a copy of production from 2026-11-23, 103 of 114 questions pass instead
+  of 99, and none that passed now fails. Merging the role-only records by hand
+  gained nothing by itself.
+- You accepted the rule on 2026-11-23. It is tested in the sandboxes and is
+  not delivered yet.
+- Found in review on 2026-11-24: a relationship stored without a label of its
+  own was named from your side of it, so "my parent" could choose your child.
+  It is now named from the other person's side. A one-way relationship that
+  starts from you, such as someone you invest in, is no longer chosen by that
+  word.
+
 ## 2026-11-23 — Scripts are on for app chats, and a script may name a tool as the model sees it (ADR-0342)
 
 - Scripts were turned on in production for chats started in the app.
@@ -71,6 +106,17 @@ title: Changelog
   default chat model, not the fake model.
 - Erasing a message also takes its end from an earlier stored revision of a
   signature detail whose current end you set yourself; your end stays.
+
+## 2026-11-23 — Sending a reply no longer waits on Chat setup (ADR-0345)
+
+- A one-press reply took 42 seconds in production, and its ten-second Undo
+  had run out before the app heard back. The send was preparing Chat's whole
+  tool list, although sending calls no model.
+- A send now runs in its own background session that opens only that
+  mailbox's read and send tools, and the Undo window starts once the send is
+  queued.
+- The send adds nothing to Chat's history. Discuss in Chat still opens the
+  conversation, and a failed-send alert opens the reply.
 
 ## 2026-11-22 — Code mode: budget, approvals and Chat (ADR-0342)
 
@@ -424,9 +470,96 @@ title: Changelog
 - Deploying: the model registry version changes, so drain active and suspended
   runs first, as for any registry change.
 
+## 2026-11-20 — Signatures leave the reading text, and People reads a sender's title and phone number (ADR-0336)
+
+- The Email reading text leaves a writer's signature out, in the message and
+  in the replies quoted below it. Show original still shows the whole
+  message.
+- When someone already in People writes to you and Gmail's sender check
+  passed, the phone numbers and the line under their name in their own
+  signature are added to their profile. No model is called, and a signature
+  inside quoted or forwarded mail is never read.
+- These details are the sender's claim. They never identify or merge anyone,
+  a later signature replaces them, and erasing the mail removes what it
+  added. Tested offline only; no run on a real mailbox is recorded.
+
+## 2026-11-20 — A reply that turns on your decision is drafted, not refused (ADR-0317)
+
+- Since researched replies shipped, a reply that depended on a decision only
+  you can make ended in the red "Required reply materials are missing or
+  ambiguous" error: ten of the 14 drafts refused between November 13 and 20.
+  Veetbot now writes the draft around the open decision without inventing
+  it.
+- A finished reply is no longer thrown away because the planner left a note
+  beside it. A file the reply needs and cannot find still stops the draft.
+- Reply research that has opened its five source conversations goes back to
+  planning with what it found. It used to fail with "Reply research reached
+  its sources limit."
+
+## 2026-11-20 — The reply is written in the conversation
+
+- On Mac, iPad and iPhone the reply body grows in place below the
+  conversation. The recipient line opens the recipients and subject for
+  editing, and Close saves the draft and brings back the reply choices.
+- After you press Send, the button becomes Undo until the undo window ends,
+  then the reply reads Sent.
+
+## 2026-11-19 — Expiring a call uses bounded memory
+
+- Erasing an expired call's content no longer loads every related event into
+  the call worker's memory. The worker keeps the affected identifiers in
+  temporary database tables and works through the content in pages of 64.
+  In a sandbox of production's size, 19,426 sessions and 1.4 million events,
+  one call expired in 2.4 seconds at a peak of about 255 MiB.
+- Operators: the `veetbot_call` login needs the database `TEMPORARY`
+  privilege, and no migration is needed. The [Bland setup
+  guide](bland-setup.md) has the check, the recovery after a worker runs out
+  of memory, and what to watch during the first production sweep, which
+  needs your approval.
+
 ## 2026-11-18 — Email attachments
 
 A researched reply can now carry up to ten files totaling 25 MB. Review the files with the message before sending. To keep an incoming file separately, press Save on the attachment in Email to add it to that conversation.
+
+## 2026-11-18 — Email reloads and opens conversations with less work (ADR-0332)
+
+- A refresh that finds a mail list unchanged keeps the rows you have loaded
+  and does not read the later pages again. A refresh that finds the open
+  conversation unchanged keeps what is on screen, with any unsaved reply.
+- A conversation's text is prepared in the background while the reader shows
+  progress, and the nine conversations you opened most recently reopen
+  without that wait. Inbox rows appear before the account details load.
+- Measured in local sandboxes only; no production timing is recorded.
+
+## 2026-11-18 — A sign-in check survives a page that reloads under it
+
+- When a website replaces its page while Veetbot is checking a sign-in, the
+  check now waits for its next look instead of ending in an error. A page
+  that keeps changing the end of its address no longer slows the check.
+
+## 2026-11-16 — Inbox leaves out mail ranked below 0.1 (ADR-0329)
+
+- Of the 100 newest Inbox conversations on 2026-11-16, 70 ranked below 0.1:
+  junk first passes, suspected spam, bulk promotion and event invitations.
+  Inbox and its count now hold a conversation only when its priority is at
+  least 0.1.
+- Marking a conversation Important brings it back, and Less important
+  removes it. Mail not yet assessed stays out until it is ranked.
+- Needs you, Handled, Important, Other mail, Suspected spam and search are
+  unchanged, so Other mail and search still reach everything.
+
+## 2026-11-16 — A chart or document is built in one step, with at most one approval (ADR-0330)
+
+- Chat used to write files, run a command and export the results as separate
+  steps, each of which could ask. One build step now takes the input files,
+  the command and the list of files to keep, runs once in a fresh sandbox
+  with no network, and attaches the results to the reply.
+- It asks once when the request has read outside content, and not at all
+  when such a computation is already allowed. A build that fails or times
+  out attaches nothing.
+- Reading the built-in visualization guide never asks. New chats get both
+  tools; open chats keep the tools they started with. Pull request 255
+  delivered it to production.
 
 ## 2026-11-14 — Chat tells you how a call went (ADR-0325)
 
@@ -436,6 +569,32 @@ A researched reply can now carry up to ten files totaling 25 MB. Review the file
 - The message usually follows the end of the call by a minute or two. The
   "New call result" notification still arrives as before.
 
+## 2026-11-14 — A message sent while Veetbot is working steers that work, off by default (ADR-0324)
+
+- With `AGENT_RUN_STEERING_ENABLED=1`, a message you send while a chat is
+  working is held and read at Veetbot's next step, instead of being refused
+  until the work ends. It does not interrupt the step in progress.
+- A follow-up never answers an approval card: it is read after you answer
+  the card. Up to eight can wait, text only. One that was never read starts
+  the next piece of work when this one finishes, and returns to the message
+  box when it fails.
+- Reading a follow-up ends an "Allow for this request" approval, and the
+  work keeps its original cost, step and time limits.
+- The server side for app chats and the Apple apps are built. Telegram, SMS
+  and WhatsApp still answer "Still working". The setting stays off until you
+  turn it on.
+
+## 2026-11-14 — Every mail list scrolls on iPhone and iPad, and Inbox pages newest first (ADR-0326)
+
+- iPhone and iPad lists load 100 conversations at a time and fetch the next
+  page as you reach the end, like the Mac. A More button appears only to
+  retry a page that failed to load.
+- Inbox, Needs you, Handled and Suspected spam page by latest activity.
+  Important, Other mail and search results still page by rank.
+- While spending is above the 75% share, a refresh keeps reading older Inbox
+  mail with whatever reads new mail leaves over. That mail is read without
+  a model call and ranked once spending falls back under the share.
+
 ## 2026-11-13 — A failed widget refresh shows on its tile (ADR-0320)
 
 - Opening Cockpit no longer sends a "Run failed" notification when a widget's
@@ -443,6 +602,101 @@ A researched reply can now carry up to ten files totaling 25 MB. Review the file
   its last value. A failed scheduled refresh still notifies.
 - One web request from a widget's job waits ten seconds at most, so a stalled
   source is an error the job can report instead of the end of its run.
+
+## 2026-11-13 — Servers you added share Chat's tool list, and their other tools are named (ADR-0321)
+
+- One server with many tools could fill the list of tools from the servers
+  you added, so another server's create and save tools never reached a
+  chat. Servers now take entries in turn.
+- A tool that gets no entry is listed by name under its server, and Chat can
+  still call it. A server set to ask before each call still asks.
+- New chats get the new list; open chats keep theirs.
+
+## 2026-11-13 — Outbound calls can run a pinned call agent, for up to fifteen minutes (ADR-0319)
+
+- The reviewed call configuration can name one call agent and an exact
+  version of it. A call you approve then runs that version, and a later
+  change at the provider alters nothing until an operator pins the new
+  version, which cancels pending call approvals.
+- A call may last up to fifteen minutes; the configured limit still defaults
+  to five. Without a pinned agent, calls are placed as before.
+- Built and tested offline. Publishing the agent, pinning it and a live call
+  are still to do.
+
+## 2026-11-13 — Teach Veetbot keeps importance and reply need apart
+
+- In Email's Teach Veetbot card, saying whether a conversation needs a reply
+  used to replace the line and the Undo for your importance choice. Each row
+  now marks its own choice and has its own Undo.
+
+## 2026-11-12 — A mail list re-reads only the conversations that changed (ADR-0318)
+
+- The server keeps each conversation's list summary in memory, checks every
+  one for a change on each request, and re-reads only those that changed.
+  Filters, counts, order and your feedback still apply on every request, and
+  the summaries hold no message text.
+- On a local store of ten thousand conversations a repeat list took about
+  90 ms instead of 550 ms. No production figure is recorded.
+
+## 2026-11-11 — Veetbot looks things up before it drafts a reply, and attaches the files (ADR-0317)
+
+- Before a draft asks your correspondent for something, Veetbot reads what
+  you already allow it to read. Asked for a meeting's documents, it finds
+  the meeting and the mail that carried them, and drafts a short reply with
+  the actual files.
+- The files are staged privately and listed with the draft. Nothing is sent
+  until you send that exact message with those exact files.
+- When the research cannot finish, Veetbot tells you what it could not read
+  instead of asking the correspondent to repeat it. A question stays in a
+  draft only when something that matters is still unclear.
+- Pull request 250 delivered it. Acceptance on real mail is still open.
+
+## 2026-11-11 — Reply is yours to write, and Draft with Veetbot is its own button (ADR-0312)
+
+- Reply opens an empty reply for you to write, with no model call. Draft
+  with Veetbot writes a suggestion, and Use Veetbot draft opens one that
+  already exists.
+- Your text and Veetbot's are both kept, on every device: switching saves
+  the one you leave and restores the other.
+- The app and the server must both be updated.
+
+## 2026-11-11 — "I'm signed in" tries again when the check is interrupted (ADR-0316)
+
+- One press of I'm signed in now makes up to three attempts when Veetbot's
+  isolated browser reports that it was briefly unavailable, and the window
+  says which attempt is running. Any other failure stops at once.
+- A page still showing "Verify you are human", "Performing security
+  verification" or a "Sign in as" account chooser is no longer saved as
+  signed in, and a website task that meets one asks you to sign in. Veetbot
+  never tries to solve the check.
+
+## 2026-11-10 — Email opens on Important
+
+- Entering Email now selects Important instead of Inbox. Coming back to it
+  keeps your place and refreshes the rows already loaded.
+- Switching between Inbox and Important shows the list you had loaded at
+  once, then refreshes it in place.
+
+## 2026-11-10 — Chat shows what the website browser is doing (ADR-0306, ADR-0307)
+
+- While a website step runs, its line in the chat's activity names the
+  current phase and how long it has run, and updates as the step moves on.
+  It used to show nothing until the step ended.
+- The updates carry no page text or addresses, are not stored, and are shown
+  only for the step in progress. Pull request 248 delivered it.
+- Operators: `agent run browser-report --hours N` counts the website steps
+  of that window by outcome and phase, with their durations, and reads no
+  page content.
+
+## 2026-11-10 — A second memory search no longer pushes out what Chat already recalled (ADR-0309, ADR-0310)
+
+- When Chat searched your memory itself, the result could push out what was
+  recalled automatically, and a second search could push out the first.
+  Each search result is now smaller, both are kept, and room is reserved for
+  automatic recall.
+- The time Veetbot spends thinking no longer counts against the time allowed
+  for a memory search.
+- This applies to chats started after the update.
 
 ## 2026-11-09 — HTML email stays readable
 
@@ -459,6 +713,103 @@ A researched reply can now carry up to ten files totaling 25 MB. Review the file
 - More includes Suspected spam before Subscriptions. The category shows flagged
   Inbox mail and never moves mail in Gmail. Counts respect account and search.
 
+## 2026-11-09 — Veetbot can read your Google Calendar, off by default (ADR-0305)
+
+- A read-only calendar server lists the calendars an operator selected,
+  lists and searches their events, and reads one event. It cannot create,
+  change or answer an event.
+- It signs in with its own read-only Google grant, separate from Gmail's.
+  What it reads is treated as outside content and forms no memory by itself.
+  A schedule reads the calendar only when the schedule names it.
+- Off until `AGENT_CALENDAR_ENABLED=1`. Pull request 247 delivered it;
+  Google consent and production activation are still to do.
+
+## 2026-11-09 — A long edited reply sends with one press (ADR-0279)
+
+- A one-press send of an edited reply longer than 512 characters was
+  abandoned and the draft stayed unsent: the check compared your reply with
+  the shortened text an approval card shows. It now compares the full
+  reply, and what is sent must still match it exactly.
+
+## 2026-11-08 — Unsubscribing in Email also archives that sender's mail (ADR-0112)
+
+- Unsubscribing from a sender in Email now archives that sender's existing
+  mail under the same confirmation, with no separate archive switch. The
+  archive follows only an unsubscribe that was accepted or sent.
+- Email unsubscribe is still off by default
+  (`AGENT_EMAIL_UNSUBSCRIBE_ENABLED`).
+
+## 2026-11-06 — Email threads read as conversations (ADR-0301)
+
+- A thread of two or more messages shows each message as a bubble, yours on
+  the right and everyone else's on the left, with day dividers. A bubble
+  holds only what its writer wrote: quoted history, repeated sign-offs,
+  disclaimers and forwarded copies fold away, and Show full email opens the
+  whole message. A single message keeps the full-width reader.
+- Markers say where a message went to only part of the thread, where people
+  were added and where it returned to everyone. Chips above the conversation
+  list who wrote and how often.
+- A thread with three or more writers and either a side conversation or
+  eight or more messages opens on Brief: the summary, each writer's latest
+  point in their own words, the side conversations and every file sent.
+- Mail that claims your address but is not in your sent mail is never shown
+  as yours and carries a warning. None of this calls a model.
+
+## 2026-11-06 — One approval can cover a whole request on a signed-in website (ADR-0302)
+
+- A website action's approval card offers "Allow for this request" beside
+  Allow once and Deny. Accepting it lets the rest of that request open
+  pages, choose menus and filters, type dates and searches, and save
+  downloaded files into the chat, on that login's addresses only.
+- It still asks before payments, transfers, messages, account or security
+  changes, deletions, uploads and passwords, and a card for one of those
+  never offers it.
+- It ends when Veetbot finishes answering, at your next message, when you
+  stop the request, or after two hours. Scheduled work and work started by
+  an inbound message never get the offer.
+- The Apple apps need the update to show the choice. The production check on
+  a card-activity review is still open.
+
+## 2026-11-06 — Every Mac mail list scrolls (ADR-0303)
+
+- On the Mac, Inbox, Needs you, Handled, Important, Other mail and search
+  results each load up to 100 conversations and fetch the next page as you
+  scroll near the end. The More mail button is gone there.
+- A refresh keeps the rows you have loaded and the conversation you were
+  looking at in view.
+
+## 2026-11-06 — The Mac shows a message's pictures when you ask, and its reader uses the window (ADR-0304)
+
+- On the Mac, a message with pictures hosted on the web offers Load images.
+  Nothing loads until you press it, for that message only, and the button
+  says that loading may tell the sender you opened the email.
+- The server fetches the pictures without credentials and shows them as
+  bounded copies that are not saved. Pictures embedded in the message, GIFs,
+  hidden images and images of two pixels or less are not shown.
+- The Mac reading panel uses the width its neighbours leave, without the old
+  680-point limit. iPhone and iPad keep their reading widths.
+
+## 2026-11-05 — A CSV export is kept even when the website sends it without a download (ADR-0300)
+
+- Some websites answer an export button with the file's data instead of
+  starting a download. An approved export click now keeps one such CSV under
+  the rules for a downloaded file: 2 MiB of text, saved into the chat as
+  outside content.
+- When no file arrives in time, Veetbot is told so and checks the page for
+  an error, an export limit or a ready-file link instead of pressing the
+  button again.
+- Not yet confirmed on Chase.
+
+## 2026-11-05 — The remote sign-in browser shows the website at full size
+
+- The website in Veetbot's remote browser is shown at its own size, and a
+  narrow window scrolls it instead of shrinking it. Sign-in fields had been
+  too small to read.
+- The picture redraws about four times a second while you type or click. It
+  used to redraw once a second.
+- Since 2026-11-03, a sign-in you finish close to the five-minute limit is
+  still checked and saved. It used to be discarded without a word.
+
 ## 2026-11-04 — Email refreshes above the budget share spend on new mail (ADR-0298)
 
 - Once spending passes 75% of a limit, a refresh with Email open rates only mail that
@@ -466,6 +817,58 @@ A researched reply can now carry up to ten files totaling 25 MB. Review the file
   USD 0.37 re-rating older mail, about USD 11 an hour with Email open.
 - Until spending falls below that share, older mail keeps its rating after a preference
   change, and a long thread is ranked on its newest part with its automatic draft waiting.
+
+## 2026-11-04 — Save an email attachment into its chat (ADR-0296)
+
+- Save on an attachment in Email stores the file in that conversation's
+  chat, which then appears in Chat with the file on a reply. No model is
+  called.
+- Chat can save an attachment when you ask, and asks you every time. A
+  schedule cannot save one unattended.
+- A file can be up to 32 MiB. A text, Markdown or PDF file you save is also
+  added to knowledge, so later chats can search it; it stays marked as
+  coming from outside.
+- Pull request 232 delivered it. No trial on a real mailbox is recorded.
+
+## 2026-11-04 — A saved login signs in again the way it last did (ADR-0297)
+
+- Sign in again, the chat's sign-in card and the website offer now open
+  Veetbot's remote browser for a login last signed in that way, and the
+  window on your device otherwise.
+- A login last signed in through the remote browser shows Use this device on
+  its row, for a website that refuses the remote browser.
+- A sign-in check now waits, up to about 25 seconds, for a signed-out page
+  to draw its sign-in form before it decides. A sign-in that passes takes
+  about three seconds longer.
+- A chat keeps working after its website login is deleted; it simply has no
+  website. Every later message there used to fail.
+
+## 2026-11-04 — An Email refresh waiting behind long work is no longer failed (ADR-0295)
+
+- An Email refresh or draft gets its 120 seconds from the moment a worker
+  picks it up, not from the moment it was requested. One that waits up to
+  five minutes still gets its full time; it used to fail before it started.
+- Background work runs two tasks at once, so the wait is rarer.
+- Operators: `agent worker --role async` starts two processes under the one
+  unit, which uses about 1 GB more memory. Rolling back needs no step.
+
+## 2026-11-04 — Approval cards show when live updates are down
+
+- On 2026-11-03 one long chat used up every database connection within
+  about three minutes. Live updates then failed everywhere, and a chat read
+  "Working..." over an approval you could not see.
+- A dropped live connection now gives its database connection back at once,
+  and the app waits for a long replay instead of reconnecting.
+- A chat that is waiting for you loads its approval cards directly, whether
+  or not live updates connect.
+
+## 2026-11-04 — Chat is told which documents are on file (ADR-0299)
+
+- A chat now starts knowing the title, dates and number of passages of each
+  document it can search, up to twelve with a count of the rest, and never
+  their text. It used to depend on memory recall to learn that a document
+  existed.
+- A knowledge search that names no scope reaches every listed document.
 
 ## 2026-11-03 — Server checks for new mail spend on new mail (ADR-0286)
 
@@ -476,6 +879,59 @@ A researched reply can now carry up to ten files totaling 25 MB. Review the file
   for 43 messages, and costs one pass instead of one per read.
 - A long thread's automatic draft now waits until Email has finished reading it.
 - A check refused by a spending limit waits five minutes before trying again.
+
+## 2026-11-03 — Recall by meaning and document search by meaning are on, and stay on (ADR-0290, ADR-0292, ADR-0293)
+
+- By your standing decision of 2026-11-03, memory recall by meaning stays on
+  across releases until you withdraw it, with the flag or by removing the
+  installed decision files. It runs on the local encoder only, memory text
+  never leaves the host, and changing the encoder withdraws it.
+- Document search by meaning runs on OpenAI's embedding model
+  (`AGENT_KNOWLEDGE_SEMANTIC_PROVIDER=openai`). Only public and internal
+  document text is sent; restricted documents stay on word matching. Long
+  passages are embedded in smaller windows, so one relevant sentence is not
+  averaged away, and documents already on file gain vectors in the
+  background.
+- A document search drops the document's own name from the question, so
+  naming a manual no longer ranks its title page above the answer, and a
+  search of a single document can return more than two passages.
+- Operators: `agent memory standing-admission` prepares the decision files
+  and root installs them. The runbook is in [deployment](deployment.md).
+
+## 2026-11-03 — Schedules and saved jobs can use MCP servers (ADR-0291)
+
+- A schedule can name the MCP servers it uses, and its approval lists them:
+  a server you added, a Gmail account or Scale VP. A scheduled run is
+  offered a server's tools only when its schedule names that server, so an
+  existing schedule no longer gets tools from servers nobody chose for it.
+- A saved job can read from the servers its grant names. It can only read,
+  each read counts against the job's request limit, and nothing in a job
+  waits for an approval.
+- Schedules name their servers in Chat; the app's schedule screens do not
+  edit the list yet. Pull request 228 delivered it.
+
+## 2026-11-03 — An approved click can save a text file into the chat (ADR-0294)
+
+- When you approve a click on a website's Download or Export control,
+  Veetbot keeps the one file that click starts: text of at most 2 MiB, such
+  as a CSV, from that login's own addresses. Chat then reads it in sections.
+- Every other file is still cancelled: PDFs, spreadsheets, anything larger,
+  and any file a page starts by itself or outside an approved click.
+- The file is treated as outside content and is not attached to the reply
+  as a download for you. Pull request 231 delivered it on 2026-11-04; the
+  check on Chase is still open.
+
+## 2026-11-02 — Document search by meaning is built, off by default (ADR-0289)
+
+- With `AGENT_KNOWLEDGE_SEMANTIC_ENABLED=1`, each passage of a document is
+  embedded when the document is added, and a search matches the question's
+  meaning. A question that cannot be embedded is answered by word matching.
+- On the recorded test questions, matching by meaning alone put every
+  answering passage in the top two, and combining it with word matching
+  lifted none, so meaning alone is the default
+  (`AGENT_KNOWLEDGE_SEMANTIC_CHANNEL`).
+- Off by default. It was turned on the next day under your standing
+  decision.
 
 ## 2026-11-01 — Website Access: logins for websites like Chase
 
@@ -508,6 +964,192 @@ A researched reply can now carry up to ten files totaling 25 MB. Review the file
   drafted before the owner opens it.
 - A check handles only new or changed conversations and stops at half the daily and
   90% of the rolling allowance. It sends and notifies nothing.
+
+## 2026-11-01 — Veetbot can read, test and propose changes to its own code, off by default (ADR-0281)
+
+- Chat can read a schedule's history, a run's failure and its timeline
+  (`run.inspect`), so it can find why something failed instead of asking you
+  for the error. This part needs no setting.
+- With `AGENT_CODE_TOOLS_ENABLED=1` it can read the source of the running
+  release, keep a set of draft edits, and run tests, lint and type checks on
+  them in a sandbox with no network and no credentials.
+- With `AGENT_CODE_PROPOSALS_ENABLED=1` it can open a pull request to `dev`
+  from a new `veetbot/` branch, after you approve the whole diff. It never
+  merges, deploys or writes to an existing branch, and it cannot change CI,
+  deployment or policy files. Only a chat you start yourself can draft or
+  propose; schedules cannot.
+- Turning proposals on also needs the GitHub App to be allowed pull requests
+  and `veetbot/**` branches.
+
+## 2026-11-01 — A widget's approval card shows the whole change
+
+- A card asking to publish a widget showed at most 50 lines of the change,
+  each cut at 240 characters, although approving publishes the code to a
+  public branch. The card now pages through the whole change.
+- A change too large to show, past 400 entries, cannot be approved: the card
+  says approving publishes nothing, and the tool refuses it.
+
+## 2026-11-01 — Questions about what you own reach the fact, and a slow lookup cannot starve recall (ADR-0282, ADR-0283)
+
+- A question such as "which phone do I use?" now recalls the things you said
+  you have, own, drive, use or wear, as a sentence with "my" in it already
+  did.
+- Saying in a new chat that you own something Veetbot already knows about
+  strengthens the one memory instead of adding a copy. `agent memory
+  merge-possessions` folds the copies already stored; it previews first and
+  writes only with `--confirm`.
+- Preparing a recall may take five seconds at most. After that, recall runs
+  on word matching with ten seconds of its own. A turn that got no recall is
+  now recorded, so it can be counted.
+
+## 2026-11-01 — A file that could not be added to knowledge says so (ADR-0284)
+
+- When a file you sent in a chat cannot be indexed, Chat is now told, and
+  tells you, that it was not indexed and that knowledge search will not find
+  it. It used to answer as if the file were searchable.
+- Indexing is tried three times, one minute and then fifteen minutes apart,
+  and the log names the kind of error.
+- `agent knowledge retry <artifact id>` queues a failed or refused file
+  again.
+
+## 2026-11-01 — Knowledge search ranks passages by how much of the question they cover (ADR-0285)
+
+- A passage that holds more of the question's distinct words now ranks above
+  one that repeats a single word, and a word matches its plural and other
+  simple forms.
+- A PDF's bookmarks become section headings when it is added, so a manual's
+  passages carry their section names. A PDF already on file gains them when
+  it is added again.
+
+## 2026-10-31 — Send a reply with one press, and take it back (ADR-0278, ADR-0279)
+
+- Send in Email now sends the reply with one press. For ten seconds Undo
+  cancels the send and returns the reply to editing with its text intact.
+  The review sheet remains only for a draft already waiting on an approval.
+- The press is your consent to exactly the draft and conversation on screen.
+  If new mail arrived or the reply changed, the send is refused in a plain
+  sentence and the draft is kept.
+- Sends no longer queue behind refreshes and read the mailbox once, so a
+  reply leaves sooner.
+- Operators: `AGENT_EMAIL_SEND_UNDO_SECONDS` sets the window, 0 to 60.
+
+## 2026-10-31 — A website that signs you out shows a sign-in card (ADR-0280)
+
+- When a website task stops because you are signed out, the chat shows a
+  card with Sign in to the website and Stop task, in place of a question to
+  answer. Signing in there continues the task, with nothing to type.
+- If the wait for the sign-in has run out, the card adds I've signed in. If
+  the task itself has run out of time, the card says so and offers only Stop
+  task.
+- Website Access now sits with the chat's toolbar actions on every device.
+  An app that has not been updated still shows the question.
+
+## 2026-10-31 — Chat can delete files it made (ADR-0277)
+
+- Ask Chat to delete a chart, export or other file it generated in that
+  chat and it does, without an approval card. The file leaves the
+  conversation and cannot be opened again. This cannot be undone.
+- It deletes only files it generated in the current chat. Files you sent,
+  saved captures, knowledge documents and other chats' files are never
+  deleted, and a turn that has read outside content cannot delete.
+- Chats started after the update can do this. Pull request 217 delivered it.
+
+## 2026-10-31 — Chat can look at a public photo (ADR-0276)
+
+- Give Chat a direct link to a picture, or a page of a public photo gallery,
+  and it can look at the image itself. When a page lists several pictures
+  and it cannot tell which one you mean, it asks.
+- The picture is fetched without credentials, from public addresses only and
+  within size and time limits, and is treated as outside content. Chat says
+  so when a picture cannot be read. Pull request 215 delivered it.
+
+## 2026-10-31 — Integration keys in Settings, off by default (ADR-0275)
+
+- Settings gains Integration keys: add a key with a label, the exact HTTPS
+  address it is for and its type (`Authorization: Bearer` or `X-API-Key`),
+  and replace or delete it later. A stored key is never shown again, in the
+  app or to the model.
+- Copy reference gives a reference you can hand to Chat for a job. The job
+  can use the key only for read requests to that address, and only under a
+  grant you approve.
+- Off until `AGENT_INTEGRATION_SECRETS_ENABLED=1`, which also needs a
+  private key file on the host (`INTEGRATION_SECRETS_KEY_FILE`); see
+  [Integration keys](integration-keys.md). Pull request 213 delivered it,
+  and turning it on in production is not recorded.
+
+## 2026-10-31 — Veetbot can examine a widget that shows the wrong thing (ADR-0273)
+
+- Veetbot can render a widget privately with one of its sample cases and get
+  back the visible text and a picture, and can read a widget's build
+  findings, rejected imports, waiting publications and the failures your
+  devices reported.
+- The app reports a widget failure as a fixed code and its revision, never
+  screen text or feed values.
+- The check in production, with a released builder and app, is still open.
+
+## 2026-10-31 — Notifications wait ninety seconds for you to see something in the app (ADR-0143)
+
+- An approval, a question, a scheduled result or a skipped run now waits 90
+  seconds, up from 30, before it is pushed to your devices. A failure is
+  still pushed at once, and an approval that expires within 90 seconds keeps
+  the 30-second wait.
+
+## 2026-10-30 — Creating a widget asks once (ADR-0270)
+
+- Veetbot now prepares a widget, with its collector, private access and
+  schedule if it has them, without publishing or granting anything, and may
+  test it offline or under access you already approved without asking.
+- One card then summarizes the widget, the code to be published, the private
+  inputs, websites and keys, the feeds, the limits and the refresh interval.
+  Approving it installs everything; a changed proposal needs a new card.
+- Pull request 212 delivered it. The check in production is still open.
+
+## 2026-10-30 — Widget refreshes stay out of Chat (ADR-0271)
+
+- A widget's refresh no longer appears as a conversation in Chat, however it
+  was started and whether or not it worked. Earlier refreshes leave the list
+  once the app is updated; their records are kept.
+- A schedule that keeps a widget's feed with a model run can be changed in
+  place to run a saved job, with the usual approval.
+- The sample pull-request collector reads through the authenticated GitHub
+  reader and publishes only after every repository was read, so a failed
+  read is an error and never a zero.
+
+## 2026-10-29 — Veetbot can write a program and run it once or on a schedule (ADR-0268)
+
+- Ask for something made of fixed steps, such as a widget's numbers, and
+  Veetbot can write a small Python program for it (a job), test it, run it
+  once and schedule it. A job calls a model only where its code asks, so one
+  that only fetches and counts costs no model spend.
+- A job's code is public, on the `cockpit/jobs` branch, and holds no
+  personal values. Its inputs, the websites it may call, its keys, the feeds
+  it may publish and its limits are private and held under your approval. An
+  approved job runs again without asking, and new access asks.
+- A job runs in the sandbox with no network of its own. It can only make web
+  requests to approved hosts, call a model within its budget (USD 0 by
+  default), publish to an approved feed and write a log line.
+- Off until `AGENT_JOBS_ENABLED=1`; the [jobs guide](jobs.md) covers setup.
+  It was turned on in production on 2026-10-30, and the day-long production
+  check is still open.
+
+## 2026-10-29 — Chat's list of further tools holds fifty (ADR-0267)
+
+- The list of tools a chat can reach beyond those it is given in full grows
+  from forty entries to fifty, after the fullest chat filled all forty. A
+  gate keeps ten entries free. Pull request 211 delivered it.
+
+## 2026-10-29 — An update starts even when recall by meaning cannot be turned on (ADR-0269)
+
+- If the files that admit recall by meaning are missing, expired or do not
+  match the release, the services now start on word-match recall and log
+  `semantic_recall_unavailable_using_sparse`. They used to refuse to start.
+  Any other configuration error still stops startup.
+
+## 2026-10-29 — The three modes lead the sidebar, and iPad sidebars resize
+
+- On Mac and iPad, Cockpit, Chat and Email sit at the top of each wide
+  sidebar. On iPad, dragging a sidebar's divider resizes it, and the width
+  is kept on that device.
 
 ## 2026-10-28 — Spent one-time repairs retired (ADR-0266)
 

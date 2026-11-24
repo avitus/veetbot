@@ -416,6 +416,8 @@ def test_the_echo_names_exactly_one_offer() -> None:
     with pytest.raises(ValueError):
         RequestGrantEcho(profile_id=UUID(int=5), tool_name=SCRIPT)
     with pytest.raises(ValueError):
+        RequestGrantEcho(profile_id=UUID(int=5), job_slug=SLUG)
+    with pytest.raises(ValueError):
         RequestGrantEcho.model_validate({"tool_name": "sandbox.run_command"})
 
 

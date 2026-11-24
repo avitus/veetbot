@@ -46,9 +46,10 @@ Plaintext HTTP, embedded URL credentials, queries, and fragments are rejected.
 The base URL may be stored in preferences. The token is stored as a
 device-local generic Keychain password and is never written to `UserDefaults`.
 The app uses the local Data Protection Keychain under its team-signed
-application identifier, with synchronization disabled. The tracked project does
-not pin a development team; each developer must select their own team under the
-target's Signing & Capabilities settings. A
+application identifier, with synchronization disabled. The tracked project
+names the owner's development team in its project-level and UI-test build
+settings; another developer selects their own team under the target's Signing &
+Capabilities settings. A
 macOS upgrade from the earlier file-based Keychain item is attempted without
 displaying an authentication prompt; if its ad-hoc signature no longer has
 access, the user must enter the token once in the signed build. The transport
@@ -77,17 +78,25 @@ unsigned-build compatible, and the debug UI-test fixture suppresses the
 permission request.
 
 Approval status uses the API's uppercase five-value wire vocabulary. A pending
-approval remains actionable in its tool card with Approve once and Deny controls.
+approval remains actionable in its tool card with Approve once and Deny controls;
+Deny takes an optional reason. When the server offers one approval for the rest
+of the request, for the scripts Veetbot writes (ADR-0342) or for changes to one
+saved job (ADR-0344), the card shows the server's summary of what that allows
+and leads with Allow for this request, beside Approve once and Deny. A server
+that makes no offer leaves Approve once and Deny.
 A `browser.act` card instead names the action, the element and the page, marks
 website text as such, and offers Allow once, Deny, and, when the server offers
 it, Allow all actions for this task after a confirmation. The card displays the
-server's site scope, limits and exceptions beside that choice. An active task permission shows
+server's site scope, limits and exceptions beside that choice. When the server
+offers one approval for the request on that signed-in website (ADR-0302), the
+card instead leads with Allow for this request beside Allow once and Deny, with
+the server's words for what it covers beneath. An active task permission shows
 above the composer with its remaining actions and time and a Stop control
 (ADR-0129).
 
 Settings are A2 pages, one per group: Connection, Models, Website access,
-MCP servers, Notifications, Appearance, iOS's SMS integration, and Data &
-privacy. On the
+MCP servers, Integration keys, Notifications, Appearance, iOS's SMS integration,
+and Data & privacy. On the
 Mac and iPad a sidebar on deep paper lists the groups under "Settings" in the
 serif face, the chosen row in the selected tint and Website access marked with
 an amber dot while a login needs the owner; the iPhone lists the groups with a
@@ -115,7 +124,11 @@ or from a pasted configuration; signs in to it in the app through
 on the `veetbot://mcp-sign-in` callback; signs out; and removes it after a
 confirmation. New chats use a server once it is ready. The group needs
 `settings.read` and `settings.write`; a server without the routes says the
-feature is not enabled.
+feature is not enabled. Integration keys (ADR-0275) lists each saved key by
+label, origin and authentication scheme, never its value, with Copy reference,
+Replace and Delete, and adds one with Add key, under the same two scopes; see
+[Integration keys](integration-keys.md). A server without the routes says the
+keys are not enabled.
 
 First-run setup is Connect: step 1 is the Connection group under "Connect this
 Mac (or iPhone, iPad) to your Veetbot." and a sentence on where the token is
@@ -294,7 +307,10 @@ keeps the login, and a sign-in started from a chat opens Website Access for its
 link (ADR-0288). While any task permission
 is active (ADR-0129), a compact Task
 permissions row at the end of Website Access shows how many, and its menu
-stops any one of them at once.
+stops any one of them at once. A Task approval websites disclosure at the top
+of Website Access lists the website addresses that may offer a task permission, kept on the server for
+every device (`/v1/browser-task-scopes`): Add website asks for confirmation,
+up to sixteen addresses, and removing one ends its active task permissions.
 
 Use Veetbot's remote browser remains the alternative. It sends the exact
 public-HTTPS primary origin, optional `additionalOrigins` included in
@@ -349,14 +365,15 @@ external states visible in App Store Connect and TestFlight.
 
 ## Runtime behavior
 
-One submitted message creates one run. A stable idempotency key is reused across
+One submitted message creates one run, unless it is a follow-up to a run that
+is already working (below). A stable idempotency key is reused across
 connection retries. While a deploy restarts the API, the proxy in front of it
 answers with its own 502, 503 or 504 page; a follow-up's session read and the
 submission keep retrying through those answers for up to three minutes of
 backoff, the release's readiness bound, before a failure is shown. The API's
 own error responses keep the ordinary retry bound. If the server reports
-`active_run_exists`, the UI attaches to the named run and does not queue a
-second message. A waiting user's answer is routed to run input with the
+`active_run_exists` for a new message, the UI attaches to the named run and
+does not queue a second message. A waiting user's answer is routed to run input with the
 displayed question identifier. Stop requests use
 the run-cancel route. The native composer uses padded multiline input; Return
 sends its contents, while Command-Return inserts a newline. The composer floats
@@ -369,6 +386,21 @@ a conversation opens on such an answer or one arrives whole, as a scheduled
 report does: the view shows its beginning below the toolbar, and keeps it there
 while rows above it change height, until the owner scrolls.
 
+A message sent while Veetbot is working joins that run instead of starting
+another (ADR-0324), on a server with `AGENT_RUN_STEERING_ENABLED=1`. The
+composer stays enabled and Stop stays available. The follow-up shows in the
+transcript, dimmed, above "Veetbot will read this at its next step" until the
+run reads it at the start of its next step; it does not interrupt a model call
+or a tool in flight, and it never answers an approval card. A follow-up is text
+only: staged files wait for the next message. The server holds at most eight
+unread follow-ups for a run, and the client says so when a further one is
+refused. If the run ends before reading a follow-up, the client follows the
+run the server started from it; when the server started none, as after a
+failure or for a follow-up typed before Stop, the unread follow-ups return to
+the message box ahead of any draft. A server that answers
+a follow-up with `active_run_exists` (steering off, or a run that takes none)
+leaves the composer waiting for the run, as before.
+
 Files can be attached to a message (ADR-0120): dropped on the conversation or
 the message field on Mac and iPad, or chosen with the paperclip from Files on
 every device and from Photos on iOS. Each file uploads to
@@ -376,7 +408,8 @@ every device and from Photos on iOS. Each file uploads to
 and removal, and a message may be attachments alone. Images other than small
 PNG, GIF, and WebP files are re-encoded as JPEG with a 2000-pixel long edge,
 which drops their location metadata. A server without the upload route marks
-each file as not accepted, and an answer to a clarifying question stays text.
+each file as not accepted, and an answer to a clarifying question or a
+follow-up to a working run stays text.
 
 Submitting a top-level message inserts its user bubble before the first network
 await. The persisted `user.message.created` event replaces that optimistic item
@@ -408,8 +441,8 @@ status names only what the run needs from the owner: Needs your approval while
 an unanswered approval is pending, and Needs your answer for a question. A run
 still parked as waiting for approval with nothing left to decide, because an
 answered approval is resuming or a delegated child is working, shows Working…
-in the activity indicator instead. People and Stop sit in the window toolbar on
-the Mac and in the navigation bar on iOS.
+in the activity indicator instead. Website Access, People and Stop sit in the
+window toolbar on the Mac and in the navigation bar on iOS.
 
 The sidebar mirrors the server's authoritative, paginated session index.
 SwiftData stores that cache behind the store protocol; if its container cannot
@@ -441,14 +474,14 @@ Conversation activity, not selection, updates the server
 ordering. Each row's activity timer shows seconds only during its first minute,
 then uses minute-or-larger relative units.
 
-On macOS, iPhone, and iPad, a collapsible **Recent chats** section immediately
-below New conversation shows up to five conversations in descending activity
-order, including conversations inside closed folders. Scheduled sessions are
+On macOS, iPhone, and iPad, a collapsible **Recent** section below search and
+New chat, after any Needs you group, shows up to five conversations in
+descending activity order, including conversations inside closed folders. Scheduled sessions are
 excluded. These are shortcuts to the same conversations: their folder and
 History rows remain in place, and selecting a shortcut does not change its
 activity or folder. The section starts expanded, remembers the owner's toggle
 on the device independently of folder solo mode, and works with older servers
-that do not offer folders. An empty history shows no Recent chats section.
+that do not offer folders. An empty history shows no Recent section.
 
 Conversation folders (Milestone 29, `thread-folders.md`) are server state the
 sidebar mirrors, never a local organization. The index's `folder_id` is merged
@@ -458,11 +491,12 @@ whose index carries the `folder_id` key is asked for its folders and open
 proposals with the history; both are held in memory only. The sidebar then
 renders suggested folders, each listing the conversations it would file one
 per line, with accept, decline, and for a new folder a rename that accepts it
-under the owner's name; then the folders in one section, each a row that
+under the owner's name; then the folders in one section whose label carries
+the new-folder control, each a row that
 expands to its conversations and whose context menu (a right-click on Mac, a
 long press on iPhone and iPad) renames or deletes it or switches solo mode;
-then the unfiled history and a new-folder control; and every row gains a move
-menu listing the folders. Which folders are expanded is remembered on the
+then the unfiled history; and every row gains a move
+menu listing the folders and New folder. Which folders are expanded is remembered on the
 device and changed only by the owner's own toggles, never by a proposal or a
 refresh. In solo mode, the default, at most one folder is open and opening one
 closes the other; without it every folder starts open. Create, rename, and
@@ -614,8 +648,23 @@ accepting connects that profile to the chat through the existing Website Access
 flow, after a device sign-in when the login needs the owner, and nothing
 connects on its own (ADR-0251).
 
+When a website signs the owner out during a run, the run pauses on a docked
+Sign-in needed card naming the website (ADR-0280), and the transcript shows
+"Waiting for you to sign in. See below." Sign in to that website opens the
+device sign-in, and the run continues on its own once the sign-in is verified.
+A pause that names no saved login offers Open Website Access instead, and a
+pause that no longer waits for a verified sign-in adds I've signed in; Stop
+task ends the run.
+
+While a browser call runs, its activity line names the current phase (Open
+page, Wait for page, Read page, Send action and the like) with the elapsed
+seconds, from transient `tool.call.progress` frames (ADR-0306). A script
+Veetbot writes in code mode (ADR-0342) is an ordinary `sandbox.run_code` tool
+call in activity, with no treatment of its own; its approval card is described
+under Build and connect.
+
 Approved checkpoints collapse automatically to a summary showing the action and
-whether it was approved once or allowed for the task. Selecting the summary
+whether it was approved once, allowed for the task or allowed for the request. Selecting the summary
 expands the original details for inspection without restoring decision controls.
 This applies to generic and website approvals, inside tool cards and standalone
 in chat, including approvals loaded from history. Pending requests remain open
@@ -636,15 +685,15 @@ the view keeps a selection when the transcript redraws. A file the agent exporte
 arrives as a button under its answer and opens the artifact viewer, which on the
 Mac opens at a reading width.
 
-Adjacent successful calls of the same tool, including `web.search` and
-`web.fetch`, collapse into one count-labelled activity bundle. Expanding it
-preserves access to each call's arguments, result, and risk. The bundle shows
-the highest individual risk. Fetch bundles also include rejected, unavailable,
-and failed calls, with outcome counts in the summary and each call's status
-and URL in its expanded row. An error result on a completed fetch is displayed
-as failed. Messages, different tools, approvals, queued or running calls,
-denials, and uncertain outcomes break the bundle. Other tools bundle only
-successful completions.
+Adjacent finished tool calls collapse into one count-labelled activity bundle
+("3 tool calls"), whichever tools they are and whether each completed, failed,
+was rejected, was unavailable or needed correction; the summary gives the
+outcome counts. Expanding it preserves access to each call's name, status,
+arguments, result, and risk. The bundle shows the highest individual risk. An
+error result on a completed call is displayed as failed. Messages, unknown tool
+names, pending approvals, queued or running calls, policy denials, and
+uncertain outcomes break the bundle; a call the owner denied at its approval
+joins the bundle as denied once that approval is settled.
 
 Artifact metadata and bytes are fetched separately. The process-local content
 cache sends `If-None-Match` and reuses bytes on `304`, retains at most 32 MiB,
@@ -706,8 +755,10 @@ ADR-0050; no richer tool-detail route was added.
 
 ## Memory and People
 
-Memory opens from the toolbar (on iOS, from the More menu) with two
-collections; the server mounts its routes when `AGENT_MEMORY_API_ENABLED=1`.
+Memory opens from the toolbar (on iOS, from the More menu) with three
+collections, Memories, People and Synthesis (the merges and summaries Veetbot
+made from overlapping memories, to review or undo); the server mounts its
+routes when `AGENT_MEMORY_API_ENABLED=1`.
 **Memories** lists the principal's governed beliefs with status and
 type filters and a flag toggle that shows only memories needing review; every
 email-derived memory arrives flagged. On the Mac the sheet has three columns:
@@ -826,12 +877,24 @@ details panel. Both side columns resize and keep their widths on this Mac
 the Cockpit acceptance checks. Email uses the Chat connection's authenticated
 transport. Its compact navigation opens a thread from the inbox; regular iPad
 and Mac layouts keep a mailbox sidebar beside the list and thread detail.
-Inbox is the initial collection; Needs you and Handled are distinct server
-collections (ADR-0231). Counts cover the filtered collection before pagination;
+Important is the initial collection and the one each switch into Email opens;
+Inbox, Needs you and Handled are distinct server collections (ADR-0231). Inbox
+leaves out mail the server ranks below 0.1 relevance, which Other mail and
+search still reach; Needs you keeps low-ranked reply requests (ADR-0329).
+Counts cover the filtered collection before pagination;
 older servers omit them. Same-query background reads retain the last confirmed
 counts while loading or after a transient failure; a changed query clears them.
+While an archive waits for Gmail's confirmation the counts stay on screen, each
+less the conversation the archive has hidden, and return to the confirmed value
+if the row is restored.
 Account filtering, search, Important / Other mail,
-pagination, per-account freshness and historical coverage remain available.
+per-account freshness and historical coverage remain available. Every list
+scrolls on every device (ADR-0326): a read fetches up to 100 conversations and
+the next page loads as the end of the list scrolls into view. On iPhone and
+iPad a More mail button (More important in Important) appears only to retry a
+page that failed to load, and is disabled while pressing it would do nothing.
+A list stays as deep as it was loaded when a row leaves it or the owner comes
+back to it.
 Rows read newest first by each
 conversation's latest activity; background updates keep the rows on screen,
 slide arrivals into place and move a conversation with new mail up (ADR-0234).
@@ -850,14 +913,15 @@ thread read from the same activation instead of replacing it with another reques
 Accounts awaiting their first update show a pending message; the client shows
 an account failure only when the server has recorded a refresh error.
 
-The wide Email sidebar contains account and search controls, New chat, the
-Chat / Email switch, pending chat attention, and Mail navigation for Important, Inbox,
-Needs you and Handled, with Suspected spam and Subscriptions under More. Its bottom row opens Chat, Memory, People,
-Schedules, Persona and Settings. On the Mac it follows the clean reader design
+The wide Email sidebar contains the Cockpit · Chat · Email switch, search, New chat,
+pending chat attention, Mail navigation for Important, Inbox,
+Needs you and Handled, Suspected spam, Subscriptions, Email learning and Find other mail under More, and the account picker.
+On the Mac it follows the clean reader design
 (MagicPath cozy-evening-6871): the Cockpit · Chat · Email switch and Search mail lead,
 then a Mail section (Important, Inbox, Needs you behind an amber dot, Handled,
 with counts), a More section (Suspected spam, Subscriptions, Email learning, Find other mail), any
-pending chat attention, and the account picker; New chat joins the bottom row. On the Mac the window's sidebar button hides
+pending chat attention, and the account picker; a bottom row opens New chat, Chat, Memory, People,
+Schedules, Persona and Settings. On the Mac the window's sidebar button hides
 it together with Chat's sidebar; the mode bar with the mode switch and More then
 returns, and account, search and collection pills sit above the inbox.
 This visibility binding is Mac-only; iPad retains UIKit-managed split navigation.
@@ -878,7 +942,7 @@ iPad revision `470590874544406528` and iPhone revision `470590869133742080`, in
 MagicPath project `462051782995116032`.
 On the Mac all four Email columns take the width the owner gives them, each
 kept on this Mac and restored at the next launch (MagicPath cozy-evening-6871):
-the sidebar's hairline drags it from 200 to 340 points (260 before any drag,
+the sidebar's hairline drags it from 300 to 420 points (320 before any drag,
 `veetbot.email.sidebarWidth`), a native split divider drags the inbox from 260
 to 480 (300 before any drag, `veetbot.email.inboxWidth`), the right panel's
 hairline drags it from 260 to 440 (below), and the reader takes the rest. Its contents fill that width with fixed edge
@@ -916,8 +980,10 @@ its reason; a single message follows as prose under its sender's line, with
 View in People and Message details kept beside the sender. A forwarded copy below
 that sender's note folds behind **Show earlier replies**, including the reader's
 `Forwarded from` attribution and dashed `Forwarded message` headers. Its nested
-replies, signatures and disclaimers remain available in that expansion. A forward
-without a note stays visible. Two or more messages
+replies and disclaimers remain available in that expansion. A forward
+without a note stays visible. The reading text leaves a sender's signature out
+at every quote level; Show original still shows it, and People takes the
+sender's title and phone number from it (ADR-0336). Two or more messages
 follow as a conversation (ADR-0301; MagicPath peaceful-flood-7871): the owner's
 bubbles on the right, others' on the left under an initials avatar, each showing
 only the writer's own words with **Show full email** for the rest, writer chips
@@ -955,8 +1021,12 @@ Send is the filled capsule (⌘↩): one press consents to the exact reply and
 parks it for the undo window, during which the button becomes Undo. Its fill recedes
 toward the server deadline, and Reduce Motion keeps it static. A confirmed send reads Sent (ADR-0279). Draft
 options is a quiet icon menu beside the send action, and Refine with Veetbot
-folds its field and button into one row.
-The reading view keeps the reply choices at the bottom edge. The Email learning, Draft history, pending-approval review and unsubscribe sheets
+folds its field and button into one row. While Veetbot rewrites the reply the
+Refine draft button shows a spinner and "Refining…", with the current
+preparation step beneath it, until the new draft arrives.
+The reading view keeps the reply choices, Reply and Draft with Veetbot
+(Continue reply and Use Veetbot draft once a draft exists), at the bottom edge,
+and Discuss in Chat below the conversation while no reply is open. The Email learning, Draft history, pending-approval review and unsubscribe sheets
 share `EmailSheetHeader` (a display-face title and a quiet way out); the
 Subscriptions census takes the same row and capsule styles.
 A compact mailbox-status disclosure retains
@@ -974,6 +1044,8 @@ Archive in Gmail is available beside each inbox row and in thread detail on
 supported accounts. Checking it removes the row immediately while the server
 archives the conversation asynchronously. Normal progress and success stay
 silent; a failure or uncertain outcome restores the row with an error. The
+owner's own reply syncing into the thread does not cancel an archive made just
+after it; new mail from anyone else still does (ADR-0337). The
 client retains confirmed mailbox state, row order and unsaved replies, and
 keeps other rows actionable. Pending rows stay hidden through refreshes and
 status checks resume when Email reopens. An archived conversation found in
@@ -997,10 +1069,10 @@ body stays unchanged. Paragraph wrappers inside HTML list items keep their first
 text beside the bullet.
 
 The reading column separates the attention summary, original conversation and
-reply composer. Why this matters and Improve priorities expand on demand, while
-the persistent Your reply action reaches the editor without scrolling through
-the conversation. From and To stay visible; Cc, Bcc and subject expand together
-and initially open when copy recipients are present. Draft options collect save,
+reply composer. Teach Veetbot expands on demand, while
+the persistent Reply action reaches the editor without scrolling through
+the conversation. The "Reply to" recipient line stays visible; From, To, Cc, Bcc and subject expand together
+from it and initially open when copy recipients are present. Draft options collect save,
 history, writing-example endorsement and discard. Send is the primary composer
 action; the exact-message review sheet remains only for a draft already
 awaiting approval through the older proposal path.
@@ -1014,7 +1086,9 @@ for attention, and filled capsules that keep contrasting text.
 Thread detail renders text and attachment metadata without remote content.
 A researched reply can include up to ten files totaling 25 MB. Review the
 attachment names with the recipients and body before sending. If the selected
-files exceed the limit, Email reports a preparation issue.
+files exceed the limit, Email reports a preparation issue. A preparation issue
+names only a required file or source: a reply that turns on a decision only the
+owner can give is still drafted, with that point left open.
 Save on an attachment keeps a copy in the email's chat (ADR-0296), where it arrives on
 a reply and appears in Artifacts. The control then reads "Saved to chat" until the
 connection resets; a file over 32 MB says so instead, and a failure offers Retry.
@@ -1033,7 +1107,7 @@ than freezing text the owner cannot see. A press the server refuses because mail
 arrived shows that mail in the stale notice, and Undo within the window returns
 the editor with the text intact. A failed owner action is reported beside
 the control that caused it, and a failed mail read with the conversation it could
-not refresh; an action refused far from its button reads as no action at all. The Writing style menu
+not refresh; an action refused far from its button reads as no action at all. Use as writing example, in Draft options,
 can explicitly endorse the displayed wording as an example after saving any
 edits; a save conflict prevents endorsement. The action binds the current draft
 revision and preserves the learning pause state. The learning pane discloses
@@ -1083,6 +1157,9 @@ explicit. Call again and Something is wrong stage an editable Chat follow-up
 without sending, redialing or reporting anything; existing draft text is kept.
 Only the call identifier enters that draft. Pending, active and erased records
 offer no follow-up. Deleting call content retains its exact confirmation.
+After a call the owner asked for in an ordinary chat ends, the server adds a
+report to that conversation saying how the call went, usually a minute or two
+later; the New call result notification and this sheet are unchanged (ADR-0325).
 
 The SMS sheet adds the recipient and an explanation that the text comes from
 this iPhone, above the system Messages composer. The system's Send tap and
@@ -1116,7 +1193,8 @@ unverified, offering no mechanism, or already decided. An unverified row reads
 on it. Unsubscribe on one row, or *Unsubscribe N*, opens one confirmation that
 names every sender with its mechanism — *One-click request to example.com* or
 *Sends an email to unsub@…* — states that an unsubscribe cannot be undone, and
-offers *Also archive existing mail from these senders*, off by default.
+says *Existing Inbox mail from these senders will be archived*: the client
+always asks for that cleanup, with no separate choice.
 Confirming is the consent and sends exactly one command. The unsubscribe
 address is never part of a client projection: a target carries a subscription
 identifier, its evidence digest and its expected revision, and nothing else.

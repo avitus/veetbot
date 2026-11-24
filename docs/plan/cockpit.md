@@ -800,6 +800,7 @@ feed is an indistinguishable 404.
 | `POST /v1/cockpit/widgets/{slug}/revert` | `cockpit.write` | Owner reverts to a named revision |
 | `POST /v1/cockpit/widgets/{slug}/delete` | `cockpit.write` | Owner deletes |
 | `POST /v1/cockpit/widgets/{slug}/restore` | `cockpit.write` | Owner restores |
+| `POST /v1/cockpit/widgets/{slug}/diagnostics` | `cockpit.write` | The owner's device reports a failure of a live revision: `revision_id` and a closed `code`; `204` ([widget diagnostics](#widget-diagnostics)) |
 | `POST /v1/cockpit/refresh` | `cockpit.write` | Refresh every assistant feed now ([refresh on entry](#refresh-on-entry)) |
 
 The owner's own write routes go through the same outbox and pipeline as the
@@ -1585,7 +1586,11 @@ grant that fits, with an optional new title or instruction. Creating,
 archiving or restoring a job, other jobs, new schedules, cadence or time
 changes and MCP server replacement still ask. A run it authorizes binds its new
 grant to the request approval, `uuid5(approval_id, "job-revision:<id>")`; a
-second run of that revision with different access asks.
+second run of that revision with different access asks. The run checks again
+when it writes the grant, whether it proposes access or carries a saved grant
+to the new revision: if another run bound other access to that id after
+authorization, it fails with `job.approval_required` instead of replacing a
+grant a run record or schedule may name.
 
 ## Widget diagnostics
 

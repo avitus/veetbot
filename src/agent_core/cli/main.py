@@ -510,12 +510,19 @@ async def _submit(
                         AsyncGenerator[StreamFrame, None],
                         composition.services.runs.stream(composition.principal, run_id, None),
                     )
+                    # A suspended run's stream stays open, so reading stops at
+                    # its waiting frame. In a finished run that frame is
+                    # history: read on to the terminal frame and its message.
+                    suspended = run.status in {
+                        RunStatus.WAITING_FOR_APPROVAL,
+                        RunStatus.WAITING_FOR_USER,
+                    }
                     async with aclosing(stream):
                         async for frame in stream:
                             if not isinstance(frame, PersistedStreamFrame):
                                 continue
                             events.append(frame)
-                            if frame.event in {
+                            if suspended and frame.event in {
                                 "run.waiting_for_approval",
                                 "run.waiting_for_user",
                             }:

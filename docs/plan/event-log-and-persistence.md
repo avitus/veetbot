@@ -191,7 +191,7 @@ INDEX (session_id) WHERE status NOT IN (...)` constrains the `runs` table to one
 non-terminal run per session, which is a statement about runs and not about
 appenders. The second is that a session therefore has only one appender. It does
 not — the submit handler appends the user message from its own transaction,
-alongside the run insert (`http-api-and-streaming.md:1003`), while a worker may
+alongside the run insert (`http-api-and-streaming.md:1035`), while a worker may
 be appending to the same session. That is safe, and it is safe because both
 writers allocate the same way, not because either the index or the one-active-run
 default forbids the concurrency.
@@ -343,7 +343,7 @@ they fix four acceptance criteria and one exclusion list. Neither states a
 format, a redaction procedure, or what "consent-gated" means mechanically,
 and [evaluation-harness.md](evaluation-harness.md) has already built the
 consuming half against the assumption that this half is redacted before a
-converter ever sees it (`evaluation-harness.md:1353`). This is the
+converter ever sees it (`evaluation-harness.md:1375`). This is the
 producing half, and it is the third projection in the table above.
 
 ### The export is an artifact, not a query
@@ -421,7 +421,7 @@ same question in the same words.
 `recorded_on` is a date, not a timestamp, and there are no per-message
 timestamps at all. Per-message timing is the highest-entropy correlatable
 field an export could carry, no stated consumer needs it — the harness
-discards timestamps at conversion (`evaluation-harness.md:1330`) and a
+discards timestamps at conversion (`evaluation-harness.md:1352`) and a
 training corpus has no use for them — and a field that is dropped by every
 consumer and re-identifies a user is a field that should not have been
 written. `tools` records the name and schema hash of every tool the run
@@ -457,7 +457,7 @@ trustworthy.
    help; these fields are excluded because of what they are, not because
    of what they contain.
 2. **Pattern replacement.** The secret scanner's five rule families
-   (`bootstrap-and-composition.md:1303-1311`) run over every message body,
+   (`bootstrap-and-composition.md:1316-1324`) run over every message body,
    every tool argument, and every tool result, and a match is replaced with
    `[redacted:<rule_name>]`. The key-name families the log-redaction
    processor already uses (`development-toolchain.md:154-156`) run over
@@ -474,7 +474,7 @@ export **fails closed**: a verification hit raises `ExportRedactionError`,
 writes no artifact, and reports the rule name and the message index. It
 never reports the match, for the reason the scanner already gives — a
 report that echoes the secret has moved the secret somewhere worse
-(`bootstrap-and-composition.md:1316-1318`).
+(`bootstrap-and-composition.md:1329-1331`).
 
 Failing rather than repairing is deliberate. A verification hit means stage
 two has a gap, and silently redacting the same string a second time hides

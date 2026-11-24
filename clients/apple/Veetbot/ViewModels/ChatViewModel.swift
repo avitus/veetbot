@@ -1923,15 +1923,22 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    /// What the card says when the server withdrew the permission it offered.
-    private static let withdrawnOfferMessages: [String: String] = [
-        "task_grant_unavailable": "Task permission is no longer available. Allow once or Deny.",
-        "task_grant_offer_mismatch": "Task permission is no longer available. Allow once or Deny.",
-        "request_grant_unavailable":
-            "Allow for this request is no longer available. Allow once or Deny.",
-        "request_grant_offer_mismatch":
-            "Allow for this request is no longer available. Allow once or Deny.",
+    /// What the server withdrew, by the reason it gives for the conflict.
+    private static let withdrawnOffers: [String: String] = [
+        "task_grant_unavailable": "Task permission",
+        "task_grant_offer_mismatch": "Task permission",
+        "request_grant_unavailable": "Allow for this request",
+        "request_grant_offer_mismatch": "Allow for this request",
     ]
+
+    /// What the card says when the server withdrew the permission it offered.
+    /// It names the card's own single-use button: "Allow once" on a website
+    /// card, "Approve once" on every other.
+    private static func withdrawnOfferMessage(_ reason: String, on approval: ApprovalView) -> String? {
+        guard let offer = withdrawnOffers[reason] else { return nil }
+        let websiteCard = BrowserActionApprovalPresentation(approval: approval, activeGrant: nil) != nil
+        return "\(offer) is no longer available. \(websiteCard ? "Allow" : "Approve") once or Deny."
+    }
 
     /// Resolve the owner's decision and refresh an offer that the server withdrew.
     /// A decision already on its way makes any further tap on that card a no-op.
@@ -1985,14 +1992,14 @@ public final class ChatViewModel: ObservableObject {
             if let apiError = apiError(from: error),
                 apiError.code == .conflict,
                 let reason = apiError.details.reason,
-                Self.withdrawnOfferMessages[reason] != nil
+                Self.withdrawnOffers[reason] != nil
             {
                 // The offer is gone or changed: show the card as it is now.
                 do {
                     let stored = try await api.getApproval(approval.id)
                     guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
                     runState.mergeApproval(stored)
-                    errorMessage = Self.withdrawnOfferMessages[reason]
+                    errorMessage = Self.withdrawnOfferMessage(reason, on: stored)
                 } catch {
                     guard generation == connectionGeneration, sessionID == selectedSessionID else { return }
                     present(error)

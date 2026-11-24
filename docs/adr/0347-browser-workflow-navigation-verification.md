@@ -1,0 +1,147 @@
+# ADR-0347: Verify reviewed browser navigation before advancing
+
+- Status: Accepted under the owner's browser work-package continuation
+- Date: 2026-11-23
+- Related: ADR-0159, ADR-0164, ADR-0328, ADR-0333
+- Detailed design: `docs/plan/browser-automation.md`
+
+## Decision
+
+A reviewed navigation step may declare an optional `postcondition` using the
+existing closed browser condition contract. After successful, uninterrupted,
+same-origin navigation, the runner queues a separate ordinary
+`browser.observe(wait_for=...)` in a persisted `verify_navigation` phase. Only
+positive satisfied evidence completes the navigation step and permits later
+work. A declared positive failure stops as `observed_failure`; missing,
+conflicting, interrupted or unsuccessful evidence cannot complete the step.
+Ordinary failures stop `unverified`; authentication uses the existing suspension
+and verified-resumption path.
+
+A loaded page, same-origin redirect or quiet DOM alone does not satisfy the
+condition. The reviewed condition can describe an expected location, rendered
+text, region, control or typed row. It is evidence of the observed page state,
+not proof that a navigation caused a business effect or that the site is truthful.
+The navigation tool receives only its existing URL argument; completion uses
+its own audited read and the run's pinned observe capabilities. Preflight checks
+that wait before starting the recipe, including navigation-only recipes.
+
+The wait retains the five-second/21-read bound and ordinary workflow/run call,
+step, cancellation and time limits. Verification failure does not retry navigation
+or replay earlier actions. Generation changes during a read restart only the
+unfinished navigation with fresh evidence; verified earlier steps remain complete.
+If verified sign-in already queued exactly that navigation URL, the runner uses
+that ordinary call and verifies its result instead of loading the page twice.
+A different recovery URL cannot substitute for the reviewed navigation.
+An action after navigation still discovers a fresh target and uses ordinary
+approval and effect handling. Pending approval resumption and uncertain actions
+cannot repeat a previously completed navigation or its wait.
+
+Omitting the condition preserves existing navigation behavior and recipe digests.
+A declared condition changes the recipe binding. Navigation does not gain action
+fields, preconditions or branch destinations. No public tool schema, deployed
+recipe, new dependency, permission, milestone or gate changes. This implements
+W4's expected navigation completion and W6's verified step progress within the
+existing engineering-plan contract; broader live-site acceptance is separate.
+
+## Verification
+
+Begin with a failing closed-recipe regression, then run execution regressions
+before adding the runner phase. Cover positive, missing, conflicting and declared
+failure evidence; exact locations; pinned capabilities; unchanged legacy identity;
+budgets; authentication resumption; ordinary approval; and lost action responses.
+Real Chromium must reject unexpected same-origin redirects before any action,
+wait for a delayed expected state, and record no duplicated server effect.
+
+Construction evidence in the local Linux ARM64 sandbox:
+
+- Red: `make test-static
+  PYTEST_ARGS=tests/unit/test_browser_workflow_navigation.py` initially rejected
+  the declared navigation condition. After admitting the field, six cases failed
+  because the verification read and pinned wait-capability checks were missing.
+- The first focused navigation/workflow/capability run passed all 77 cases.
+  The expanded navigation module passed all 20 cases, covering sign-in resume
+  and cancellation after a prior approved effect, exact versus redirected
+  recovery URLs, read failures, foreign origins and exhausted time/call bounds.
+- The sign-in regression first found an unnecessary second navigation after the
+  service had already queued the same URL. Matching recovery calls now pass
+  through normal dispatch and verification once; different URLs are not reused.
+- `make test-browser-cases
+  CASES=tests/unit/test_browser_workflow_navigation_real_chromium.py` passed all
+  seven cases. Real Chromium waits for delayed state, accepts the declared
+  redirect destination and refuses an unexpected same-origin redirect, missing
+  state or conflicting evidence before any approval/effect. Positive failure is
+  retained. An approved action with a lost response has exactly one server effect
+  and never repeats the completed navigation or its verification.
+- After incorporating advancing `dev`, broader verification passed 1,791 selected
+  browser/steering/People-context static tests and 174 contracts. Lint and type
+  checking passed. Reading lane A matches the diff-derived minimum. Citation
+  reconciliation and strict documentation checks passed; no milestone or gate moves.
+- The integrated full `make test-browser BROWSER_TEST_WORKERS=2` partition passed
+  all 447 cases in 465.96 seconds, with no skips or warnings. These are local
+  construction checks; production and broader W4/W6 live-site acceptance remain
+  separate, and the deployed recipe catalog is unchanged.
+
+## Review follow-up
+
+2026-11-24, found in review of pull request 265. Neither repair adds a call, tool
+version, event type or recipe field, and the decisions above stand.
+
+- **The target read keeps the destination evidence.** The verification read and
+  an action's target read were separate observations, so a same-origin page
+  change between them could supply the action's target; the action's revision
+  fence only binds dispatch to the target read. The first target read of an
+  action that directly follows a verified navigation now repeats that
+  navigation's `wait_for`, with or without a `precondition` or `target_region`.
+  The runner proposes the action only from an observation that itself reports
+  the condition `satisfied`, so the revision the action names is a capture where
+  the reviewed evidence held. Otherwise the run stops as `observed_failure` or
+  `unverified` before approval or dispatch, with the navigation still complete.
+  The action takes its target from that window alone; see the second review
+  pass below. A branch that skipped the navigation carries no requirement. Once the action is sent the wait is never
+  repeated. A navigation condition directly followed by an action must therefore
+  describe state that lasts until the target is read.
+- **A bound stops new work, not a finished read.** The time, call and step
+  bounds stopped the loop before it read an observation the last admitted call
+  had already returned, so a recipe whose final verification used the last
+  permitted call ended `bounded_stop`. The runner now reads that observation
+  first. A bound still fails a pending dispatch closed and refuses every new
+  call, and the queue now applies the run's tool-call limit itself. An approved
+  action that used the last permitted call without conclusive evidence therefore
+  stops `bounded_stop`, report-only and unreplayed, where the budget check
+  previously failed the run.
+
+Second review pass, 2026-11-24, pull request 265. A focus or continuation read
+is a fresh capture of the live page. The provider ties it to the capture before
+it (the exact revision for `region_ref`, a reference or cursor only the latest
+capture issued for `after` and `cursor`) and to the same document, counting
+history moves. It compares no page content. In real Chromium a change inside the
+document after the first window supplied a target through a cursor continuation
+and through a region focus; a history move was refused. Every pinned
+`browser.observe` version rejects `wait_for` combined with a continuation, so a
+later window cannot repeat the wait. An earlier sentence here overstated the
+binding.
+
+The runner therefore issues no focus or continuation read for an action directly
+after a verified navigation: its target must be in the destination-proving
+window. A target beyond the first control window stops as `target_not_observed`,
+the existing outcome for a target with no usable continuation. A `target_region`
+action stops as `unverified` once its region is matched, the existing outcome
+for a region target read without focus. Both stop before approval. This costs
+reach: such targets cannot be acted on in that position. No deployed recipe
+declares a navigation condition, and actions in any other position keep their
+later windows.
+
+The fuller repair is undecided and left open: let later windows carry or
+re-prove the evidence by a local check of the condition, by an observe version
+that accepts `wait_for` with a continuation, or by provider capture identity.
+
+Construction evidence in the local Linux sandbox: six unit cases and one real
+Chromium case first failed because the unrepaired runner requested approval for,
+or looked for a region on, the changed page. Twelve more failed because a reached
+tool-call, step, workflow-call or time bound hid a completed verification, and
+one because the run failed after an action on its last permitted call.
+For the second pass, two unit and three real-Chromium cases first failed because
+the unrepaired runner read a later window and, in four of them, requested
+approval from it. Afterwards the browser-workflow unit modules passed all 303
+cases and the real-Chromium workflow modules all 71, eleven of them in the
+navigation module.

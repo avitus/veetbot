@@ -4,6 +4,44 @@ title: Current Milestone
 
 # Current milestone
 
+- **Code mode — ADR-0342:** On 2026-11-21 the owner asked for code mode on the
+  existing Docker sandbox and authorized its implementation.
+  [The decision](../adr/0342-code-mode-over-the-sandbox-bridge.md) adds
+  `sandbox.run_code`: one model-written script whose tool calls re-enter the
+  ordinary pipeline, each counted and each still asking where it would ask. It is
+  default off behind `AGENT_CODE_MODE_ENABLED`. Pull requests 263 and 264
+  delivered it on 2026-11-23, and the owner turned it on in production for app
+  chats that day; schedules and inbound surfaces stay off. No milestone or gate
+  moves.
+
+- **Recall measurement and repairs — ADR-0338, ADR-0339, ADR-0343, ADR-0346,
+  ADR-0348:** Between 2026-11-20 and 2026-11-23 the owner approved a recall
+  health report that reads per-trace summaries, a stored recall question set
+  with a default-off signed-in page, the repair that keeps standing semantic
+  recall on when the chat model or the model list changes, a scoring rule that
+  counts a fact any live memory delivers, and a rule that a relationship
+  selects a person only when the question names it. Pull requests 260, 262 and
+  264 delivered the first four and pull request 265 the fifth. On a
+  production clone of 2026-11-23 the set passes 99 of 114 questions, and 103
+  with ADR-0348. The set is a diagnostic; no Milestone 33 gate moves.
+
+- **Email memories — ADR-0340 and ADR-0341:** On 2026-11-20 the owner chose to
+  keep an email memory for as long as its thread is important, to let mail from
+  a known sender in a long-kept thread form a first-class memory, and to hold
+  one memory per fact per message.
+  [Retention](../adr/0340-email-memories-keep-by-importance.md) and
+  [one memory per fact](../adr/0341-one-memory-per-email-fact.md) were delivered
+  in pull request 260 on 2026-11-21. The owner-run `agent memory rerate-email`
+  and `agent memory merge-email-duplicates` commands have no recorded production
+  run. No milestone or gate moves.
+
+- **One approval for a job repair — ADR-0344:** On 2026-11-22 the owner chose
+  one approval per request for a saved job's tests, saves, runs and schedule
+  repins, within the access the job already has. Pull request 262 delivered it
+  on 2026-11-23; production acceptance follows the check in
+  [the decision](../adr/0344-one-approval-for-a-job-repair-request.md). No
+  milestone or gate moves.
+
 - **One offline artifact build — ADR-0330:** On 2026-11-16 the owner authorized
   one complete offline build invocation and approval-free bundled-guide reads.
   [The decision](../adr/0330-one-offline-artifact-build.md) keeps inputs, rendering
@@ -32,21 +70,23 @@ title: Current Milestone
 - **Read-only Google Calendar — ADR-0305:** The owner authorized implementation
   on 2026-11-09. [Calendar integration](calendar-integration.md) specifies selected
   calendars, operator OAuth setup, three read tools and explicit scheduled access.
-  Implemented with offline tests; production consent and activation remain pending.
+  Implemented with offline tests and delivered in pull request 247 on 2026-11-09;
+  production consent and activation remain pending.
 
 - **Save an email attachment — ADR-0296:** On 2026-11-03 the owner asked to add email
   attachments to Veetbot's file storage and chose the email's chat as the place, a Save
   button plus an approval-gated Chat tool as the ways in, and knowledge on every save.
   [The decision](../adr/0296-save-email-attachments-to-the-chat.md) adds no schema,
-  setting, or scope. Implemented, not yet tried on a real mailbox; no milestone or gate
-  moves.
+  setting, or scope. Pull request 232 delivered it on 2026-11-04; no real-mailbox
+  trial is recorded. No milestone or gate moves.
 
 - **Server email checks — ADR-0286:** On 2026-11-01 the owner accepted
   [the decision](../adr/0286-server-checks-for-new-mail.md) and authorized its
   implementation on `email-checks`. A default-off maintenance pass checks for new
   mail every five minutes while Email is closed. It handles only new or changed
-  mail, within 50% of the daily and 90% of the rolling allowance. Activation needs
-  one measured production week and adds a thirty-third Milestone 26 gate.
+  mail, within 50% of the daily and 90% of the rolling allowance. Pull request 222
+  delivered it on 2026-11-02 with a thirty-third Milestone 26 gate, which is
+  bound. Activation needs one measured production week.
 
 - **Veetbot's code power — ADR-0281:** On 2026-11-01 the owner asked for
   first-class coding and debugging power after Veetbot could not explain a
@@ -54,14 +94,16 @@ title: Current Milestone
   tools read run failures, read the running release's source, draft and test a
   change offline, and open a pull request to `dev` after the owner approves. The
   tools never merge or deploy. Default off behind `AGENT_CODE_TOOLS_ENABLED` and
-  `AGENT_CODE_PROPOSALS_ENABLED`, except the read-only `run.inspect`. Activation
-  needs the owner's GitHub App change. No milestone or gate moves.
+  `AGENT_CODE_PROPOSALS_ENABLED`, except the read-only `run.inspect`. Pull request
+  219 delivered them on 2026-11-01. Activation needs the owner's GitHub App
+  change. No milestone or gate moves.
 
 - **Integration keys MVP — ADR-0275:** On 2026-10-30 the owner accepted
   [the decision](../adr/0275-in-app-integration-secrets.md) and authorized its
   implementation on `secret-store`. The default-off MVP reuses PostgreSQL,
   AES-GCM sealing and approved job grants, with native Settings for key entry.
-  See [the operator guide](../integration-keys.md). Production activation and
+  See [the operator guide](../integration-keys.md). Pull request 213 delivered
+  it on 2026-10-31. Production activation and
   ADR-0268's jobs prerequisites remain separate; no milestone or gate moves.
 
 - **Agent-written jobs MVP — ADR-0268:** On 2026-10-29 the owner authorized
@@ -79,8 +121,8 @@ title: Current Milestone
   [the operator guide](../jobs.md).
   On 2026-10-30 the owner requested one summarized approval at the end of
   widget creation (ADR-0270). The combined preparation/installation repair is
-  implemented with composed approval, retry and refusal tests; delivery and
-  production verification remain pending.
+  implemented with composed approval, retry and refusal tests and was delivered
+  in pull request 212 on 2026-10-30; production verification remains pending.
   Existing protections remain, broader hardening is deferred, and no milestone
   or gate moves.
 
@@ -173,8 +215,11 @@ title: Current Milestone
   fixed seven-day maximum, with all other safety and release gates preserved.
   Both trials lapsed. On 2026-11-03 the owner directed that semantic recall be
   activated and stay on (ADR-0290): a standing admission with no expiry, bound to
-  the local encoder, has run it on interactive owner chats since, with the
+  the local encoder, has governed it on interactive owner chats since, with the
   relevance rerank. It moves no gate and does not relabel the failed comparison.
+  A later release that added a model turned semantic recall off in those chats;
+  the repair (ADR-0343) reached `main` in pull request 262 on 2026-11-23, and a
+  production check that it is on again is not recorded.
   [General memory recall](general-memory-recall.md) registers twelve gates for
   cross-category evaluation, relevance before candidate limits, measured semantic
   retrieval, task-aware queries, governed source recovery and release evidence.
@@ -313,10 +358,11 @@ title: Current Milestone
   The owner approved checkpointed continuation and a focused production comparison
   (ADR-0212): all 400 scenarios, both paths, formation sparse control versus final
   hybrid, or 1,600 required observations. Reuse requires unchanged runtime inputs,
-  verified original rows and banks, and complete accounting. The separately verified collector is collecting the remaining positions with
-  append-only checkpoints. The source fixes and current production changes are
-  being integrated on `codex/recall-production-release`; complete scoring, actual
-  independent human failure review and deployment compatibility remain open.
+  verified original rows and banks, and complete accounting. The separately verified collector collected the remaining positions with
+  append-only checkpoints and completed all 1,600 on 2026-10-19, as recorded above. The source fixes and
+  production changes were integrated on `codex/recall-production-release`, which
+  pull request 178 merged on 2026-10-19; actual independent human failure review
+  and deployment compatibility remain open.
   No quality threshold or independent human review is waived. Work proceeds independently on `codex/memory-retrieval-evaluation`;
   unrelated development and releases are not dependencies or held by this run.
   The owner explicitly authorized the recall pull request when ready, its review,
@@ -408,8 +454,9 @@ title: Current Milestone
 - **Active milestone:** Milestone 15 — operational hardening — is the next
   sequential authorized milestone, is specified by
   [operational-hardening.md](operational-hardening.md) with sixteen gates, and
-  has not started; its backup tranche has no dependency on the milestones
-  before it. Milestone 14 — inbound surfaces and pairing, specified by
+  is in progress: its independent reliability repair (ADR-0205) is delivered
+  and none of its sixteen gates is bound; its backup tranche has no dependency
+  on the milestones before it. Milestone 14 — inbound surfaces and pairing, specified by
   [inbound-surfaces.md](inbound-surfaces.md) with twenty-one gates — completed
   on 2026-10-07. A paired message's run has its own USD 10 budget (ADR-0064
   amendment); the sixteen findings pull request 104 left open were resolved
@@ -599,8 +646,9 @@ title: Current Milestone
   twenty-one delegation gates and the cumulative registry, with the seven
   Milestone 6 sandbox gates passing in the hosted real-Docker lane. Milestone
   14 completed on 2026-10-07 (recorded 2026-10-09), advancing the verified
-  ceiling to 289 gates; Milestone 15 remains authorized and specified with
-  sixteen and has not started. Milestone 16, the parallel memory-evaluation
+  ceiling to 289 gates (290 in the current registry); Milestone 15 remains
+  authorized and specified with sixteen, none of them bound, and only its
+  ADR-0205 reliability repair is delivered. Milestone 16, the parallel memory-evaluation
   workstream, has implemented all twenty of its gates, republished the
   provider evidence at `formation@8`, and re-recorded its baseline, and completed on 2026-08-23 when hosted CI and
   the CodeRabbit review loop finished clean on the `dev` to `main` pull
@@ -621,7 +669,8 @@ title: Current Milestone
   implemented, with all seventeen registered gates passing locally, including
   the four operator-managed multi-account gates added under ADR-0085. The
   extension reached `main` in pull request 94 with one CodeRabbit finding
-  unresolved, and the owner's mailbox smokes remain outstanding. Milestone
+  unresolved; its repair reached `main` in pull request 258 on 2026-11-19 with
+  that thread resolved, and the owner's mailbox smokes remain outstanding. Milestone
   19, the fourth parallel workstream, completed with its five registered gates
   once pull requests 64 and 66 passed hosted CI and a clean review. Milestone
   20, the fifth, completed with its six gates on pull request 74. Milestone 22,

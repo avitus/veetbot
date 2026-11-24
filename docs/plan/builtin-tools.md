@@ -185,9 +185,11 @@ job.manage                    capability  cockpit
 job.run                       capability  cockpit
 ```
 
-Sixty-five model-callable builtin tools in total: the original roster of
-eight, the fifty above, the two media-generation tools in ADR-0140, and the
-five from ADR-0281, [listed below](#platform-diagnostics-and-code-tools).
+Sixty-eight model-callable builtin tools in total: the original roster of
+eight, the fifty above, the two media-generation tools in ADR-0140, the
+five from ADR-0281, [listed below](#platform-diagnostics-and-code-tools), the
+two [offline artifact tools](#offline-artifact-tools-adr-0330) of ADR-0330,
+and [`sandbox.run_code`](#code-mode-tool-adr-0342) (ADR-0342).
 ADR-0261 added `artifact.read_capture`, which
 [tool-system.md](tool-system.md#reading-a-capture-in-sections-adr-0261)
 declares and classifies, and ADR-0277 added `artifact.delete`, which
@@ -227,12 +229,12 @@ with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
 roster.** Its subject is every builtin the composition root registers, and
-that is a function of the deployment. Twenty-one identities are always
+that is a function of the deployment. Twenty-three identities are always
 registered: `math.calculate`, `conversation.ask_user`, `system.current_time`,
 the three `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
-`artifact.export`, `artifact.read_capture`, `artifact.delete`, `context.update_working_state`, the four `memory.*` tools,
-`skill.load`, `tool.call`, `run.inspect`, and the two `knowledge.*` tools. The other forty-four register only
-with their flag or provider: `skill.manage` with skill authoring, the four
+`artifact.export`, `artifact.build`, `artifact.read_guide`, `artifact.read_capture`, `artifact.delete`, `context.update_working_state`, the four `memory.*` tools,
+`skill.load`, `tool.call`, `run.inspect`, and the two `knowledge.*` tools. The other forty-five register only
+with their flag or provider: `sandbox.run_code` with `AGENT_CODE_MODE_ENABLED=1`, `skill.manage` with skill authoring, the four
 `web.*` and four `browser.*` tools with their providers, `delegate.run` with
 `AGENT_DELEGATION_ENABLED`, the six `schedule.*` tools with the schedule API
 and worker, the three `people.*` tools with People, `email.context` and
@@ -1708,7 +1710,7 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is the original roster; sixty-five model-callable builtin tools
+    is the original roster; sixty-eight model-callable builtin tools
     are declared at build time across the corpus, and fifty of them
     belong to other specifications. Resolved by naming those fifty here,
     together with the rule that keeps the roster's count correct —

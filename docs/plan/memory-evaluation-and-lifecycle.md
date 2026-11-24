@@ -20,7 +20,7 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:975), and formation precision and
+scenarios (memory-retrieval-and-ranking.md:981), and formation precision and
 recall of consequential facts (memory-formation-and-consolidation.md:861-863).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
@@ -28,10 +28,10 @@ therefore been argued from reading the diff.
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:358-360), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:1017-1020),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:1023-1026),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:102), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:1012), and re-derivation
+resolved at read time (memory-retrieval-and-ranking.md:1018), and re-derivation
 that is opt-in per principal (memory-formation-and-consolidation.md:888) are
 all written down, and none of them runs.
 
@@ -298,7 +298,7 @@ Per scenario the driver builds one composition and never leaves it:
 script     = FakeModelScript(turns=[ScriptedTurn(text=PROBE_ACK_TEXT)],
                              on_exhausted="repeat_last")
 composition = bootstrap.build(storage="memory", script=script,
-                              principal=EVAL_PRINCIPAL,
+                              principal=EVALUATION_PRINCIPAL,
                               fixed_clock_at=scenario.start_at,
                               sequential_ids=True,
                               enabled_tools=PROBE_TOOLS,
@@ -307,7 +307,7 @@ composition = bootstrap.build(storage="memory", script=script,
 
 for session in scenario.sessions:
     clock.advance(session.advance_seconds)
-    view = sessions.create(EVAL_PRINCIPAL, "general", {"project_scope": ...})
+    view = sessions.create(EVALUATION_PRINCIPAL, "general", {"project_scope": ...})
     for turn in session.turns:
         clock.advance(turn.advance_seconds)
         append user.message.created for the principal
@@ -319,7 +319,7 @@ maintenance_factory().run_once()          # once, after the last session
 for probe in scenario.probes:
     clock.advance(probe.advance_seconds)
     store_live = memory.list_memories()
-    view = sessions.create(EVAL_PRINCIPAL, "general", {"project_scope": ...})
+    view = sessions.create(EVALUATION_PRINCIPAL, "general", {"project_scope": ...})
     run = runs.submit(probe_prompt(probe, corpus, live=False), view.id)
     traces = [memory.get_recall_trace(event.payload["trace_id"])
               for event in events if event.event_type == "memory.recalled"]
@@ -446,8 +446,8 @@ regressions    a higher-is-better count fell — supported beliefs, needed
                formed, needed recalled, completed probe runs — or a
                lower-is-better count rose — fabricated, stale live, noise,
                dropped for budget, dropped for the candidate ceiling, blocked,
-               currency violations, abstention leaks, false transfers, run
-               policy failures, distinct prefixes — or any per-probe row's
+               currency violations, currency unformed, abstention leaks, false
+               transfers, run policy failures, distinct prefixes — or any per-probe row's
                needed_recalled fell, or a distance bin's recall fell. A
                distance bin's population is a function of the corpus and the
                session mapping, so a moved population is drift, like the
@@ -474,7 +474,7 @@ explicit write.
 ## The live arm and its evidence
 
 The live arm runs only when `RUN_LIVE_MODEL_TESTS` is `1`
-(evaluation-harness.md:1301) and it runs every probe twice: a `with_memory`
+(evaluation-harness.md:1323) and it runs every probe twice: a `with_memory`
 arm, which is the deterministic driver with a real model policy and no script,
 and a `without_memory` arm, which is a fresh composition per probe carrying the
 same session metadata and the probe alone. The difference between them is the
@@ -660,7 +660,7 @@ the precedent this milestone set with `stale_penalty` and
 at the values the recorded baseline was measured under — and takes the document
 to thirty-four knobs. At that point the six additions took the milestone-era
 inventory from 137 to 143; later authorized configuration additions take the
-current repository-wide operator inventory to 156, as derived in
+current repository-wide operator inventory to 228, as derived in
 [bootstrap-and-composition.md](bootstrap-and-composition.md). The shipped values
 are identical to the former literals, so the deterministic benchmark baseline
 is unchanged by the move itself; a change to any of the six is a ranking change
@@ -692,7 +692,7 @@ behavior has no implementation and each is cheap.
 **Operator-tier trace expiry.** The trace record is retained on two clocks and
 only the user-safe tier survives the shorter one. `TraceStore` gains
 `expire_operator_fields(now, limit) -> int`, which nulls arm latencies,
-candidate counts, and the dropped-for-budget identifier list on traces past
+candidate counts, the dropped-for-budget identifier list, and the candidate ranking (ADR-0338) on traces past
 their operator expiry while leaving `returned`, `cited`, and `beliefs`
 untouched, is idempotent, and returns zero on a second call. The count of
 dropped items survives as a new optional scalar on the record so the user-safe
@@ -858,7 +858,7 @@ first time they move; lifecycle decisions read these counters, never the legacy
 `utility`, which two months of per-run snapshot charges depressed and no wait can
 reset. The `memory.cited` payload names the delivered traces. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:1017-1020): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:1023-1026): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.
@@ -874,7 +874,7 @@ the store holds?" from the database alone, the way `agent run reliability`
 reports run outcomes: one read-only, repeatable-read transaction with a
 ten-second statement bound, scoped to the authenticated owner, over a window
 of at most ninety days. It reads recall-trace summaries, the `memory.recalled`,
-`memory.delivered` and `memory.cited` events, the lifecycle events, the
+`memory.recall.limited`, `memory.delivered` and `memory.cited` events, the lifecycle events, the
 memory rows and the semantic index tables, and reports counts, shares and
 latencies only: no statement, query or identifier leaves the database.
 
@@ -938,8 +938,8 @@ composition would otherwise choose.
 
 The owner question set (ADR-0338) applies the same driver as a standing
 before-and-after measure. It holds real questions the owner asked and the
-stored facts each should reach, split once into a development file a change
-may be tuned against and a held-out file it may not. A change to candidate
+stored facts each should reach, split once into a development half a change
+may be tuned against and a held-out half it may not. A change to candidate
 selection, ranking, packing or the semantic index is run against both, at its
 base revision and at the change, before it reaches `dev`. Like the probes, its
 reports are not activation or release evidence.

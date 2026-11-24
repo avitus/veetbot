@@ -238,6 +238,7 @@ class SurfaceSession(BaseModel):
     external_key: str
     session_id: UUID
     created_at: datetime
+    last_inbound_at: datetime | None
     rotated_at: datetime | None
 ```
 
@@ -424,10 +425,10 @@ drained by the surface role for the surface device. The payload is
 content-free — it carries a `question_id` or `approval_id` and no text — so the
 surface role performs an authenticated detail read before it sends: as the
 paired principal, with the pairing's intersected scopes, through the same
-application services the API serves, it reads the question text from the run's
-`run.waiting_for_user` event (which requires `run.read` among the granted
-scopes) and the approval's summary from the approval service (which requires
-`approval.read`); if the pairing lacks the scope, it sends a generic notice
+application services the API serves, it reads the question text from the
+outstanding question in the run's latest checkpoint (which requires `run.read`
+among the granted scopes) and the approval's summary from the approval service
+(which requires `approval.read`); if the pairing lacks the scope, it sends a generic notice
 ("The agent has a question" / "Approval needed") with the identifier instead.
 Every detail read is redacted before it leaves. With that, its
 `run.waiting_for_user` notification reaches the chat as the question text; a
@@ -482,7 +483,7 @@ policy (the lockout table through its surface):
 ```text
 surface_pairing_codes
   id UUID PRIMARY KEY
-  surface_id UUID NOT NULL REFERENCES devices(id)
+  surface_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE
   tenant_id TEXT NOT NULL
   principal_id TEXT NOT NULL
   code_hash BYTEA NOT NULL
@@ -498,7 +499,7 @@ surface_pairing_codes
 
 surface_pairings
   id UUID PRIMARY KEY
-  surface_id UUID NOT NULL REFERENCES devices(id)
+  surface_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE
   tenant_id TEXT NOT NULL
   principal_id TEXT NOT NULL
   sender_id TEXT NOT NULL
@@ -510,7 +511,7 @@ surface_pairings
   last_message_at TIMESTAMPTZ NULL
 
 surface_sender_lockouts
-  surface_id UUID NOT NULL REFERENCES devices(id)
+  surface_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE
   sender_id TEXT NOT NULL
   failed_attempts INTEGER NOT NULL
   window_started_at TIMESTAMPTZ NOT NULL
@@ -519,16 +520,17 @@ surface_sender_lockouts
 
 surface_sessions
   id UUID PRIMARY KEY
-  surface_id UUID NOT NULL REFERENCES devices(id)
+  surface_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE
   tenant_id TEXT NOT NULL
   principal_id TEXT NOT NULL
   external_key TEXT NOT NULL
   session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE
   created_at TIMESTAMPTZ NOT NULL
+  last_inbound_at TIMESTAMPTZ NULL
   rotated_at TIMESTAMPTZ NULL
 
 surface_inbound_receipts
-  surface_id UUID NOT NULL REFERENCES devices(id)
+  surface_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE
   external_update_id TEXT NOT NULL
   received_at TIMESTAMPTZ NOT NULL
   disposition TEXT NOT NULL
@@ -539,7 +541,7 @@ surface_inbound_receipts
 
 surface_replies
   id UUID PRIMARY KEY
-  surface_id UUID NOT NULL REFERENCES devices(id)
+  surface_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE
   tenant_id TEXT NOT NULL
   principal_id TEXT NOT NULL
   run_id UUID NOT NULL UNIQUE REFERENCES runs(id) ON DELETE CASCADE
@@ -644,7 +646,7 @@ Metrics carry tenant-safe identifiers or aggregates, never content or tokens.
 
 1. Add the pairing, session-key, and receipt domain values, the external-key
    grammar, and the rotation rules with property tests. **M14.**
-2. Add the five-table migration, ORM models, in-memory and PostgreSQL
+2. Add the six-table migration, ORM models, in-memory and PostgreSQL
    repositories, constraints, RLS, erasure, and the port contracts. **M14.**
 3. Extract the shared submission function from the public run service and
    converge the CLI on it, keeping every existing API and CLI test green.

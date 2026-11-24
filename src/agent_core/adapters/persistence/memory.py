@@ -12,7 +12,6 @@ from decimal import Decimal
 from uuid import UUID
 
 from agent_core.adapters.memory.reconsolidation_index import ReconsolidationIndex
-from agent_core.adapters.persistence.conversation import conversation_items
 from agent_core.adapters.persistence.people_erasure import ORIGINAL_EVENTS, redact
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import (
@@ -39,6 +38,7 @@ from agent_core.domain.events import (
     NewEvent,
     ProcessEvent,
     advances_session_activity,
+    conversation_items,
     is_context_only_seed_event,
 )
 from agent_core.domain.folders import (

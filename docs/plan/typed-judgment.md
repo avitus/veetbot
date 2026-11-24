@@ -92,7 +92,10 @@ All are frozen and live in `agent_core.domain.judgment`.
 - **`JudgmentRequest`** — JSON-serializable `state` and between one and eight
   questions keyed by identifiers matching `^[a-z][a-z0-9_]{0,31}$`. Questions
   in one request are answered independently over the same state, so a
-  consumer asks everything it may need about one state in one request.
+  consumer asks everything it may need about one state in one request. Two
+  optional fields complete it: a `model` pin matching `^[A-Za-z0-9._-]{1,64}$`,
+  absent by default, and `maximum_attempts`, from one to three and three by
+  default.
 - **`JudgmentResult`** — the answers by question identifier and one
   `ModelUsage`. A pure `validate_result` checks that every question has an
   answer of its own type, every chosen key was offered, and every probability
@@ -318,8 +321,9 @@ which previously held only the error's class name.
 ## Open questions
 
 1. Whether the vendor accepts a pinned model version as well as the floating
-   alias. The adapter requests the alias and records the version returned;
-   pinning can follow a verified answer.
+   alias. The adapter requests the alias unless a request names a `model`, and
+   records the version returned; the email junk consumer pins its own
+   (ADR-0203) and every other consumer keeps the alias.
 2. Whether a verdict cache is worth its invalidation rules. Folder matching
    re-judges an unfiled conversation on each pass while proposal slots are
    free; the cost is small and the cache is deferred until a metric asks.

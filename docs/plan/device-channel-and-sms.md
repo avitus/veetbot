@@ -145,9 +145,9 @@ policy:
 ```text
 device_invocations
   id UUID PRIMARY KEY
-  tenant_id UUID NOT NULL
-  device_id UUID NOT NULL REFERENCES devices(id)
-  run_id UUID NOT NULL REFERENCES runs(id)
+  tenant_id TEXT NOT NULL
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE
+  run_id UUID NOT NULL REFERENCES runs(id) ON DELETE CASCADE
   tool_name TEXT NOT NULL
   arguments JSONB NOT NULL
   status TEXT NOT NULL           -- pending | sent | cancelled | failed | expired
@@ -155,8 +155,8 @@ device_invocations
   resolved_at TIMESTAMPTZ NULL
 
 device_ingest_receipts
-  device_id UUID NOT NULL REFERENCES devices(id)
-  tenant_id UUID NOT NULL
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE
+  tenant_id TEXT NOT NULL
   channel TEXT NOT NULL
   digest TEXT NOT NULL
   received_at TIMESTAMPTZ NOT NULL
@@ -166,10 +166,10 @@ device_ingest_receipts
   PRIMARY KEY (device_id, channel, digest)
 
 device_triage_sessions
-  device_id UUID NOT NULL REFERENCES devices(id)
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE
   channel TEXT NOT NULL
-  tenant_id UUID NOT NULL
-  session_id UUID NOT NULL REFERENCES sessions(id)
+  tenant_id TEXT NOT NULL
+  session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE
   PRIMARY KEY (device_id, channel)
 ```
 
@@ -199,7 +199,7 @@ the roadmap or in this document's open questions.
 
 ## Build sequence
 
-1. Port, domain values, and the two migrations, with the contract suite. **M24.**
+1. Port, domain values, and the migration, with the contract suite. **M24.**
 2. The push-wake adapter against a fake APNs and a fake device client. **M24.**
 3. Capability-derived registration and the policy classification. **M24.**
 4. The ingest route, digest idempotency, and the triage session seeding. **M24.**

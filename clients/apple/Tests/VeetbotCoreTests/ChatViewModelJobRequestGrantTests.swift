@@ -77,6 +77,38 @@ import Testing
         #expect(merged.decision == .approveForRequest)
     }
 
+    /// The server can withdraw a job's offer before the tap arrives. The card is read again as
+    /// it now stands: still pending, with Approve once and Deny and no offer to accept.
+    @Test(arguments: ["request_grant_unavailable", "request_grant_offer_mismatch"])
+    func aWithdrawnJobOfferReloadsTheCardWithoutIt(reason: String) async throws {
+        let reloaded = Self.approval(offer: false)
+        let server = DeviceFlowServer { request in
+            try Self.conversationRoutes(request) ?? {
+                switch Self.route(request) {
+                case "GET veetbot.test /v1/browser-task-grants":
+                    return (200, #"{"items":[],"next_cursor":null}"#)
+                case "POST veetbot.test /v1/approvals/\(Self.approvalID.uuidString)/resolve":
+                    return (409, #"{"error":{"code":"conflict","message":"conflict","details":{"reason":"\#(reason)"},"request_id":"r"}}"#)
+                case "GET veetbot.test /v1/approvals/\(Self.approvalID.uuidString)":
+                    return (200, reloaded)
+                default:
+                    return nil
+                }
+            }()
+        }
+        let model = try await openedModel(server)
+        let offered = try JSONDecoder.server.decode(ApprovalView.self, from: Data(Self.approval().utf8))
+
+        await model.resolveApproval(offered, decision: .approveForRequest)
+
+        #expect(model.errorMessage == "Allow for this request is no longer available. Approve once or Deny.")
+        let merged = try #require(model.runState.approvals.first { $0.id == Self.approvalID })
+        #expect(merged.status == .pending)
+        #expect(merged.decision == nil)
+        #expect(merged.offersJobRequestGrant == false)
+        #expect(merged.requestOfferSummary == nil)
+    }
+
     private func openedModel(_ server: DeviceFlowServer) async throws -> ChatViewModel {
         let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

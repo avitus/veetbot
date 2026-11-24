@@ -238,11 +238,11 @@ docs              mkdocs build --strict
 website-install   validated local reuse or npm ci; always npm ci in CI
 test-website      website-install, static export tests, and lint
 cockpit-install   the same installer for the cockpit/ workspace
-test-cockpit      cockpit-install, Chromium, kit, builder and realm
-                  tests, then ESLint and tsc
+test-cockpit      cockpit-install, Chromium and WebKit, kit, builder
+                  and realm tests, then ESLint and tsc
 ```
 
-Twenty more serve checks, CI steps, or operators; the Apple lanes and
+Twenty-two more serve checks, CI steps, or operators; the Apple lanes and
 `env-pull` are described below. `docs-check` runs
 `scripts/check_docs.py` and `test-deploy` the release, rollback, and Nginx
 deployment script tests; both are inside `make check` and CI's static job,
@@ -259,7 +259,9 @@ image, and `test-browser-image` measures what its browser asks for on its own
 `cockpit-widgets-worktree` checks out the public `cockpit/widgets` branch under
 `.worktrees/` so a person can build widgets against the kit on `main`
 ([cockpit.md](cockpit.md)).
-`cockpit-runtime` exports the board's runtime to the local artifact root, as a
+`cockpit-runtime-build` builds the board's runtime and fails on an empty
+manifest; the macOS CI job runs it before its Swift tests. `cockpit-runtime`
+runs it and then exports the runtime to the local artifact root, as a
 release does, so a local server can serve Cockpit.
 
 `make check` is `test-fast test-browser test-website test-cockpit lint
@@ -423,6 +425,7 @@ must never be used for this workflow.
 | PostgreSQL integration and real-browser tests | A disposable database or installed Chromium in their respective partitions. Skips count as missing browser evidence in the required lane. |
 | Native Email, Unsubscribe, Folders, and Cockpit acceptance | Xcode and the target device or VM. Six navigation cases check wide layouts and skip on an iPhone. Two hosted-board Swift tests require the built Cockpit runtime. The macOS CI job runs `make cockpit-runtime-build` before Swift tests, requires a nonempty manifest, and includes `cockpit` and the npm installer in its verification key. |
 | SVP credential persistence and deploy-identity calling permission checks | A non-root process that respects directory permissions. |
+| iOS-only branches of the Swift package tests (three composer Return-key cases, and the iOS side of a few layout and sign-in cases) | Never: the package tests run through `swift test` on macOS only, so `#if os(iOS)` unit code is not compiled in any lane. |
 | Owner procedure TLS floor check | An OpenSSL executable capable of serving the legacy TLS version under test. |
 | Duplicate and stale release-evidence fixtures | An artifact in the bundled evidence directory. A separate test requires a nonempty bundle. |
 
@@ -879,7 +882,7 @@ tests/resilience    interventions   integration M2
 tests/security      security        integration M2
 tests/live          live            live        M3
 tests/eval_cases    case fixtures   n/a         M1
-tests/native        Apple journeys  (none)      M26
+tests/native        Apple journeys  integration M26
 tests/corpora       data            n/a         M16
 tests/fixtures      data            n/a         M0
 ```

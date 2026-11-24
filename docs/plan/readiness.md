@@ -64,7 +64,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:2344` states that device tools are *"a reserved
+    `tool-system.md:2346` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -86,7 +86,7 @@ rather than smoothed.
 | 6 | Isolated execution and artifacts | Ready | 11 | Nothing |
 | 7 | Context budgeting and working state | Ready | 7 | Nothing |
 | 8 | Skills and MCP integration | Ready | 17 | Nothing |
-| 9 | Long-term memory and knowledge | Ready | 26 | Nothing |
+| 9 | Long-term memory and knowledge | Ready | 27 | Nothing |
 | 10 | Memory maturation, self-authored skills, web access, browser automation | Complete | 38 | Tenant activation remains roadmap item B1 (ADR-0061) |
 | 11 | Scheduled runs | Complete | 23 | Nothing |
 | 12 | Notifications and device identity | Complete | 20 | The Apple push key and capability are owner actions outside the corpus |
@@ -103,7 +103,7 @@ rather than smoothed.
 | 23 | Conversational schedule lifecycle | Complete | 12 | Nothing; ADR-0080 and ADR-0088 fix discovery, approval, lifecycle, and update semantics |
 | 24 | SMS through the owner's iPhone | Authorized | 12 | Nothing in the corpus; the physical-iPhone verification is an owner action outside it |
 | 25 | WhatsApp business surface | Authorized | 12 | Nothing in the corpus; the Meta ceremony, template approval, and live-number smoke are owner actions outside it |
-| 26 | Client modes and adaptive email experience | Authorized | 32 | Nothing in the corpus; the private quality evaluations and two-account acceptance need the owner |
+| 26 | Client modes and adaptive email experience | Authorized | 33 | Nothing in the corpus; the private quality evaluations and two-account acceptance need the owner |
 | 27 | Bland calling and public reception | Authorized | 14 | Nothing in the corpus; the provider dashboard and live-call checks are owner actions outside it |
 | 28 | People and relationship memory | Authorized | 36 | Nothing in the corpus; every gate binding is still pending, and quality evaluation needs the owner |
 | 29 | Chat thread folders | Complete | 17 | Nothing; ADR-0110 adds the typed-judgment port and its matcher |
@@ -146,7 +146,8 @@ pair arriving with the design that closed one of this section's named
 gaps rather than being added to make a count look better. Milestone
 9's fourteen became twenty-six on the same principle and by the
 largest margin, when the knowledge half of that milestone acquired a
-design to be true of.
+design to be true of; ADR-0289's paraphrase-lift gate later made them
+twenty-seven.
 
 ## Milestone 0: ready
 
@@ -492,8 +493,8 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1301-1302` and the resolve at
-`policy-and-approvals.md:1354`, and one reference in
+at `policy-and-approvals.md:1305-1306` and the resolve at
+`policy-and-approvals.md:1358`, and one reference in
 `runtime-loop.md:1347` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -579,7 +580,7 @@ Section 28 of the plan is not empty — `engineering-plan.md:4791-4868`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
-existed. `tool-system.md:1163` constrains MCP server URLs by *"the
+existed. `tool-system.md:1165` constrains MCP server URLs by *"the
 egress allowlist the sandbox spec establishes"*, and there was no
 sandbox spec.
 `bootstrap-and-composition.md:205` and `:183` assign ownership of
@@ -588,8 +589,8 @@ itself, which is the corpus recording that nothing below the plan owns
 them.
 
 Two bullets are covered. Output truncation and artifactization are
-specified at `tool-system.md:803`, and the programmatic orchestration
-bridge Section 8.5 requires is specified from `tool-system.md:1679`.
+specified at `tool-system.md:805`, and the programmatic orchestration
+bridge Section 8.5 requires is specified from `tool-system.md:1681`.
 
 Two further items deserved naming.
 
@@ -598,7 +599,7 @@ Two further items deserved naming.
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
-    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1564`
+    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1566`
     now says Milestone 6; the plan's Milestone 6 implement list
     contains it. The map follows the plan. This was reported rather
     than resolved, because the right answer depended on a sandbox
@@ -627,7 +628,7 @@ The eight types the corpus referenced and never declared are declared:
 `ArtifactWriter`, and `CredentialResolver` from
 `ToolExecutionContext`. That removes the last of the
 referenced-and-undeclared types the API specification named as
-remaining. The egress allowlist `tool-system.md:1163` depends on by
+remaining. The egress allowlist `tool-system.md:1165` depends on by
 name gets a grammar, an owner, and two enforcement points, of which
 the address denylist runs first and no allowlist entry can waive it.
 Workspace lifecycle is settled by a rule rather than a mechanism —
@@ -748,7 +749,7 @@ criteria" and the acceptance criteria say nothing about mocks.
 **Skills had no specification below the tool system.** The stronger
 claim this review first made — that skills have no specification at
 all — was wrong, and the correction matters because it changes what
-had to be written. `tool-system.md:1610-1657` draws the line between
+had to be written. `tool-system.md:1612-1659` draws the line between
 a skill and a tool, fixes the metadata block at four fields, puts
 `required_tools` checking at load rather than at authoring, assigns
 trust by author, and classifies `skill_manage`. That is real design.
@@ -860,7 +861,9 @@ closed, so the verdict changes with it.
 
 ## Milestone 9: ready
 
-Twenty-six registry entries, the second-largest count, and the three
+Twenty-seven registry entries (twenty-six, then the second-largest count,
+when this review ran; ADR-0289 later added the knowledge paraphrase-lift
+gate), and the three
 specifications behind them are among the most complete documents here.
 [memory-formation-and-consolidation.md](memory-formation-and-consolidation.md)
 covers the autonomous formation loop, the tiers, the provisional tier
@@ -1007,15 +1010,15 @@ for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
 child-run recall class at `memory-retrieval-and-ranking.md:96`, which
 gets fifteen beliefs against an interactive run's forty. The
-restricted tool set is `tool-system.md:1129`: *"the registry resolves
+restricted tool set is `tool-system.md:1131`: *"the registry resolves
 the child's set through `specs_for_session` with the child's
 principal, not the parent's"*. The child deadline is
 `runtime-loop.md:1312`: *"the parent's `deadline_at` is copied onto
 every child at creation"*. The concise return is the sibling join
 plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
-`tool-system.md:1125`. Two are partial: the explicit objective has a
+`tool-system.md:1127`. Two are partial: the explicit objective has a
 carrier but no schema, since `delegate.run` is a control tool at
-`tool-system.md:1062` and no input type for it exists anywhere, and
+`tool-system.md:1064` and no input type for it exists anywhere, and
 the child budget is additive by `engineering-plan.md:679` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
@@ -1592,8 +1595,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1775` does open a *"Device-scoped tools"* section, and
-`tool-system.md:2344` states that device tools are *"a reserved seam,
+`tool-system.md:1777` does open a *"Device-scoped tools"* section, and
+`tool-system.md:2346` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. What it
 left behind was a model with no home.
@@ -1633,7 +1636,7 @@ rewriting the fifteen-string grammar and the gate that asserts it,
 and the `device.` that already exists is a tool-name domain rather
 than a scope prefix. Three conflicts between Section 29 and later
 specifications are named and resolved in the specifications' favour,
-one of them the question `tool-system.md:1789` reserved by name —
+one of them the question `tool-system.md:1791` reserved by name —
 whether a device tool may be advertised in a session opened while the
 device was absent — which resolves against the pinned prefix on the
 same precedent that governs an MCP catalog change mid-session. None
@@ -1785,7 +1788,7 @@ under the conflict it settles.
     mechanism refuses to start in production, so a tool that only
     works against it is not a milestone deliverable, and the spec's
     Milestone 5 was an off-by-one against a list in which 5 is the
-    HTTP API. `builtin-tools.md:1564` now says Milestone 6.
+    HTTP API. `builtin-tools.md:1566` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2663` against
     `model-gateway.md:2024` and `milestone-map.md:1987`. The map
@@ -1848,7 +1851,7 @@ under the conflict it settles.
     settles it on evidence rather than on the prediction.
 2.  **Does the sandbox specification precede Milestone 5, or follow
     it?** Milestone order says it follows. Two arguments say it should
-    come first: `tool-system.md:1163` already depends on an egress
+    come first: `tool-system.md:1165` already depends on an egress
     allowlist it establishes, and it is the only undesigned area whose
     failure mode is a security boundary rather than a missing feature.
     Writing it early costs nothing except the order in which two
@@ -1991,7 +1994,8 @@ public-HTTPS egress transport for a single tool, is owned by ADR-0112
 decision 5. Nineteen gates bind executable checks as of 2026-09-20. ADR-0165
 adds three `gate.email.spam_*` gates on 2026-10-08 for the suspected-spam flag,
 Gmail's sender check, and thread-level Report spam, designed in the same
-document. Integrated release evidence remains pending, and the milestone does
+document. Twenty-two of the twenty-three gates now bind executable checks.
+Integrated release evidence remains pending, and the milestone does
 not move the verified ceiling.
 
 ## Milestone 32: Memory reconsolidation (dreaming), implemented; verification incomplete
@@ -2058,6 +2062,7 @@ The design touches no roadmap item. Widgets never enter the assistant's
 context, so B1 is unchanged. No standing grant is introduced, so B8 is
 unchanged, and B11's workflow builder stays deferred. Its two posture changes
 are owned by ADR-0240: a second platform-owned sandbox image, and the
-assistant's ability to publish to one branch of this public repository. Gate
-bindings remain pending until executable implementation evidence lands; the
-verified ceiling does not move.
+assistant's ability to publish to one branch of this public repository.
+Fourteen gates bind executable checks: gates 1, 2, 4 to 9, 14 to 18 and 21.
+The other nine remain pending until their implementation or activation
+evidence lands; the verified ceiling does not move.

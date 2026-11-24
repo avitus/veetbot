@@ -30,13 +30,14 @@ risk-acceptance ADR.
 
 ## Sequencing
 
-This milestone's code lives inside Milestone 14 deliverables that do not
-exist yet: the surface role process, the five surface ports, the pairing
-and receipt tables. The documents, gates, Nginx preparation, and the
-owner ceremony — Meta business account, phone number, WhatsApp Business
-Account, access token, and utility-template approval, which has real lead
-time — proceed now; implementation begins when Milestone 14's ports are
-real. Nothing here amends Milestone 14's acceptance criteria.
+This milestone's code lives inside Milestone 14 deliverables that did not
+exist when it was authorized: the surface role process, the five surface
+ports, the pairing and receipt tables. The documents, gates, Nginx
+preparation, and the owner ceremony — Meta business account, phone number,
+WhatsApp Business Account, access token, and utility-template approval,
+which has real lead time — could proceed at once; the adapter was built
+once Milestone 14's ports were real and shipped with them. Nothing here amends
+Milestone 14's acceptance criteria.
 
 ## The webhook ingress
 
@@ -53,7 +54,7 @@ subscription handshake — the GET challenge echoed only on a constant-time
 verify-token match — and on POST validates
 `X-Hub-Signature-256` (HMAC over the raw body with the app secret,
 constant-time) before any parse. A missing or wrong signature is a
-content-free reject that stores nothing but a content-free receipt.
+content-free reject that stores nothing.
 Bodies are bounded; anything over the limit is rejected unread. Because
 the listener reads a body before it can check the signature, the Nginx
 location admits at most ten requests a second per client address with a
@@ -180,4 +181,6 @@ number or multi-tenant pairing UI.
    channel-agnostic plumbing, but each channel enters only with its own
    authorization.
 3. Whether `last_inbound_at` belongs on the session or on the pairing —
-   decided at implementation with Milestone 14's real schema in view.
+   decided at implementation with Milestone 14's real schema in view: it is
+   on the surface session, and a notification reads the pairing's
+   `last_message_at`, stamped in the same transaction.

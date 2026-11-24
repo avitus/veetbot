@@ -88,6 +88,7 @@ class ArtifactOrigin(StrEnum):
     TRAJECTORY_EXPORT = "TRAJECTORY_EXPORT"
     KNOWLEDGE_SOURCE = "KNOWLEDGE_SOURCE"   # new
     EMAIL_ATTACHMENT = "EMAIL_ATTACHMENT"   # ADR-0296
+    EMAIL_DRAFT_ATTACHMENT = "EMAIL_DRAFT_ATTACHMENT"   # ADR-0317
 ```
 
 This sketch, like the one in [sandbox-isolation.md](sandbox-isolation.md), names the
@@ -159,7 +160,7 @@ document that retrieves nothing and explains nothing.
 ### 3. Normalize
 
 A stated, closed list of transformations, never a paraphrase and never a model call:
-Unicode NFC, CRLF to LF, tabs to spaces at the file's own tab width, trailing whitespace
+Unicode NFC, CRLF to LF, tabs to spaces at four-column tab stops, trailing whitespace
 stripped, and runs of more than two blank lines collapsed to two. Nothing else. The
 verbatim guarantee below is only worth stating if the normalization it survives is
 written down, and "we clean up the text a bit" is not a specification.
@@ -417,9 +418,9 @@ is every place it differs, because the differences are the design.
 The rendered block is trust-labelled like every other untrusted region:
 
 ```text
-<knowledge as_of="2026-07-28T00:00:00Z" policy="knowledge-v1">
+<knowledge as_of="2026-07-28T00:00:00Z" policy="knowledge@1">
   <passage doc="Deployment Guide" path="Deployment > Rollback"
-           chunk="kc_7f3a91" doc_date="2026-05-02"
+           chunk="kc_7f3a91c2d4e5b608" doc_date="2026-05-02"
            instruction_like="false">
     Roll back by reverting the release tag and re-running the deploy
     job. Do not edit the running configuration directly.
@@ -450,7 +451,11 @@ score(c, q) =
 obtained, never of what it says. `recency(d)` uses the **document's** date rather than
 the ingestion date, because a newer edition supersedes an older one and nothing else in
 the store knows that. Weights are hand-set, versioned, and eval-tuned, exactly as
-memory's are.
+memory's are. Both stores compute three of the terms today,
+`0.75 · match + 0.15 · authority + 0.1 · scope_affinity` capped at 1, with authority
+1.0, 0.7 and 0.4 down the ladder and scope affinity 1.0 when the document's project
+scope equals the query's current scope and 0.5 otherwise; neither store computes a
+`recency` or `penalty` term.
 
 ### The trace
 
@@ -481,7 +486,8 @@ been deleted" rather than a dangling id or, worse, silence.
 The **management surface is deferred**, mirroring the same decision skills recorded and
 with the same discomfort. There is no route and no CLI command in 0.1: the Milestone 5
 route table was closed at fourteen and the CLI at twelve, and nothing in Milestone 9
-needs either. ADR-0050's two later session routes do not add knowledge management.
+needs either. ADR-0050's two later session routes do not add knowledge management,
+and ADR-0284's `agent knowledge retry` only queues a failed chat upload again.
 What is *not* deferred is the semantics — `KnowledgeStore.delete()` is specified now,
 with its cascade, so that whatever surface eventually calls it is calling something that
 was designed rather than something invented at the call site. This is the same
@@ -554,13 +560,15 @@ class Extractor(Protocol):
 class Chunker(Protocol):
     version: str                       # chunk ids are stable per version
     def chunk(
-        self, text: str, title: str
+        self, text: str, title: str, *,
+        document_row_id: UUID, document_id: UUID, version: int
     ) -> list[KnowledgeChunk]: ...
 
-class KnowledgeChunkEmbedding(BaseModel):     # ADR-0289; one per chunk and space
+class KnowledgeChunkEmbedding(BaseModel):     # ADR-0289; one per chunk, space and window
     chunk_id: str
     space: EmbeddingSpace
-    text_version: str                  # "knowledge-text@1"
+    text_version: str                  # "knowledge-text@2"
+    window: int = 0                    # which window of the chunk (ADR-0290)
     vector: tuple[float, ...]
 
 class KnowledgeSemanticQuery(BaseModel):      # the question, embedded
@@ -588,12 +596,8 @@ class KnowledgeCatalog(BaseModel):
 
 class KnowledgeStore(Protocol):
     async def ingest(
-        self,
-        source: ArtifactRef,
-        title: str,
-        visibility: str,
-        principal: Principal,
-    ) -> KnowledgeDocument: ...
+        self, prepared: KnowledgeIngestPrepared   # document, chunks, embeddings
+    ) -> None: ...
     async def search(
         self, query: KnowledgeQuery, *, semantic: KnowledgeSemanticQuery | None = None
     ) -> list[RetrievedPassage]: ...
@@ -602,7 +606,7 @@ class KnowledgeStore(Protocol):
     async def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None: ...
     async def delete(
         self, document_id: UUID, principal: Principal
-    ) -> None: ...
+    ) -> list[ArtifactRef]: ...        # the source artifacts to expire
 ```
 
 ## The agent-facing surface

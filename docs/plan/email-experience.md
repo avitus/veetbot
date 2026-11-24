@@ -11,7 +11,7 @@ on 2026-09-11, including USD 20 per UTC day and USD 200 per rolling thirty days
 for aggregate automatic email work. This canonical mechanism expands the
 engineering plan's Milestone 26 under [ADR-0092](../adr/0092-client-modes-and-email-experience.md).
 It is an independent parallel workstream; the verified ceiling remains Milestone
-12. Gate registration alone is not implementation evidence.
+14. Gate registration alone is not implementation evidence.
 
 ## 1. Product decision
 
@@ -181,8 +181,8 @@ thread is archived. New clients must not silently substitute this command when
 the server or selected account lacks archive support.
 
 The approved A2 collection controls add **Inbox**, **Needs you**, and **Handled**.
-Inbox contains cached threads still in Gmail's Inbox; Needs you contains those
-with a current reply-needed assessment and no current-revision dismissal;
+Inbox contains cached threads still in Gmail's Inbox whose effective priority is at least 0.1 (ADR-0329); Needs you contains
+Inbox threads, whatever their priority, with a current reply-needed assessment and no current-revision dismissal;
 Handled contains Inbox threads whose dismissed revision equals their source
 revision. Counts cover all authorized, retained cached threads matching the
 account and search, before pagination, and do not claim a complete Gmail census.
@@ -240,7 +240,7 @@ the real host. A phone number's percent-encoded target is removed. A line the
 mailer wrapped rejoins its sentence, judged by whether the next word would have
 fit within 70 columns; a line the writer ended keeps its break as a Markdown hard
 break, so a signature stays a stack of lines and a short answer stays two answers.
-A message containing a code fence keeps its lines as they are, apart from a `-- ` signature outside the fence. A block of three or
+A message containing a code fence keeps its lines as they are, apart from a signature outside the fence, and rejoining wrapped lines joins no line of an indented code block to another. A block of three or
 more lines that repeats an earlier block of the same message, however it wrapped,
 is shown once, which is how a signature quoted at every level appears; a repeat that
 is a code block stays. No other prose is removed for repeating.
@@ -1352,7 +1352,7 @@ filters apply to both counts and rows. Older clients ignore the new field;
 clients receiving no counts show no count rather than inferring one from a page.
 The additive `total_count` counts the threads matching the requested view before
 pagination. Older servers can omit it, in which case the Mac labels the loaded
-count as such. The API default remains `priority`; A2 clients explicitly request `inbox`.
+count as such. The API default remains `priority`; A2 clients name the view on every request, `inbox` when the owner selects Inbox.
 
 `POST /v1/email/threads/{id}/dismiss` accepts `expected_revision` and an optional
 strict boolean `dismissed` (default `true` for existing clients). `true` marks

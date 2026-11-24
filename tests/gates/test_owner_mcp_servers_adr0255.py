@@ -18,7 +18,7 @@ import pytest
 from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
-from agent_core.adapters.mcp.sealing import AESGCMSecretSealer
+from agent_core.adapters.sealing import AESGCMSecretSealer
 from agent_core.api import create_app
 from agent_core.application.mcp_servers import MCPServerSettingsService
 from agent_core.bootstrap import Composition, build

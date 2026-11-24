@@ -169,14 +169,18 @@ uv run python -m gmail_mcp bootstrap \
   --output-directory "$VEETBOT_GMAIL_OUTPUT"
 ```
 
-`lsof` should print nothing. During bootstrap, complete three separate Google
+`lsof` should print nothing. Before each consent the command prints Veetbot's
+data-use disclosure for that scope and opens Google only after you type
+`CONTINUE`; any other answer cancels the ceremony. Each consent must finish
+within five minutes. During bootstrap, complete three separate Google
 consents while signed in to the intended Gmail account:
 
 1. read — `gmail.readonly`;
 2. write — `gmail.modify`; and
 3. send — `gmail.send`.
 
-The command may print only each output path and granted scope. It must create:
+Besides the three disclosures, the command may print only each output path and
+granted scope. It must create:
 
 ```text
 gmail-read.json
@@ -515,10 +519,11 @@ Checkpoint:
 ## Phase 5 — Scheduled triage smoke
 
 Do not create this schedule through the conversational `schedule.create` tool.
-That tool derives scopes only from its own flags (website, call, Cockpit feed;
-ADR-0213) and never grants a Gmail scope, so its runs cannot use Gmail.
-Create the smoke schedule through `POST /v1/schedules` with
-the exact read and write scopes.
+That tool never takes a scope from the model: it derives scopes from its own
+flags (website, call, Cockpit feed; ADR-0213) and, since ADR-0291, from the MCP
+servers named in `use_mcp_servers`, so a chat-created schedule reaches Gmail
+only when it names the Gmail servers. Create the smoke schedule through
+`POST /v1/schedules` so the request states the exact read and write scopes.
 
 First create a fresh session through the API and copy its returned `agent_id`
 and `agent_version`. Protect the bearer token from process arguments by passing
@@ -724,7 +729,9 @@ above and needs no new Google permission.
    needed. The flag grants no authority; the scopes and the existing account
    authority do. One-press Send parks each reply for
    `AGENT_EMAIL_SEND_UNDO_SECONDS` (default 10, 0–60) before the worker sends
-   it; Undo within that window cancels it (ADR-0279).
+   it; Undo within that window cancels it (ADR-0279). Optionally set
+   `AGENT_EMAIL_OWNER_TIMEZONE` to the owner's IANA zone for draft planning;
+   when it is unset, selected-calendar metadata supplies the zone.
 3. Automatic email work spends at most USD 20 per UTC day and USD 200 per
    rolling 30 days. A reviewed `runtime/limits.yaml` overlay under
    `AGENT_CONFIG_DIR` can set other finite `email.daily_cost` and
@@ -738,6 +745,11 @@ above and needs no new Google permission.
    and confirm each account reports a completed update.
 
 Set the flag back to `0` and restart the same services to turn it off.
+
+A deploy changes no existing email memory. The one-time
+`agent memory merge-email-duplicates` and `agent memory rerate-email` commands
+that bring earlier email memories under ADR-0341 and ADR-0340 are in
+[Deployment](deployment.md#email-memories-kept-by-importance-adr-0340).
 
 ## Milestone 26 — Activate server email checks
 
@@ -813,8 +825,9 @@ sender name, an address, or an unsubscribe address.
 4. **Report spam, then Not spam.** Report one junk sender; confirm its threads
    carry Gmail's Spam label and left the Inbox. Use Not spam and confirm exactly
    those threads returned.
-5. **Cleanup.** Unsubscribe from one sender with *Also archive existing mail*
-   on; confirm its Inbox threads moved to All Mail.
+5. **Cleanup.** The confirmation states that existing Inbox mail from the
+   sender will be archived; there is no archive toggle. After one accepted
+   unsubscribe, confirm that sender's Inbox threads moved to All Mail.
 6. **Chat.** Ask Veetbot to list subscriptions, then to unsubscribe from one
    named sender. The run must wait for approval; the approval names the sender
    and destination host and never a path. Approve it once.

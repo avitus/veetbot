@@ -68,13 +68,16 @@ class RequestGrantResolution:
     clock: Clock
 
 
-async def request_approval_for_run(
-    uow: RepositoryUnitOfWork, run: Run, principal: Principal
+async def approval_allowed_for_request(
+    uow: RepositoryUnitOfWork, run: Run, principal: Principal, created_event: str
 ) -> ApprovalRequest | None:
-    """The run's request approval, found through its creation event."""
+    """The approval the run's newest ``created_event`` names, when the owner
+    allowed it for the request and has sent no follow-up since. The website,
+    job and script grants all find theirs this way; each then checks its own
+    offer."""
 
     created = await uow.events.latest_before(
-        run.session_id, _NEWEST, REQUEST_GRANT_CREATED_EVENT, principal, run_id=run.id
+        run.session_id, _NEWEST, created_event, principal, run_id=run.id
     )
     if created is None or created.run_id != run.id:
         return None
@@ -93,9 +96,19 @@ async def request_approval_for_run(
     if (
         approval.run_id != run.id
         or approval.resolution is not ApprovalResolutionType.APPROVE_FOR_REQUEST
-        or approval.request_grant_offer is None
         or approval.resolved_at is None
     ):
+        return None
+    return approval
+
+
+async def request_approval_for_run(
+    uow: RepositoryUnitOfWork, run: Run, principal: Principal
+) -> ApprovalRequest | None:
+    """The run's request approval, found through its creation event."""
+
+    approval = await approval_allowed_for_request(uow, run, principal, REQUEST_GRANT_CREATED_EVENT)
+    if approval is None or approval.request_grant_offer is None:
         return None
     return approval
 

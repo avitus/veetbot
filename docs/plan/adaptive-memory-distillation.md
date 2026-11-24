@@ -92,7 +92,7 @@ catch-all justification for a system that remembers nothing.
 Milestone 21 does not mutate the meaning of the completed policies:
 
 ```text
-formation@7   deterministic-v2       frozen deterministic control
+formation@7   deterministic-formation-v2  frozen deterministic control
 formation@8   provider-assisted-v2   frozen provider control
 formation@9   nemori-assisted-v1     new candidate policy
 formation@10  provider-assisted-v3   repaired provider control (ADR-0086)
@@ -128,8 +128,8 @@ outside production, where no release identity exists, the file is accepted
 and the gap is logged. A change to the scorer withdraws
 every artifact published under
 the previous scorer; the `formation@9` artifact of 2026-09-03 was withdrawn on
-2026-09-04 for that reason (ADR-0087), and `auto` selects `formation@10` for
-the production tuple until a re-evaluation under the current scorer passes.
+2026-09-04 for that reason (ADR-0087), and `auto` selected `formation@10` for
+the production tuple until a re-evaluation under the current scorer passed.
 Until such evidence exists, `auto` keeps the newest evidenced provider-assisted
 policy, `formation@10` where its artifact matches and otherwise `formation@8`;
 `required` refuses rather than claiming an unevaluated policy is active. A
@@ -702,7 +702,11 @@ memory.
 There is no shadow, canary, or manual opt-in phase after passing evidence is
 bundled. `auto` selects `formation@9` immediately for the exact production
 tuple, then the repaired `formation@10` below, then the frozen `formation@8`
-control, whichever artifact matches first. `formation@8` remains an honest
+control, whichever artifact matches first. Since ADR-0101 that search runs
+only when People is disabled or the pin names one of those three policies:
+with People enabled and no pin, or a pin of `formation@11`, startup selects
+`formation@11` without reading an artifact
+([people-and-relationships.md](people-and-relationships.md)). `formation@8` remains an honest
 control in the comparison, not a conservative rollout stage. The operator pin
 `AGENT_MEMORY_FORMATION_POLICY_PIN` holds the selection at `formation@8`,
 `formation@9`, or `formation@10` without deleting an artifact; a pin narrows

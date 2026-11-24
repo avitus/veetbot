@@ -262,7 +262,8 @@ admits semantic candidates under the same final item/token caps, lifecycle weigh
 trust scan and rendering. Semantic RRF order follows cosine rank. Verified equivalence transfers semantic
 relevance to permitted originals before scoring, so a partially indexed group
 still cites its canonical fact and contributes only one fused result. Trace policy
-records `semantic@1` and the embedding-space digest. The embedding tuple includes
+records `semantic@2`, the embedding-space digest and the fusion coefficient
+(`+dense@1` for the dense channel). The embedding tuple includes
 provider, model, model revision, dimensions and `memory-text@1` (original subject
 and statement, with no inferred labels).
 
@@ -605,10 +606,11 @@ a cancelled formation call. Its complete originals and both scratch databases ar
 retained. Eight ledgers total USD 135.90882425 including USD 7.83424 in uncertain
 reservations, leaving USD 164.09117575 under the unchanged cap. The owner then
 approved checkpointed continuation (ADR-0212), replacing the earlier no-reuse
-method for unchanged, verified inputs. Work now proceeds on the isolated
+method for unchanged, verified inputs. Work then proceeded on the isolated
 `codex/memory-retrieval-evaluation` branch without holding unrelated development
-or production releases. Continuation implementation, collection, independent human
-failure review, publication and a separately authorized release route remain open.
+or production releases. The continuation has since been implemented and collected: it
+retains all 1,600 observations and fails the original quality goals (ADR-0220,
+below). Reviewed release evidence that satisfies the original gates remains open.
 The native historical-index load measurement
 under `20261013-native-postgres-load/` retains 480 successful retrieval samples through
 100,000 competing records. It measures one synthetic information need and cannot
@@ -668,8 +670,9 @@ uv run python -m agent_core.evals.general_memory_recall_driver --noise 1000 --ou
 At 1,000 newer distractors and the unchanged 20-item/2,000-token caps, both recall
 paths increased rendered-evidence recall from 67% to 68.75%. Automatic preference
 recall remained 26%; this confirms the repair does not solve implicit semantic needs.
-The optional synthetic embedding comparison has verified response ordering, finite
-vectors, usage, spend reservation and no retries. Initial calls using the generic
+The synthetic embedding comparison verified response ordering, finite
+vectors, usage, spend reservation and no retries; its runner has since been
+retired, and the observation guide below names the revision that holds it. Initial calls using the generic
 credential returned HTTP 401; the provider profile's `VEETBOT_OPENAI_KEY` worked.
 On the same synthetic pool, top-20 candidate recall is 68.5% for lexical/structured
 selection, 97% for dense search and 96.5% for rank fusion. The 256-dimensional
@@ -885,7 +888,9 @@ current blocks that differ only in observation time. Focused People context
 reserves identity and one relationship before beliefs, then fills spare capacity
 with additional history. Fallback role discovery requires the complete stored
 relationship label: a shared topic word cannot redirect the query to an unrelated
-person. Older tool pins remain registered with their prior semantics. Source,
+person. Older tool pins remain registered with their prior semantics, except
+that this label requirement now governs every relevance recall, automatic recall
+included ([ADR-0348](../adr/0348-a-tie-selects-a-person-only-when-the-question-names-it.md)). Source,
 sensitivity, temporal, erasure and search-quota protections remain mandatory.
 
 ### Verification method and observations

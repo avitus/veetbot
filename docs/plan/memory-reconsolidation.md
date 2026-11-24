@@ -534,7 +534,8 @@ mutation. Its `requires_local_validation` result is explicitly insufficient for
 merge, summary or hypothesis admission: kind-specific rules below, evidence
 identity/grounding checks and transactional source revalidation still apply.
 The separate executor does not change that authority boundary. Operation
-orchestration and comparative activation evidence remain pending; these components
+orchestration is composed by `ReconsolidationPass`, described below; comparative
+activation evidence remains pending, and these components
 do not advance a complete runtime gate.
 
 Automatic equivalence uses NFC normalization and whitespace collapse only;

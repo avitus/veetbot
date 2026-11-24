@@ -371,7 +371,7 @@ call (Section 9):
 Milestone 16 builds the decay and explicit re-derivation parts of this stage.
 Whole-store merging and grounded connections are now authorized as Milestone 32;
 [memory-reconsolidation.md](memory-reconsolidation.md) defines that mechanism
-and its twenty-four gates; runtime and offline comparisons are implemented; verification and supervised deployment remain pending.
+and its twenty-four gates; runtime, offline comparisons and the owner-reviewed supervised mode (ADR-0174) are implemented; gate verification and unattended activation remain pending.
 [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md) gives
 decay a bounded sweep with per-belief-type half-lives, a confidence step, and a
 retirement floor; adds the `AFFIRMED` authority and the working-state facts
@@ -391,7 +391,7 @@ guesses — the three answers are three different writes:
 
 | The user says | Formation does |
 | --- | --- |
-| Not true | Retire the belief: `valid_to = now`, status `superseded`, no replacement. |
+| Not true | Retire the belief: `valid_to = now`, status `retired`, no replacement. |
 | Was true, has changed | Supersede it with the correction as a new belief at user authority. |
 | True elsewhere, not here | Lower `portability` and record a negative scope override. The belief survives in its origin; it stops being carried here. |
 | Still true (confirm, ADR-0247) | Supersede it with the same words as a new belief at user authority, citing a `memory.owner_confirmation` event; no rejection is recorded. Allowed for a live belief and for one decay or expiry retired. |
@@ -499,7 +499,7 @@ class MemoryRecord(BaseModel):
     valid_to: datetime | None
     superseded_by: UUID | None
     # `status` (from Milestone 9) carries the lifecycle state:
-    #   candidate | provisional | active | superseded | expired
+    #   candidate | provisional | active | superseded | expired | retired
     flagged_for_review: bool = False    # committed, surfaced for review
     formation_run_id: UUID              # which consolidation produced it
     consolidation_policy_version: str
@@ -509,7 +509,7 @@ class BeliefRejection(BaseModel):
     tenant_id: str
     principal_id: str
     belief_id: UUID                     # as rejected; ids may change
-    # kind: untrue | changed | not_here | unspecified
+    # kind: untrue | changed | not_here | unspecified | deleted
     kind: str
     # content keys survive re-derivation
     subject: str
@@ -550,8 +550,8 @@ New relationships between beliefs: `conflicts_with`, `supersedes`.
   `supersede`, `list`, `edit`, `delete`, `reject`,
   `outstanding_rejections`, `record_consolidation`, and principal-scoped
   consolidation listing. Backends: Postgres (FTS + normalized belief tables)
-  first; `pgvector` and an external provider (e.g. Honcho) later, behind the
-  same port (ADR-0014).
+  first; an external provider (e.g. Honcho) later, behind the same port
+  (ADR-0014). The `pgvector` index sits behind `SemanticMemoryIndex` ([general-memory-recall.md](general-memory-recall.md)).
 - **`MemoryConsolidator` port**: `run(trigger, scope, since_watermark) ->
   ConsolidationResult`. The builtin implementation is LLM extraction as above; an
   external memory provider can be delegated to behind this port.
@@ -682,7 +682,7 @@ the deterministic fallback while preserving the model-assisted design above:
 ADR-0051 introduced a schema-constrained hybrid reference extractor over trusted
 principal-authored events and a compact existing-belief view. Its focused tests
 retain regression coverage for grounding, strict output, independent limits,
-content-free `memory.extraction.completed` auditing, and deterministic fallback.
+content-free extraction auditing, and deterministic fallback.
 Those tests are not production activation evidence. Accepted ADR-0057 supersedes
 the earlier routed-policy selection rule. Normal composition does not select a
 provider extractor until a version-bound artifact for the exact runtime tuple

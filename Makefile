@@ -264,6 +264,7 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testBrowserApprovalAllowsForThisTaskAfterConfirmation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testEmailBudgetPauseKeepsAccountingCollapsed \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testClosedEmailComposerKeepsSendUndoVisible \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testFollowUpSentWhileVeetbotWorksWaitsToBeRead \
 		CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGN_ENTITLEMENTS= PROVISIONING_PROFILE_SPECIFIER= DEVELOPMENT_TEAM=
 

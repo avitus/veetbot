@@ -249,6 +249,34 @@ page summarizes and does not claim a milestone complete.
   unattended run that holds only the call-reading scope (ADR-0325). Its
   report is untrusted call content, so a later call from that conversation
   needs the card. `AGENT_CALL_RESULT_FOLLOW_UP_ENABLED=0` turns it off.
+- Code mode (ADR-0342) is default-off behind `AGENT_CODE_MODE_ENABLED`. A
+  script the model writes runs only in the run's sandbox, never in the worker.
+  `sandbox.run_code` is classified exactly as `sandbox.run_command`, and its
+  output is `EXTERNAL_UNTRUSTED`. Every tool call a script makes over the
+  bridge passes the same validation, scope, policy, hardline, approval and
+  limit checks as a direct call and counts against the run's tool-call limit;
+  control tools and sandbox tools are refused. A script written for the
+  owner's own message runs without a card only while the turn has read no
+  outside content.
+- "Allow for this request" lets one approval cover later actions of the same
+  kind in one request: actions on a signed-in website (ADR-0302), further
+  scripts (ADR-0342 decision 11), and trials, saves, runs and schedule repins
+  of one saved job within access its grants already hold (ADR-0344). The
+  script and job offers are made only in a top-level run of the owner's own
+  chat. A grant ends with its run, after two hours, or when the run reads the
+  owner's next message, and never transfers to another run or session. A
+  script grant covers starting a script, not what the script does; new hosts,
+  MCP servers, feeds or larger limits for a job still ask. Each use is
+  recorded as `tool.call.authorized` with its authorization kind and approval.
+- Mail forms a first-class memory only from a sender the owner knows in a
+  thread kept a year or more; on received mail that requires Gmail's sender
+  check to pass, which vouches for the sending domain, not the mailbox
+  (ADR-0340). A sender's signature updates their People contact details only
+  under the same check (ADR-0336). Other mail stays an attributed guess.
+- The recall question page (ADR-0339) is default-off behind
+  `AGENT_RECALL_QUESTIONS_ENABLED`. Its routes need `memory.read` and
+  `memory.write`, its tables are owner-scoped under forced row security, and
+  the page keeps the owner's token in tab memory only.
 
 ## Production delivery controls
 

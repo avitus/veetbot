@@ -362,6 +362,7 @@ The first segment is the **domain**, and domains are partitioned:
 | `people` | builtin, People memory | build time, People flag |
 | `records` | builtin, owner records | build time, records flag |
 | `cockpit` | builtin, Cockpit widgets and feeds | build time, Cockpit flag |
+| `job` | builtin, agent-written jobs | build time, jobs flag |
 | `run` | builtin, the owner's run evidence | build time |
 | `code` | builtin, the release's source and proposals | build time, code tools flag |
 | `image` `video` | builtin, generated media | build time, TensorScale credential (ADR-0140) |
@@ -371,12 +372,13 @@ The first segment is the **domain**, and domains are partitioned:
 The control annotation is on the three domains that hold nothing else; `tool`
 holds only `tool.call` (ADR-0123).
 `skill` holds `skill.load` and `skill.manage`, one of each kind, and
-`memory` holds three capability tools and no control tool.
+`memory` holds four capability tools and no control tool.
 `schedule` holds `schedule.create` plus Milestone 23's summary-only
 `schedule.list` and approval-gated `schedule.update`, `schedule.pause`,
 `schedule.resume`, and `schedule.cancel` capabilities; their registration
 remains conditional on the scheduling deployment flags.
-`web` holds the read-only `web.search`, `web.fetch` and `web.fetch_json`
+`web` holds the read-only `web.search`, `web.fetch`, `web.fetch_json` and
+`web.inspect_image` (ADR-0276)
 capabilities designed in [web-access.md](web-access.md). Their `web_provider` target is valid only with
 `NETWORK_READ`, `READ_ONLY`, and `EXTERNAL_UNTRUSTED`; registration refuses any
 other use of that target.
@@ -2951,3 +2953,10 @@ paragraph and the case.
 and no roster, prompt or pin changes. On, the tool is registered and Chat
 changes as the section above describes. `tests/unit/test_code_mode.py` covers
 the library, the runner, the tool and the bridge refusal offline.
+
+Each service reads the setting from its own settings file. The API and the
+interactive, async and maintenance workers share `veetbot.env`; the schedule,
+surface, notify and call services each have their own. Production has the
+setting on in the shared file since 2026-11-23 and off in the others, so app
+chats have the script tool, and schedules and inbound surfaces keep
+`sandbox.run_command` (ADR-0342, Implementation status).

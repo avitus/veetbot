@@ -1154,8 +1154,21 @@ over the ordinary composition and repositories. They insert no belief rows
 directly and implement no second runtime loop; the HTTP review and deletion
 routes are ADR-0117's, not the CLI's.
 
+Later memory documents add commands under the same noun, each owned where its
+subject is designed: `health`, `probe` and the `questions` group (`import`,
+`export`, `record`; ADR-0339) in
+[memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md);
+the `reconsolidations` group in
+[memory-reconsolidation.md](memory-reconsolidation.md); `reconcile-conflicts`
+in [memory-formation-and-consolidation.md](memory-formation-and-consolidation.md);
+`rerate-email` and `merge-email-duplicates` (ADR-0340, ADR-0341) in
+[email-experience.md](email-experience.md); and the operator commands
+`merge-possessions` and `standing-admission` in
+[the deployment guide](../deployment.md).
+
 Later subject documents add nouns on the same terms, each owned where its
-subject is designed: `agent persona` in
+subject is designed: `agent knowledge` in
+[knowledge-documents.md](knowledge-documents.md), `agent persona` in
 [persona-surface.md](persona-surface.md), `agent surface` in
 [inbound-surfaces.md](inbound-surfaces.md), `agent people` in
 [people-and-relationships.md](people-and-relationships.md), and the

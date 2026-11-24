@@ -19,20 +19,21 @@ criteria live in the [engineering plan](../plan/engineering-plan.md).
 
 ## At a glance
 
-State reviewed on 2026-11-18 against `main` at `7000560d`. The API, documentation, and public website
-reported `20261119-024855-7000560`; Milestone 14's completion was
+State reviewed on 2026-11-23 against `main` at `df31c490` (pull request 264), whose application,
+proxy and TestFlight delivery jobs succeeded; `dev` is two commits ahead with ADR-0348. Milestone 14's completion was
 recorded on 2026-10-09. Of the thirty-six milestones (0 through 35),
 twenty-two are complete and fourteen are in progress; none is authorized but
-unstarted. Milestone 15's independent reliability repair under ADR-0205 reached
+unstarted, and none completed since the 2026-11-18 review. Milestone 15's independent reliability repair under ADR-0205 reached
 `main` in pull requests 171 and 158. Milestone 32 has implemented components and
 registered gates; comparative quality and complete runtime/release evidence
 remain pending. Milestone 34 is delivered behind its flag and awaits owner
-activation.
+activation. Milestone 18's account-bound bootstrap repair reached `main` in
+pull request 258, which closed that item.
 
 | Milestone | State | Gates with checks | What remains | Who acts |
 | --- | --- | --- | --- | --- |
 | 15 Operational hardening | In progress | 0/16 | All sixteen gates; the ADR-0205 reliability repair is delivered | Engineering, then owner |
-| 18 Email integration | In progress | 17/17 | Mailbox smokes and reviewed bootstrap repair | Owner; engineering |
+| 18 Email integration | In progress | 17/17 | Owner mailbox smoke and work-only draft smoke | Owner |
 | 21 Memory distillation | In progress | 31/31 | Final-head review; evidence for formation@11, which production selects; Sol/Astra study | Engineering; owner |
 | 24 SMS | In progress | 12/12 | Physical-iPhone verification | Owner |
 | 25 WhatsApp | In progress | 12/12 | Meta ceremony, live smoke | Owner |
@@ -42,11 +43,11 @@ activation.
 | 30 Advisory approval | In progress | 5/5 | Threshold calibration and enforce decision; final-head review | Owner; engineering |
 | 31 Email unsubscribe | In progress | 22/23 | iPad detail layout, mailbox smoke; final-head review | Engineering; owner |
 | 32 Memory reconsolidation | In progress | 2/24 | Measured quality failures, remaining integrated gates and release evidence | Engineering |
-| 33 General memory recall | In progress | 12/12 | Staged implementation and comparative activation evidence; reviewed release | Engineering; owner |
+| 33 General memory recall | In progress | 12/12 | Production check of standing semantic recall; staged implementation and comparative activation evidence; reviewed release | Engineering; owner |
 | 34 Owner records | In progress | 10/10 | Production flag and the approval tool_rules entry | Owner |
-| 35 Cockpit | In progress | 14/23 | Builder canary, build steps 10 and 11, owner activation | Engineering; owner |
+| 35 Cockpit | In progress | 14/23 | Gate 3 binding, build steps 10 and 11, owner activation | Engineering; owner |
 
-At that revision, 551 of the 642 registered gates had checks. The other 91 referenced the pending placeholder. A bound check still needs passing evidence in its specified environment.
+At that revision, 551 of the 642 registered gates had checks, as at the 2026-11-18 review. The other 91 referenced the pending placeholder. A bound check still needs passing evidence in its specified environment.
 
 ## Complete
 
@@ -139,14 +140,18 @@ final head of
 GitGuardian, and CodeRabbit with every review thread resolved before merge
 ([Glen review](https://app.tryglen.com/avitus/veetbot/pull/73)). The
 multi-account extension reached `main` in pull request 94, which merged with
-one CodeRabbit finding unresolved. Regression coverage now checks the account
-label in both CLI argument positions and rejection of conflicting labels. Follow the
+one CodeRabbit finding unresolved: a root-level account label was not passed to
+the bootstrap ceremony. The repair forwards the label from either CLI argument
+position and refuses conflicting labels; it reached `main` in pull request 258
+(2026-11-19) with hosted CI and the CodeRabbit check passing on its final head,
+and both pull requests' review threads are resolved. The work account runs in
+production: ADR-0204 and ADR-0244 record its owner-reviewed junk-filter pilot
+there. Follow the
 [Gmail integration runbook](../gmail-integration-runbook.md) for the remaining
 owner-controlled work. Remaining:
 
 - [ ] Owner real-mailbox smoke covering bootstrap consent, scheduled triage, phone approval, and one approved send
-- [ ] Work-account bootstrap, production manifest activation, and work-only draft smoke
-- [ ] Verify the account-bound bootstrap repair through hosted CI and final-head CodeRabbit review
+- [ ] Work-only draft smoke on the work account; ADR-0204 and ADR-0244 record that account running in production, and no smoke is recorded
 
 ### Milestone 21 — Adaptive memory distillation
 
@@ -235,9 +240,14 @@ Chat and announced to every device. Reaching that point took two fixes: ADR-0105
 tool-definition budget and the missing `call_finished` lock-screen alert. Bland's
 signed post-call webhook has been verified in production against the raw bytes.
 Every pull request that carried calling to `main` passed hosted CI and a clean
-review, most recently pull request 173 (owner-requested calls, 2026-10-18) and
-pull request 179 (call plans with retries and a follow-up, and the call-result
-intake repair, 2026-10-20); the final-head review waits for the two pending gates,
+review: pull request 173 (owner-requested calls, 2026-10-18), pull request 179
+(call plans with retries and a follow-up, and the call-result intake repair,
+2026-10-20), and most recently pull request 252 (a pinned provider agent version
+and fifteen-minute calls, ADR-0319, 2026-11-13), pull request 254 (Chat reports
+a finished call, ADR-0325, 2026-11-14) and pull request 259 (bounded
+call-erasure memory, 2026-11-19). Publishing and pinning the provider agent and
+a live call under ADR-0319 and ADR-0325 are not recorded. The final-head review
+waits for the two pending gates,
 `gate.call.admission_bounds` and `gate.call.live_release`, to be bound.
 
 - [ ] Verify provider-side admission controls and account-level memory or persona attachments in the Bland dashboard
@@ -368,7 +378,18 @@ Authorized on 2026-10-11 by [ADR-0178](../adr/0178-general-memory-recall.md),
 with twelve gates in the [design](../plan/general-memory-recall.md).
 The staged implementation is in progress; optional channels remain evidence-gated.
 
-- [ ] Verify the first authorized ADR-0274 release in production, including trial expiry, semantic role bindings, sparse fallback and jobs
+The bounded owner trials had expired by 2026-11-02. On 2026-11-03 the owner
+directed that semantic recall be activated and stay on (ADR-0290), a standing
+admission bound to the local encoder that moves no gate. A later release that
+added a model turned it off in the owner's chats; the repair (ADR-0343) reached
+`main` in pull request 262 on 2026-11-23, and no production readback after it is
+recorded. The recall health report and stage timings (ADR-0338) and the stored
+owner question set (ADR-0339) reached `main` in pull request 260. That set is a
+diagnostic, not gate evidence: on a production clone of 2026-11-23 it passes 99
+of 114 questions under the ADR-0346 scoring rule (pull request 264), and 103
+with ADR-0348 (pull request 265).
+
+- [ ] Verify semantic recall in production under the standing admission (ADR-0290, kept on by ADR-0343 in pull request 262), including semantic role bindings, sparse fallback and jobs; this item first named the ADR-0274 trial release, whose trial expired on 2026-11-02
 - [ ] Complete the staged implementation and comparative activation evidence
 - [ ] Owner decision on 2026-11-20: memory text may be sent to an outside embedding provider for recall, to be revisited by 2027-05-20. No provider is configured; measuring a stronger encoder against the owner question set needs its own decision record, since the standing admission binds the local encoder (ADR-0290)
 - [ ] Complete the authorized dev-to-main PR review, hosted CI and production delivery after plan completion
@@ -415,9 +436,12 @@ the detail panel and sheet, the Arrange sheet, and the release's runtime
 export. Gates 2, 4 through 9, 14 through 18 and 21 are bound. The Apple mode shell
 runs over three modes (build step 9): the switch reads Cockpit · Chat · Email
 at the top of each Mac left pane, and Cockpit shows its unavailable state.
-Every other gate is pending.
+Every other gate is pending. Gate 3's production evidence exists: the release
+script builds a reference widget under runsc before it promotes, and that
+canary first passed in the release of pull request 188 (2026-10-24); the
+registry entry still names the pending check.
 
-- [ ] Gate 3 evidence: the runsc builder canary passing in the first production release that builds the builder image
+- [ ] Bind gate 3 (gate.cockpit.builder_offline_under_runsc), which still names the pending check; its runsc builder canary first passed in the production release of pull request 188 and precedes every promotion since
 - [ ] Build step 10 remainder: the discuss intent, gate 20 across all three modes, gate 22 on the oldest supported iPad, and gate 19's preflight rebuild of live widgets
 - [ ] ADR-0273: Verify the fixture preview and a device failure report after releasing the production builder and Apple client.
 - [ ] The widget write approval view's preview image: the design calls for it, and the card so far carries only the whole diff

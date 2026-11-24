@@ -20,6 +20,13 @@ final class ConversationNavigationUITests: XCTestCase {
         // or a flag takes the key as its value and AppKit opens YES as a
         // document instead of a window.
         app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+        #else
+        // Every journey starts upright. A simulator that has not been turned
+        // reports no orientation, so a journey that turns it and then puts
+        // back what it read leaves it turned for every journey after it in
+        // the run. Starting from a known orientation also makes that reading
+        // one a journey can put back.
+        XCUIDevice.shared.orientation = .portrait
         #endif
         app.launchArguments.append("--ui-testing-conversation-navigation")
         // Each case adds its fixture options and then launches once; launching
@@ -3223,6 +3230,63 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(explanation.value as? String, "Board mail comes first")
     }
 
+    /// Refine with Veetbot rewrites the open reply. Refine draft waits for an instruction, and
+    /// once Veetbot has answered, its rewrite stands in the editor in place of what the owner
+    /// had changed, with the button ready for another instruction and no progress line left.
+    /// The fixture answers at once, so the spinner and "Refining…" shown in between are held
+    /// by the package tests, not here.
+    func testEmailRefineReplacesTheReplyWithVeetbotsRewrite() {
+        app.launch()
+        let emailMode = app.buttons["mode.email"]
+        XCTAssertTrue(emailMode.waitForExistence(timeout: 10))
+        emailMode.tap()
+        let row = app.buttons["email.thread.00000000-0000-0000-0000-000000000801"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        let aiDraft = app.buttons["email.draft-with-veetbot"]
+        XCTAssertTrue(aiDraft.waitForExistence(timeout: 5))
+        aiDraft.tap()
+        let editor = app.textViews["email.draft-body"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        let suggestion = "Thanks, Alex. I'll review the agenda."
+        let showsSuggestion = NSPredicate(format: "value == %@", suggestion)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: showsSuggestion, object: editor)], timeout: 5), .completed)
+        // Draft with Veetbot focuses the body: the owner changes the suggestion.
+        app.typeText("Mine. ")
+        XCTAssertEqual((editor.value as? String)?.contains("Mine.") ?? false, true)
+        let keyboardDone = app.buttons["email.keyboard-done"]
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        keyboardDone.tap()
+
+        let disclosure = app.buttons["Refine with Veetbot"]
+        scrollEmailUntilVisible(disclosure)
+        XCTAssertTrue(disclosure.isHittable, app.debugDescription)
+        disclosure.tap()
+        let refine = app.buttons["email.refine-draft"]
+        XCTAssertTrue(refine.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(refine.label, "Refine draft")
+        XCTAssertFalse(refine.isEnabled, "Refine draft waits for an instruction")
+        let instruction = app.textFields["How should the reply change?"]
+        scrollEmailUntilVisible(instruction)
+        instruction.tap()
+        instruction.typeText("Make it shorter")
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        keyboardDone.tap()
+        scrollEmailUntilVisible(refine)
+        XCTAssertTrue(refine.isEnabled)
+        refine.tap()
+
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: showsSuggestion, object: editor)], timeout: 10), .completed,
+            "Veetbot's rewrite replaces what the editor held")
+        let ready = NSPredicate(format: "label == %@ AND enabled == true", "Refine draft")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: refine)], timeout: 5),
+                       .completed, "The button takes another instruction once the rewrite has arrived")
+        XCTAssertFalse(element("email.refine-progress").exists)
+        XCTAssertFalse(element("email.action-error").exists, app.debugDescription)
+    }
+
     func testEmailModePreservesAnUnsentChatMessage() {
         app.launch()
         let historicalRow = app.descendants(matching: .any)[
@@ -3442,6 +3506,57 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Sending…"].exists)
         XCTAssertTrue(app.buttons["Send"].isEnabled)
     }
+
+    #endif
+
+    /// ADR-0324: while Veetbot works on one message the owner can send another. It joins the
+    /// transcript at once, marked as waiting to be read, and the message box is free again.
+    /// The fixture's server then answers as one whose run had already ended, which makes the
+    /// words an ordinary message, so the mark goes and nothing is reported.
+    func testFollowUpSentWhileVeetbotWorksWaitsToBeRead() {
+        let composer = app.descendants(matching: .any)["chat.composer"]
+        let send = app.buttons["Send"]
+        #if os(iOS)
+        submitSlowChatMessage(useReturn: true)
+        #else
+        app.launchArguments.append("--ui-testing-chat-slow-send")
+        app.launch()
+        let row = sessionRow("00000000-0000-0000-0000-000000000123")
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).click()
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.click()
+        composer.typeText("Follow up")
+        XCTAssertTrue(send.wait(for: \.isEnabled, toEqual: true, timeout: 5))
+        send.click()
+        #endif
+        XCTAssertTrue(app.staticTexts["Sending…"].waitForExistence(timeout: 2))
+        // The follow-up is written while the first message is still on its way.
+        activate(composer)
+        composer.typeText("Use metric units")
+        // Send takes it once the first message has been accepted and its run is working.
+        XCTAssertTrue(app.staticTexts["Working…"].waitForExistence(timeout: 12))
+        XCTAssertTrue(send.wait(for: \.isEnabled, toEqual: true, timeout: 5), "A working run takes a follow-up")
+        activate(send)
+        let waiting = element("chat.followUp.waiting")
+        XCTAssertTrue(waiting.waitForExistence(timeout: 5), app.debugDescription)
+        let followUp = app.staticTexts.matching(NSPredicate(
+            format: "label CONTAINS %@ OR value CONTAINS %@", "Use metric units", "Use metric units")).firstMatch
+        XCTAssertTrue(followUp.exists, "The follow-up is in the transcript before Veetbot has read it")
+        // On a Mac `chat.composer` marks the scroll view; the words are in its text view.
+        #if os(macOS)
+        let composerText = composer.textViews.firstMatch
+        #else
+        let composerText = composer
+        #endif
+        XCTAssertEqual(composerText.value as? String, "", "The message box is free for the next words")
+        XCTAssertTrue(waiting.waitForNonExistence(timeout: 15), "An accepted follow-up stops waiting")
+        XCTAssertTrue(followUp.exists, "The words stay in the transcript")
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        XCTAssertFalse(app.sheets.firstMatch.exists)
+    }
+
+    #if os(iOS)
 
     func testMemoryBrowserListsAndOpensDetail() {
         app.launch()
