@@ -885,7 +885,9 @@ current blocks that differ only in observation time. Focused People context
 reserves identity and one relationship before beliefs, then fills spare capacity
 with additional history. Fallback role discovery requires the complete stored
 relationship label: a shared topic word cannot redirect the query to an unrelated
-person. Older tool pins remain registered with their prior semantics. Source,
+person. Older tool pins remain registered with their prior semantics, except
+that this label requirement now governs every relevance recall, automatic recall
+included ([ADR-0348](../adr/0348-a-tie-selects-a-person-only-when-the-question-names-it.md)). Source,
 sensitivity, temporal, erasure and search-quota protections remain mandatory.
 
 ### Verification method and observations

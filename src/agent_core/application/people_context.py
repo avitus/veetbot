@@ -41,12 +41,15 @@ from agent_core.domain.people import (
     RelationshipAssertion,
     is_group_or_service_name,
     is_non_person_reference,
+    normalize_identifier,
     referenced_people,
 )
 from agent_core.domain.recall_execution import recall_search
 from agent_core.ports.people_runtime import PeopleRecall
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
+# People one role-discovery read may propose before it abstains (ADR-0348).
+_DISCOVERY_PEOPLE = 20
 # How close an owner relationship is, for overview paging: lower is closer.
 _RANK = ("partner", "child", "parent", "sibling", "relative")
 # Bounds one overview's identity reads per relationship group; a larger group
@@ -413,8 +416,23 @@ class PeopleContextService:
                     # Overflow and collisions abstain; labels alone never authorize a merge.
                     if len(rows) <= 100:
                         matches: dict[str, set[UUID]] = {}
+                        # ADR-0348: an unnamed relative is displayed by a role the
+                        # owner never confirmed ("mom"). That word names a tie, not a
+                        # person, exactly as the role alias beside it selects nobody.
+                        role_labels = {
+                            (row.person_id, normalize_identifier("role", "owner", row.value))
+                            for row in rows
+                            if isinstance(row, PersonIdentifier)
+                            and row.identifier_kind == "role"
+                            and row.verification != "owner_confirmed"
+                        }
                         for row in rows:
                             if isinstance(row, Person) and row.state != "merged":
+                                if (
+                                    row.id,
+                                    normalize_identifier("role", "owner", row.display_name),
+                                ) in role_labels:
+                                    continue
                                 label, person_id = row.display_name, row.id
                             elif isinstance(row, PersonIdentifier) and row.person_id is not None:
                                 instant = query.as_of or self._retriever.current_time()
@@ -673,7 +691,14 @@ class PeopleContextService:
         # This is identity discovery, not a hard type filter on the final facts.
         # Keep every visibility restriction and use ordinary bounded lexical
         # selection; no inferred role vocabulary or extra encoder call.
-        """Resolve one governed identity, requiring full role labels for focused recall."""
+        """Resolve the one person whose stored tie to the owner the question names.
+
+        ADR-0348: a relationship belief that merely shares a word with the task
+        proposes its people; a person is selected only when a visible, resolved,
+        direct owner edge that belief supports carries a label whose whole
+        lexemes occur in the task. Nobody named leaves ordinary recall untouched;
+        several named people abstain, as do reads too large to certify.
+        """
         discovery = query.model_copy(
             update={
                 "belief_types": [BeliefType.RELATIONSHIP],
@@ -702,50 +727,52 @@ class PeopleContextService:
                 owner_relationship_belief_ids=evidence,
                 as_of=query.as_of,
                 known_at=query.known_at,
-                limit=1,  # The repository returns one additional row for ambiguity.
+                limit=_DISCOVERY_PEOPLE,  # The repository returns one more row on overflow.
             )
         )
-        if (
-            len(people) == 1
-            and isinstance(people[0], Person)
-            and is_safe_text(people[0].display_name)
+        if not people:
+            return [], False, ()
+        if len(people) > _DISCOVERY_PEOPLE or not all(isinstance(row, Person) for row in people):
+            return [], True, ()
+        edges = await uow.people.query(
+            PeopleQuery(
+                tenant_id=principal.tenant_id,
+                principal_id=principal.principal_id,
+                sensitivity_ceiling=ceiling,
+                kinds=["relationship"],
+                belief_ids=evidence,
+                as_of=query.as_of or self._retriever.current_time(),
+                known_at=query.known_at,
+                limit=100,
+            )
+        )
+        if len(edges) > 100:
+            return [], False, ()
+        candidates = {row.id: row for row in people if isinstance(row, Person)}
+        tokens = lexical_tokens(query.text or "")
+        named: dict[UUID, list[UUID]] = {}
+        for edge in edges:
+            if (
+                not isinstance(edge, RelationshipAssertion)
+                or edge.unresolved
+                or not any(endpoint.kind == "owner" for endpoint in (edge.subject, edge.object))
+            ):
+                continue
+            label = edge.qualifier or (edge.predicate if edge.predicate != "other" else "")
+            terms = recall_term_lexemes(label, fold=True)
+            if not terms or not all(lexical_term_matched(forms, tokens) for forms in terms):
+                continue
+            for endpoint in (edge.subject, edge.object):
+                if endpoint.kind == "person" and endpoint.id in candidates:
+                    named.setdefault(endpoint.id, []).append(edge.belief_id)
+        if not named:
+            return [], False, ()
+        if len(named) > 1 or not all(
+            is_safe_text(candidates[person_id].display_name) for person_id in named
         ):
-            if query.focused_people_context:
-                edges = await uow.people.query(
-                    PeopleQuery(
-                        tenant_id=principal.tenant_id,
-                        principal_id=principal.principal_id,
-                        sensitivity_ceiling=ceiling,
-                        kinds=["relationship"],
-                        person_id=people[0].id,
-                        belief_ids=evidence,
-                        as_of=query.as_of or self._retriever.current_time(),
-                        known_at=query.known_at,
-                        limit=100,
-                    )
-                )
-                if len(edges) > 100:
-                    return [], False, ()
-                tokens = lexical_tokens(query.text or "")
-                evidence = []
-                for edge in edges:
-                    if (
-                        not isinstance(edge, RelationshipAssertion)
-                        or edge.unresolved
-                        or not any(
-                            endpoint.kind == "owner" for endpoint in (edge.subject, edge.object)
-                        )
-                    ):
-                        continue
-                    label = edge.qualifier or (edge.predicate if edge.predicate != "other" else "")
-                    terms = recall_term_lexemes(label, fold=True)
-                    if terms and all(lexical_term_matched(forms, tokens) for forms in terms):
-                        evidence.append(edge.belief_id)
-                evidence = list(dict.fromkeys(evidence))
-                if not evidence:
-                    return [], False, ()
-            return [people[0].id], True, tuple(evidence)
-        return [], bool(people), ()
+            return [], True, ()
+        ((person_id, backing),) = named.items()
+        return [person_id], True, tuple(dict.fromkeys(backing))
 
     async def validate_retained(
         self, usage: MemoryRecallUsage, *, session_id: UUID, run_id: UUID

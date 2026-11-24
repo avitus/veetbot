@@ -130,6 +130,16 @@
 # saved jobs. Each schedule names its servers, the approval lists them, and a
 # job's grant names what it may read. Implemented, not yet delivered: the schedule
 # environment must mirror AGENT_SVP_ENABLED first. No milestone or gate moves.
+# ADR-0348 (Accepted, 2026-11-23): relevance recall chose a focal person too
+# easily, and the identity rule then excluded every fact linked to anyone else.
+# A relative recorded only by a role word was chosen by that word; a
+# relationship memory sharing one word with the question chose another
+# relative; two loose matches excluded all person-linked facts. A tie now
+# selects its person only when the question names the tie's stored label
+# (ADR-0310's rule, for every relevance recall), and a role-only display name
+# selects nobody. On a production clone of 2026-11-23: 103 of 114 questions
+# pass, up from 99, none lost. Accepted by the owner the same day; sandbox
+# tests only, not yet delivered. No milestone or gate moves.
 # ADR-0346 (Accepted, 2026-11-23): diagnosing the owner question set found
 # that the probe driver followed only the newest memory containing an expected
 # text, so a later mention in mail hid a delivered fact. The driver now follows

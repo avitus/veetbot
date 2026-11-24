@@ -38,9 +38,28 @@ from tests.contract.test_people_store_contract import (
 from tests.integration.m2_support import database_settings
 
 
+@pytest.mark.parametrize("case", ["role_word", "stored_label", "shared_word"])
+async def test_postgres_an_unnamed_tie_selects_no_person_and_hides_no_fact(case: str) -> None:
+    from agent_core.bootstrap import build
+    from tests.contract.support import agent, session
+    from tests.unit.test_people_context import unnamed_tie_recall_contract
+
+    clock = FixedClock(NOW)
+    async with build(
+        settings=database_settings(), storage="postgres", clock=clock, principal=principal()
+    ) as app:
+        async with app.uow_factory() as uow:
+            await uow.agents.put(agent())
+            await uow.sessions.create(session())
+        await unnamed_tie_recall_contract(clock, app.uow_factory, case)
+
+
 @pytest.mark.parametrize("role", ["portfolio CEO", "tennis coach", "estate accountant"])
 @pytest.mark.parametrize("partial", [False, True])
-async def test_postgres_qualified_relationship_discovery(role: str, partial: bool) -> None:
+@pytest.mark.parametrize("focused", [True, False])
+async def test_postgres_qualified_relationship_discovery(
+    role: str, partial: bool, focused: bool
+) -> None:
     from agent_core.bootstrap import build
     from tests.contract.support import agent, session
     from tests.unit.test_people_context import qualified_relationship_recall_contract
@@ -52,7 +71,9 @@ async def test_postgres_qualified_relationship_discovery(role: str, partial: boo
         async with app.uow_factory() as uow:
             await uow.agents.put(agent())
             await uow.sessions.create(session())
-        await qualified_relationship_recall_contract(clock, app.uow_factory, role, partial)
+        await qualified_relationship_recall_contract(
+            clock, app.uow_factory, role, partial, focused=focused
+        )
 
 
 @pytest.mark.parametrize("inactive_label", ["expired", "future"])

@@ -653,6 +653,23 @@ edge's qualifier or non-generic predicate, after the existing unambiguous-person
 check. An overflowing bounded edge read abstains. This adds no role dictionary
 and leaves explicit names, session selections and older query versions unchanged.
 
+[ADR-0348](../adr/0348-a-tie-selects-a-person-only-when-the-question-names-it.md)
+applies that label requirement to every relevance recall, automatic recall and
+older search versions included, and applies it before people are counted. A
+relationship belief that shares a word with the task still proposes its people,
+within the same bounds. A proposed person is selected only when a visible,
+resolved, direct owner edge that such a belief supports carries a label whose
+whole lexemes occur in the task. When nobody is named, no person is selected and
+ordinary recall runs untouched: a shared topic word no longer selects a
+relative, and several loose matches no longer exclude every person-linked
+fact. Two or more named people still abstain from person context, and so does a
+proposal set of more than twenty people. Name matching also stops selecting a
+provisional record through a display name that is only that record's
+unconfirmed role label, such as an unnamed relative recorded as "mom": the word
+names a tie, as the role alias beside it already selects nobody. An
+owner-confirmed role alias still selects. No role vocabulary, merge or inferred
+identity is added.
+
 [ADR-0238](../adr/0238-owner-overview-and-memory-delivery.md) adds direct owner
 relationship pages for explicit owner/family overviews. The first family page
 includes family and partner edges; deliberate `memory.search` can select a group

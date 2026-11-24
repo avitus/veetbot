@@ -8,7 +8,7 @@ import pytest
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.application.people_context import PeopleContextService
-from agent_core.domain.memory import Sensitivity
+from agent_core.domain.memory import MemoryRecord, Sensitivity
 from agent_core.domain.people import PeopleQuery, PeopleRecord, Person, PersonMemoryLink
 from agent_core.memory.retrieval import HybridMemoryRetriever
 from agent_core.ports.persistence import UnitOfWorkFactory
@@ -95,9 +95,18 @@ async def test_relationship_links_survive_more_recent_topical_distractors() -> N
 
 @pytest.mark.parametrize("role", ["portfolio CEO", "tennis coach", "estate accountant"])
 @pytest.mark.parametrize("partial", [False, True])
-async def test_focused_role_discovery_rejects_shared_topic_words(role: str, partial: bool) -> None:
+@pytest.mark.parametrize("focused", [True, False])
+async def test_role_discovery_rejects_shared_topic_words(
+    role: str, partial: bool, focused: bool
+) -> None:
     clock, factory = await memory_uow_factory()
-    await qualified_relationship_recall_contract(clock, factory, role, partial)
+    await qualified_relationship_recall_contract(clock, factory, role, partial, focused=focused)
+
+
+@pytest.mark.parametrize("case", ["role_word", "stored_label", "shared_word"])
+async def test_an_unnamed_tie_selects_no_person_and_hides_no_fact(case: str) -> None:
+    clock, factory = await memory_uow_factory()
+    await unnamed_tie_recall_contract(clock, factory, case)
 
 
 @pytest.mark.parametrize("inactive_label", ["expired", "future"])
@@ -115,8 +124,9 @@ async def qualified_relationship_recall_contract(
     partial: bool,
     *,
     inactive_label: str | None = None,
+    focused: bool = True,
 ) -> None:
-    """Exercise complete role labels, temporal validity and legacy discovery behavior."""
+    """Exercise complete role labels and temporal validity for every relevance recall."""
     await relationship_recall_contract(
         clock,
         factory,
@@ -125,9 +135,150 @@ async def qualified_relationship_recall_contract(
         query_text=f"Review my {role.split()[0]} plans."
         if partial
         else f"Choose a gift for my {role}.",
-        focused=True,
+        focused=focused,
         inactive_label=inactive_label,
     )
+
+
+async def unnamed_tie_recall_contract(
+    clock: FixedClock, factory: UnitOfWorkFactory, case: str
+) -> None:
+    """A tie the question does not name selects nobody, so no linked fact is hidden (ADR-0348).
+
+    `role_word`: a relative known only as "mom" sits beside the named mother; the
+    word is that record's unconfirmed role, not a name. `stored_label`: the same
+    directory, asked by the label the named mother's tie stores. `shared_word`:
+    two relatives' ties share a topic word with the question and neither is named.
+    """
+    from agent_core.domain.memory import BeliefType
+    from agent_core.domain.people import (
+        PeopleEndpoint,
+        PersonIdentifier,
+        RelationshipAssertion,
+        RelationshipPredicate,
+    )
+    from agent_core.memory.profiles import DEFAULT_RETRIEVAL_PROFILE
+
+    owner = principal().model_copy(update={"scopes": {"people.read"}})
+    common: PeopleFields = {
+        "tenant_id": owner.tenant_id,
+        "principal_id": owner.principal_id,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+
+    def belief(key: int, subject: str, statement: str, kind: BeliefType) -> MemoryRecord:
+        return memory(belief_id=key, statement=statement).model_copy(
+            update={"subject": subject, "belief_type": kind, "store_position": key - 900}
+        )
+
+    relationship, attribute = BeliefType.RELATIONSHIP, BeliefType.USER_MODEL_ATTR
+    ties: list[tuple[Person, MemoryRecord, RelationshipPredicate, str]]
+    if case == "shared_word":
+        named = Person(id=uuid4(), display_name="Rae", **common)
+        other = Person(id=uuid4(), display_name="Quinn", **common)
+        ties = [
+            (
+                named,
+                belief(901, "Rae", "Rae is the user's wife and loves weekend hikes.", relationship),
+                "spouse",
+                "",
+            ),
+            (
+                other,
+                belief(
+                    902,
+                    "Quinn",
+                    "Quinn is the user's brother and joins weekend hikes.",
+                    relationship,
+                ),
+                "sibling",
+                "",
+            ),
+        ]
+        wanted = belief(903, "Rae", "Rae is training for a weekend trail race.", attribute)
+        text = "Plan something for the weekend."
+    else:
+        named = Person(id=uuid4(), display_name="Marta", **common)
+        other = Person(id=uuid4(), display_name="mom", state="provisional", **common)
+        ties = [
+            (
+                named,
+                belief(901, "Marta", "Marta is the user's mother.", relationship),
+                "parent",
+                "mother",
+            ),
+            (
+                other,
+                belief(902, "User", "User's mom is visiting in June.", relationship),
+                "parent",
+                "",
+            ),
+        ]
+        wanted = belief(903, "Marta", "Marta lives in a retirement village in Lisbon.", attribute)
+        text = f"Where does my {'mom' if case == 'role_word' else 'mother'} live?"
+    async with factory() as uow:
+        for person, tie, predicate, qualifier in ties:
+            await uow.people.put(person, expected_revision=0)
+            await uow.memories.upsert_belief(tie)
+            await uow.people.put(
+                PersonMemoryLink(id=uuid4(), person_id=person.id, belief_id=tie.id, **common),
+                expected_revision=0,
+            )
+            owner_first = predicate == "spouse"
+            await uow.people.put(
+                RelationshipAssertion(
+                    id=uuid4(),
+                    subject=PeopleEndpoint(kind="owner")
+                    if owner_first
+                    else PeopleEndpoint(kind="person", id=person.id),
+                    object=PeopleEndpoint(kind="person", id=person.id)
+                    if owner_first
+                    else PeopleEndpoint(kind="owner"),
+                    predicate=predicate,
+                    qualifier=qualifier,
+                    belief_id=tie.id,
+                    **common,
+                ),
+                expected_revision=0,
+            )
+        if case != "shared_word":
+            await uow.people.put(
+                PersonIdentifier(
+                    id=uuid4(),
+                    person_id=other.id,
+                    identifier_kind="role",
+                    namespace="owner",
+                    value="mom",
+                    context="owner",
+                    verification="contextual",
+                    valid_from=NOW,
+                    **common,
+                ),
+                expected_revision=0,
+            )
+        await uow.memories.upsert_belief(wanted)
+        await uow.people.put(
+            PersonMemoryLink(id=uuid4(), person_id=named.id, belief_id=wanted.id, **common),
+            expected_revision=0,
+        )
+    profile = DEFAULT_RETRIEVAL_PROFILE.model_copy(
+        update={"candidate_selection": "relevance", "reranking": "relevance"}
+    )
+    service = PeopleContextService(
+        factory,
+        HybridMemoryRetriever(
+            factory, clock, ids(), owner, profile=profile, reranking_admitted=lambda: True
+        ),
+    )
+    query = recall_query(text=text, budget_tokens=2000).model_copy(
+        update={"candidate_selection": "relevance"}
+    )
+    result = await service.automatic_recall(owner, query, session_id=SESSION_ID)
+    assert wanted.id in {item.belief_id for item in result.items}
+    focal = {person_id for item in result.people for person_id in item.person_ids}
+    assert other.id not in focal
+    assert (named.id in focal) == (case == "stored_label")
 
 
 async def relationship_recall_contract(
