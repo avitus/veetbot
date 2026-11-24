@@ -301,9 +301,16 @@ The work is cut into four slices.
      compaction instead. The existing end-to-end case used scripts that
      called nothing before the card. Decision 5 now states the rule, and
      `session-history@3` rebuilds a stored session without those results.
-   - **Not done.** A later script inside one claim, which the failure cut
-     off before it started. The trajectory export and the skill review
-     transcript still list bridged results; the export is off in production.
+   - **Repaired and measured there, 2026-11-24.** Pull request 266
+     delivered the rule that day. The same request, sent again in the chat
+     that had failed, ran its three scripts to the answer. The second ran in
+     2.8 s after the approval. The third started under the request approval
+     with no card and ran in 1.1 s, which is the cost of a later script
+     inside one claim. The chat's history was rebuilt under
+     `session-history@3` and held no bridged result, and the request was
+     assembled without the compaction the earlier one needed.
+   - **Not done.** The trajectory export and the skill review transcript
+     still list bridged results; the export is off in production.
 
 ## Consequences
 

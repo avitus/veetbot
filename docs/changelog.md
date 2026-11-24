@@ -23,6 +23,9 @@ title: Changelog
   is re-pinned. One made since has the script tool.
 - Asked a twelve-city time question with no mention of scripts, the model
   wrote a script by itself and answered correctly.
+- Delivered the same day. The request that had failed then ran all three of
+  its scripts in production: 2.8 s for the one you approved and 1.1 s for the
+  one after it, which needed no card.
 
 ## 2026-11-24 — One approval for a job request now covers the job's later run (ADR-0344)
 
