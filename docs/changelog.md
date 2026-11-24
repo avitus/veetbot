@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-24 — One approval for a job request now covers the job's later run (ADR-0344)
+
+- "Allow for this request" on a job card now covers the later test, save, run
+  and schedule repin of that job in the same request. It stopped at the card's
+  own tool, because the job tools are judged under two profiles of the one
+  policy. It still ends when the policy changes; one narrow restart case that
+  is not detected is recorded in the decision.
+
 ## 2026-11-23 — Three repairs where the code disagreed with its documents
 
 - `agent run --idempotency-key`, retried after its run was approved and

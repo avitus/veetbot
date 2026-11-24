@@ -9,13 +9,16 @@ ceiling the owner already approved, for the rest of the run.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
+import yaml
 
 from agent_core.application.job_grants import revision_grant_id
 from agent_core.application.job_request_grants import (
@@ -51,6 +54,7 @@ from agent_core.domain.policies import (
     AuthorizationTurn,
     ExecutionTarget,
     IdempotencyClass,
+    LoadedRuleset,
     PolicyDecision,
     PolicyDecisionType,
     ProposedAction,
@@ -62,6 +66,8 @@ from agent_core.domain.policies import (
 from agent_core.domain.runs import Run, RunKind, RunStatus
 from agent_core.domain.schedules import JobTask
 from agent_core.domain.sessions import Session, SessionStatus
+from agent_core.policy.jobs import job_policy_version, job_publication_ruleset
+from agent_core.policy.loader import DEFAULT_RULESET, POLICY_DIRECTORY, load_ruleset_documents
 from tests.contract.support import NOW, memory_uow_factory, principal, tool_context
 from tests.contract.test_schedule_repository_contract import revision as schedule_revision
 from tests.contract.test_schedule_repository_contract import schedule as a_schedule
@@ -323,10 +329,13 @@ class World:
         turn: AuthorizationTurn | None = OWNER_TURN,
         policy_version: str = "policy-v1",
         agent_version: str = "agent-v1",
+        loaded_policy_version: Callable[[str], str] | None = None,
     ) -> StandingAuthorization:
         name, arguments = action
         return await JobRequestGrantAuthorizer(
-            uow_factory=self.uow_factory, now=lambda: self.clock[0]
+            uow_factory=self.uow_factory,
+            now=lambda: self.clock[0],
+            loaded_policy_version=loaded_policy_version,
         ).authorize(
             action=proposed(name, arguments),
             decision=decision(policy_version),
@@ -698,6 +707,91 @@ async def test_the_grant_ends_with_its_request(case: str) -> None:
         policy_version="policy-v2" if case == "policy_changed" else "policy-v1",
     )
     assert not result.allowed
+
+
+# Two policy profiles. `job.manage` is judged under the jobs profile and
+# `job.run` and `schedule.update` under the base profile (ADR-0268), so the
+# card and a later action of one unchanged policy carry different versions.
+
+CARD_TOOLS = ["job.manage", "job.run", "schedule.update"]
+COVERED = [trial(), update(), job_run(), repin()]
+
+
+def loaded(base: LoadedRuleset = DEFAULT_RULESET) -> Callable[[str], str]:
+    """The policy version one composition's engine gives each tool."""
+
+    return partial(job_policy_version, base=base, publication=job_publication_ruleset(base))
+
+
+def changed_policy(document: str) -> LoadedRuleset:
+    """The shipped policy after an edit to its profile or its hardline set."""
+
+    profile, hardline = (
+        yaml.safe_load((POLICY_DIRECTORY / name).read_text())
+        for name in ("default.yaml", "hardline.yaml")
+    )
+    if document == "profile":
+        profile["approval_expiry_seconds"]["medium"] = 3600
+    else:
+        hardline["rules"] = hardline["rules"][:-1]
+    return load_ruleset_documents(profile, hardline)
+
+
+def card(tool_name: str, policy: Callable[[str], str]) -> dict[str, Any]:
+    """What a card for this tool records of the policy that judged it."""
+
+    return {"tool_name": tool_name, "policy_version": policy(tool_name)}
+
+
+@pytest.mark.parametrize("card_tool", CARD_TOOLS)
+@pytest.mark.parametrize("action", COVERED)
+async def test_one_loaded_policy_covers_its_jobs_profile_and_its_base_profile(
+    card_tool: str, action: tuple[str, dict[str, Any]]
+) -> None:
+    policy = loaded()
+    assert policy("job.manage") != policy("job.run") == policy("schedule.update")
+    subject = await world(granted=True, approval_update=card(card_tool, policy))
+    result = await subject.authorize(
+        action, policy_version=policy(action[0]), loaded_policy_version=policy
+    )
+    assert result.allowed, result.reason_code
+    assert result.authorization_ref == str(APPROVAL)
+
+
+@pytest.mark.parametrize("document", ["profile", "hardline"])
+@pytest.mark.parametrize("card_tool", CARD_TOOLS)
+@pytest.mark.parametrize("action", COVERED)
+async def test_a_changed_policy_ends_the_grant_under_either_profile(
+    document: str, card_tool: str, action: tuple[str, dict[str, Any]]
+) -> None:
+    before, after = loaded(), loaded(changed_policy(document))
+    assert all(before(name) != after(name) for name in CARD_TOOLS)
+    subject = await world(granted=True, approval_update=card(card_tool, before))
+    result = await subject.authorize(
+        action, policy_version=after(action[0]), loaded_policy_version=after
+    )
+    assert not result.allowed
+    assert result.reason_code == "job.request_grant.policy_changed"
+
+
+async def test_a_decision_under_a_version_this_process_did_not_load_asks() -> None:
+    policy = loaded()
+    subject = await world(granted=True, approval_update=card("job.manage", policy))
+    result = await subject.authorize(
+        job_run(),
+        policy_version=loaded(changed_policy("profile"))("job.run"),
+        loaded_policy_version=policy,
+    )
+    assert not result.allowed
+    assert result.reason_code == "job.request_grant.policy_changed"
+
+
+async def test_without_the_loaded_versions_the_grant_never_crosses_profiles() -> None:
+    policy = loaded()
+    subject = await world(granted=True, approval_update=card("job.manage", policy))
+    result = await subject.authorize(job_run(), policy_version=policy("job.run"))
+    assert not result.allowed
+    assert result.reason_code == "job.request_grant.policy_changed"
 
 
 async def test_a_second_run_of_one_revision_with_other_access_asks() -> None:

@@ -110,6 +110,33 @@ approved that in the conversation that produced this record.
    `tool.call.authorized` with `authorization_kind: "job_request_grant"` and the
    approval id.
 
+## Addition, 2026-11-24: one policy, two profiles
+
+A PostgreSQL journey written on 2026-11-23 found that a request approval never
+crossed tools, so the radar repair still asked more than once. `job.manage` is
+judged under the jobs profile (ADR-0268) and `job.run` and `schedule.update`
+under the base profile. A policy version names its profile, so the two differ
+while nothing has changed, and decision 5's rule that the policy version must
+match the approval's refused every use on the other profile.
+
+The versions now match when they are equal, or when the approval's version is
+the one this process loaded for the approval's own tool and the action's
+version is the one it loaded for the action's tool. An edit to the policy moves
+both profiles' versions, so after one the approval's version is no longer a
+loaded one and the grant ends, whichever profile judged the card. Without the
+loaded versions the authorizer behaves as before and the grant never crosses.
+No event, table, offer or coverage check changes.
+
+One gap is known and the owner accepted it on 2026-11-24, answering "What
+should I do with it?" with "Push the fix as written to dev". The approval
+records only the version of the profile that judged its card. Across a restart
+inside the two-hour window, two changes are therefore not detected: the base
+profile re-spelled without a change in meaning when the card was on
+`job.manage`, and a change to the code that derives the jobs profile, with the
+policy files unchanged, when the card was on `job.run` or `schedule.update`.
+Closing it exactly means recording both versions in
+`job.request_grant.created`; that is not done.
+
 ## Consequences
 
 - The radar repair asks once after the owner's message instead of five times.

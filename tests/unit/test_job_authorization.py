@@ -1,8 +1,10 @@
 """Code authoring keeps the trust overlay; widened access needs fresh approval."""
 
+from typing import Any
 from uuid import UUID
 
 import pytest
+import yaml
 
 from agent_core.application.job_grants import JobGrantAuthorizer
 from agent_core.domain.policies import (
@@ -12,8 +14,8 @@ from agent_core.domain.policies import (
     TrustLevel,
 )
 from agent_core.policy.engine import DeterministicPolicyEngine
-from agent_core.policy.jobs import JobPolicyEngine, job_publication_ruleset
-from agent_core.policy.loader import DEFAULT_RULESET
+from agent_core.policy.jobs import JobPolicyEngine, job_policy_version, job_publication_ruleset
+from agent_core.policy.loader import DEFAULT_RULESET, POLICY_DIRECTORY, load_ruleset_documents
 from tests.contract.support import NOW, memory_uow_factory, principal, run
 from tests.contract.test_job_store_contract import record
 from tests.unit.test_policy_tool_rules import _action
@@ -44,6 +46,71 @@ async def test_job_publication_retains_untrusted_content_approval(
     )
     assert unrelated.policy_version == DEFAULT_RULESET.policy_version
     assert unrelated.decision is PolicyDecisionType.REQUIRE_APPROVAL
+
+
+def _edit(profile: dict[str, Any], hardline: dict[str, Any], section: str) -> None:
+    if section == "name":
+        profile["name"] = "strict"
+    elif section == "default_effect":
+        profile["default_effect"] = "require_approval"
+    elif section == "rules":
+        profile["rules"]["publication"] = {"decision": "deny"}
+    elif section == "tool_rules":
+        profile["tool_rules"]["job.run"] = {"decision": "require_approval"}
+    elif section == "trust_overlay":
+        profile["trust_overlay"] = {"external_untrusted_requires_approval": False}
+    elif section == "approval_expiry_seconds":
+        profile["approval_expiry_seconds"]["medium"] = 3600
+    elif section == "self_approval":
+        profile["self_approval"] = {"enabled": False}
+    elif section == "advisory":
+        profile["advisory"] = {"enabled": True}
+    else:
+        hardline["rules"] = hardline["rules"][:-1]
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        "name",
+        "default_effect",
+        "rules",
+        "tool_rules",
+        "trust_overlay",
+        "approval_expiry_seconds",
+        "self_approval",
+        "advisory",
+        "hardline",
+    ],
+)
+def test_a_policy_edit_moves_the_base_and_the_jobs_policy_version(section: str) -> None:
+    """A standing grant pinned to either profile's version sees every policy edit."""
+
+    def documents() -> tuple[dict[str, Any], dict[str, Any]]:
+        profile, hardline = (
+            yaml.safe_load((POLICY_DIRECTORY / name).read_text())
+            for name in ("default.yaml", "hardline.yaml")
+        )
+        return profile, hardline
+
+    before = load_ruleset_documents(*documents())
+    profile, hardline = documents()
+    _edit(profile, hardline, section)
+    after = load_ruleset_documents(profile, hardline)
+    for tool_name in ("job.manage", "cockpit.install", "job.run", "schedule.update"):
+        assert job_policy_version(
+            tool_name, base=before, publication=job_publication_ruleset(before)
+        ) != job_policy_version(tool_name, base=after, publication=job_publication_ruleset(after))
+
+
+def test_job_policy_version_names_the_profile_that_judges_each_tool() -> None:
+    publication = job_publication_ruleset(DEFAULT_RULESET)
+    versions = {
+        name: job_policy_version(name, base=DEFAULT_RULESET, publication=publication)
+        for name in ("job.manage", "cockpit.install", "job.run", "schedule.update")
+    }
+    assert versions["job.manage"] == versions["cockpit.install"] == publication.policy_version
+    assert versions["job.run"] == versions["schedule.update"] == DEFAULT_RULESET.policy_version
 
 
 async def test_widened_access_and_foreign_grants_do_not_receive_standing_authority() -> None:
