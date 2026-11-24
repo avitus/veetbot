@@ -76,6 +76,7 @@ from agent_core.memory.source_recovery import (
     BoundedSourceRecovery,
     SourceRecoveryUnavailableError,
 )
+from agent_core.memory.state_questions import grounded_state_beliefs
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.semantic_memory import RuntimeSemanticQueries, SemanticQueryLookup
@@ -865,7 +866,7 @@ class HybridMemoryRetriever:
         seen: set[tuple[str, str, str]] = set()
         chosen: set[UUID] = set()
         partners: set[UUID] = set()
-        for item in ranked:
+        for item in grounded_state_beliefs(effective_query, ranked):
             key = (item.subject.casefold(), item.belief_type.value, item.statement.casefold())
             if key in seen:
                 continue
@@ -1518,6 +1519,8 @@ class HybridMemoryRetriever:
             if self._reconsolidation_enabled:
                 _, merges = await self._merge_candidates(uow, query, records, now)
                 current = _collapse_merges(current, merges)
+            if len(grounded_state_beliefs(query, current)) != len(current):
+                return False
             if any(item.sources for item in originals):
                 if self._source_recovery is None:
                     return False

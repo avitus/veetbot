@@ -513,6 +513,14 @@ Filling the budget is not the objective.
 
 ### 6. Collapse and diversify
 
+[ADR-0351](../adr/0351-ground-inferred-state-in-the-requested-subject.md) proposes
+a subject check for current yes-or-no state questions. An inferred provisional
+recurring state that answers the same predicate about a differently qualified
+subject is withheld when only the final noun matches. The assertion must name
+its stored subject. Linked conflicts, historical reads and explicit identity
+lookups retain their existing semantics. Retained search receipts undergo the
+same subject check on revalidation.
+
 - **Supersession collapse.** Group by `(subject, belief_type, predicate key)` and keep
   the belief valid at `as_of`. Never surface a belief alongside the one it replaced.
 - **Unresolved conflicts surface as conflicts.** Where two beliefs are linked by

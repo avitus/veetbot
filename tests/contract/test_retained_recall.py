@@ -338,3 +338,36 @@ async def test_returned_ids_must_match_authoritative_rendered_trace(tampered: bo
     assert await retriever.validate_retained(usage, session_id=SESSION_ID, run_id=RUN_ID) is (
         not tampered
     )
+
+
+@pytest.mark.parametrize(("queried", "valid"), [("copper", True), ("steel", False)])
+async def test_retained_state_search_rechecks_the_original_subject(
+    monkeypatch: pytest.MonkeyPatch, queried: str, valid: bool
+) -> None:
+    """A receipt saved before subject grounding still answers its original question."""
+    from agent_core.domain.memory import MemoryAuthority, MemoryClaimKind, MemoryStatus
+
+    _, factory, _, retriever = await formation_stack()
+    record = memory(statement="The copper vessel is full.").model_copy(
+        update={
+            "subject": "copper vessel",
+            "status": MemoryStatus.PROVISIONAL,
+            "authority": MemoryAuthority.INFERRED,
+            "claim_kind": MemoryClaimKind.RECURRING_STATE,
+        }
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(record)
+    query = recall_query(text=f"Is the {queried} vessel full?", min_score=0).model_copy(
+        update={"candidate_selection": "relevance"}
+    )
+    with monkeypatch.context() as prior:
+        prior.setattr("agent_core.memory.retrieval.grounded_state_beliefs", lambda q, items: items)
+        result = await retriever.recall(query, session_id=SESSION_ID, run_id=RUN_ID)
+    assert [item.belief_id for item in result.items] == [record.id]
+    async with factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+    receipt = MemoryRecallUsage(
+        trace_id=trace.id, tokens=result.tokens, items=1, content_sha256=trace.rendered_sha256
+    )
+    assert await retriever.validate_retained(receipt, session_id=SESSION_ID, run_id=RUN_ID) is valid

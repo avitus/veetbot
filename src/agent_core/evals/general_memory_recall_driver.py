@@ -232,6 +232,7 @@ def implementation_hashes() -> dict[str, str]:
         "domain/memory_candidates.py",
         "adapters/memory/in_memory.py",
         "memory/retrieval.py",
+        "memory/state_questions.py",
         "memory/profiles.py",
         "memory/profiles.yaml",
         "tools/memory_search.py",
