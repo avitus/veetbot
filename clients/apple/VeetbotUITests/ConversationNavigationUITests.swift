@@ -20,6 +20,13 @@ final class ConversationNavigationUITests: XCTestCase {
         // or a flag takes the key as its value and AppKit opens YES as a
         // document instead of a window.
         app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+        #else
+        // Every journey starts upright. A simulator that has not been turned
+        // reports no orientation, so a journey that turns it and then puts
+        // back what it read leaves it turned for every journey after it in
+        // the run. Starting from a known orientation also makes that reading
+        // one a journey can put back.
+        XCUIDevice.shared.orientation = .portrait
         #endif
         app.launchArguments.append("--ui-testing-conversation-navigation")
         // Each case adds its fixture options and then launches once; launching
