@@ -20,7 +20,9 @@ title: Changelog
   a tool-calling script lost its earlier turns to a summary. That stops too.
 - Correction: schedules, Telegram and calls do not have their own switch for
   scripts. A schedule made before 2026-11-23 keeps the command tool until it
-  is re-pinned. One made since has the script tool.
+  is re-pinned. One made since has the script tool. At your request the nine
+  schedules that run a model were re-pinned on 2026-11-24; the four job
+  schedules run no model and were left alone.
 - Asked a twelve-city time question with no mention of scripts, the model
   wrote a script by itself and answered correctly.
 - Delivered the same day. The request that had failed then ran all three of

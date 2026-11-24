@@ -263,11 +263,17 @@ The work is cut into four slices.
      notify and call services stay off because they read their own settings
      files. They never read the setting. A run is offered what the agent
      version of its session lists. Every schedule that existed on 2026-11-24
-     pins an older version and keeps `sandbox.run_command`. A schedule made
+     pinned an older version and kept `sandbox.run_command`. A schedule made
      since the activation pins the new version, and a new inbound-surface
      chat takes it too. No inbound-surface chat exists in production. Moving
      an existing schedule is a re-pin (`scheduling.md`), which the owner
      decides.
+   - **Schedules re-pinned, 2026-11-24.** The owner had the nine active
+     schedules that run a model moved to the activated version. Each wrote
+     one new revision and kept its next firing time. The four active job
+     schedules run no model and were left on their versions. No scheduled
+     run had used a script when this was written; the first fires on
+     2026-11-25.
    - **Measured there (gVisor, the production host), four scripts in three
      requests of one chat.** A script with no tool call returned 4.4 s after
      it started, on the first request after the restart. A script with two
