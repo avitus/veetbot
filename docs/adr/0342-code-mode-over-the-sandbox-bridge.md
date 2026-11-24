@@ -376,9 +376,9 @@ The work is cut into four slices.
   credentials, and policy still decides each call it makes.
 - A schedule that requests `sandbox.execute` stops running if the schedule
   role does not hold that scope, because materialization fails closed.
-- A `schedule.create` card raised before a release with decision 13 and
-  approved after it creates a schedule with the approval the card did not
-  show. The window is the time one card stays pending across that release.
+- Before creating the schedule, the tool checks its invocation's stored card.
+  A legacy card carries no script approval. A change in script authority
+  while the card is pending requires a fresh approval.
 - Session history changes builder version to `session-history@3`. Each
   stored session is rebuilt from its events when it is next read, once.
   A release from before this change projects under version 2. If such a

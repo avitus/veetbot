@@ -201,7 +201,11 @@ async def test_live_destination_recheck_preserves_approval_and_single_effect(
                 await (
                     runtime._current_page()
                     .locator("#target")
-                    .evaluate("node => node.replaceWith(node.cloneNode(true))")
+                    .evaluate("""node => {
+                        const replacement = node.cloneNode(true);
+                        replacement.onclick = node.onclick;
+                        node.replaceWith(replacement);
+                    }""")
                 )
             if approvals:
                 await app.approvals.resolve(approvals[0].id, ApprovalResolutionType.APPROVE_ONCE)

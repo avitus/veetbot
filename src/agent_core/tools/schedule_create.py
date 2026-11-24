@@ -10,7 +10,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from agent_core.application.services import ScheduleService
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.approvals import ApprovalPresentation
+from agent_core.domain.approvals import ApprovalPresentation, ApprovalStatus
 from agent_core.domain.browser_task_grants import TaskGrantNotCovered
 from agent_core.domain.errors import AuthorizationError, ConflictError, ScheduleValidationError
 from agent_core.domain.execution import SANDBOX_EXECUTE_SCOPE, SANDBOX_RUN_CODE_TOOL_NAME
@@ -414,6 +414,24 @@ class ScheduleCreateTool:
             return summary
         return f"{summary}; {SCHEDULE_SCRIPTS_APPROVAL_SUMMARY}"
 
+    async def _script_approval_matches(self, context: ToolExecutionContext) -> bool:
+        """Bind this invocation's effective script authority to its stored card."""
+        if self._uow_factory is None:
+            return not self._approves_scripts
+        async with self._uow_factory() as uow:
+            card = await uow.approvals.get_by_action(context.invocation_id)
+        if card is None:
+            return not self._approves_scripts
+        if card.arguments.get("scripts_approved", False) is not self._approves_scripts:
+            return False
+        scopes = card.arguments.get("requested_scopes")
+        return not self._approves_scripts or (
+            card.status is ApprovalStatus.APPROVED
+            and card.tool_name == SCHEDULE_CREATE_TOOL_NAME
+            and isinstance(scopes, list)
+            and SANDBOX_EXECUTE_SCOPE in scopes
+        )
+
     async def approval_view_in_session(
         self,
         arguments: dict[str, Any],
@@ -487,6 +505,13 @@ class ScheduleCreateTool:
                     "Connect Website Access in this conversation before creating this schedule.",
                     retryable=False,
                 )
+        if not await self._script_approval_matches(context):
+            return _failure(
+                ToolFailureKind.PERMISSION,
+                "schedule.script_approval_changed",
+                "Script permissions have changed. Request a new schedule approval.",
+                retryable=False,
+            )
         definition = derived_definition(
             self._agent,
             self._limits,

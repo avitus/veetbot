@@ -50,6 +50,8 @@ def test_recheck_preserves_legacy_identity_and_binds_opt_in() -> None:
 
     document = navigation_catalog()["recipes"][0]
     legacy = _definition(BrowserWorkflowRecipe.model_validate(document))
+    # Checkpoints created before ADR-0350 carry this digest for the default recipe.
+    assert legacy == "3c1b0ccca2c15a50300cf6e135e989df877223a3eb20ca0cc597f11c90e636aa"
     document["steps"][1]["recheck_destination"] = False
     assert _definition(BrowserWorkflowRecipe.model_validate(document)) == legacy
     document["steps"][1]["recheck_destination"] = True

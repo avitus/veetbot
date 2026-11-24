@@ -444,7 +444,9 @@ requests `sandbox.execute` (`schedule.scripts_scope_required`) and its pinned
 agent version lists the script tool (`schedule.scripts_unavailable`). A job
 schedule cannot hold it. With `AGENT_SCHEDULE_SCRIPTS_ENABLED` on,
 `schedule.create` requests the scope and records the approval when the agent
-it pins has the script tool, and its card says so. Conversational
+it pins has the script tool, and its card says so. Before creation the tool
+checks the stored card for that invocation. If the script authority has
+changed, the owner must approve a fresh proposal. Conversational
 `schedule.update` keeps the approval with the other pins; the full-definition
 update carries it or drops it.
 

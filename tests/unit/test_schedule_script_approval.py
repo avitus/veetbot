@@ -28,6 +28,7 @@ from agent_core.application.schedule_script_approvals import (
     ScheduleScriptAuthorizer,
 )
 from agent_core.bootstrap import build
+from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import NotFoundError, ScheduleValidationError
 from agent_core.domain.execution import SANDBOX_EXECUTE_SCOPE, SANDBOX_RUN_CODE_TOOL_NAME
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn, StopReason
@@ -434,6 +435,30 @@ async def test_a_schedule_set_up_in_chat_records_the_approval_its_card_showed(
     [record] = page.items
     assert record.revision.scripts_approved
     assert SANDBOX_EXECUTE_SCOPE in record.revision.requested_scopes
+
+
+@pytest.mark.parametrize("enabled_on_card", [True, False])
+async def test_a_changed_script_setting_requires_fresh_schedule_consent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled_on_card: bool
+) -> None:
+    _factory, context = await _production(
+        tmp_path,
+        _create_turn(),
+        extra_environment={
+            "AGENT_CODE_MODE_ENABLED": "1",
+            "AGENT_SCHEDULE_SCRIPTS_ENABLED": "1" if enabled_on_card else "0",
+        },
+    )
+    async with context as app:
+        run_id = await app.runs.submit("Schedule it.")
+        [card] = await app.approvals.list_pending(run_id=run_id)
+        assert card.arguments.get("scripts_approved", False) is enabled_on_card
+        registered = cast(RegisteredTool, app.tool_pipeline._registry.get("schedule.create"))
+        monkeypatch.setattr(registered.implementation, "_approves_scripts", not enabled_on_card)
+
+        await app.approvals.resolve(card.id, ApprovalResolutionType.APPROVE_ONCE)
+        assert (await app.runs.wait_terminal(run_id)).status is RunStatus.COMPLETED
+        assert not (await app.schedules.list(app.principal, 10, None)).items
 
 
 def _agent_like() -> Any:
