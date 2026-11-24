@@ -316,6 +316,11 @@ The work is cut into four slices.
   the run suspends and the script re-executes from the start on resume.
 - Session history changes builder version to `session-history@3`. Each
   stored session is rebuilt from its events when it is next read, once.
+  A release from before this change projects under version 2. If such a
+  process reads a session, it rebuilds that session under version 2 and the
+  failure can return for it, so rolling back past this change removes the
+  repair. A release restarts every service that reads history, so the two
+  versions run side by side only while those restarts are in progress.
 - A release builds the sandbox image and tags it for production
   (`docs/deployment.md`), so a deployed release already carries the runner
   and the library. A host whose image was built by hand must rebuild it
