@@ -323,7 +323,8 @@ body as written, by the rule ADR-0336 states. Two details are taken:
 - each phone number, written with a `+` or in the ten-digit North American
   shape, at most four, skipping one written after a fax label;
 - the line directly under the name, such as "Partner, Scale", unless it holds
-  a digit, an address or a link, or begins "Sent from".
+  a digit, an address or a link, has no letter, begins "Sent from" or
+  "Get Outlook", or reads as secret material or an injection pattern.
 
 Organisations, links and postal addresses are not taken, and no relationship,
 organization reference or belief is formed from a signature.
@@ -349,8 +350,9 @@ people nor attributes a text or a call. A model-proposed mention or an owner
 alias naming the namespace is refused. The owner makes a number an identifier
 by adding it to the person, as before.
 
-**Change and removal.** These rows do not take the thirty-day horizon of
-mail-formed facts; they last while their source mail supports them. Titles and
+**Change and removal.** These rows do not take the expiry of mail-formed
+facts, thirty days or longer by the thread's importance (ADR-0340); they last
+while their source mail supports them. Titles and
 phone numbers are replaced separately: a later message that states a different
 title ends the earlier one at its sent time, and a later message that states
 numbers ends an earlier number it omits. A signature without a title, or
@@ -436,7 +438,7 @@ of the person's importance in the owner's life.
 
 | Clock | Meaning |
 | --- | --- |
-| Effective time | When the relationship or fact held in the world, with exact/day/month/year/unknown precision. |
+| Effective time | When the relationship or fact held in the world, with instant/day/month/year/unknown precision. |
 | Occurred time | When the interaction happened; can be approximate or owner-reported. |
 | Evidence time | When the original supporting statement/message occurred. Imports and citations do not renew it. |
 | Recorded time | When Veetbot stored or revised the assertion. Enables “what did you know then?” without future evidence. |
@@ -469,6 +471,13 @@ This amendment must carry versioned evidence before activation; linking a
 person cannot silently change any other lifecycle.
 
 Current communication-derived claims retain their existing tentative horizon.
+Under `email-semantic@2` that horizon follows the thread's importance, from
+thirty days to no expiry, and a claim is stored first-class (direct, durable)
+only when its sender is known and the thread is kept a year or more. A known
+sender is the owner on sent mail, or on received mail a `sender_check` of
+`pass` with an address that resolves to one active or provisional person. A
+historical import keeps thirty days from the email's own date (ADR-0340;
+[email-experience.md](email-experience.md)).
 Their dated source reports and historical interactions remain available for
 deliberate historical lookup. “Maya said she worked at Acme in 2022” is valid
 history even when it no longer supports “Maya works at Acme.” Repeated retrieval
@@ -664,7 +673,7 @@ ordinary recall runs untouched: a shared topic word no longer selects a
 relative, and several loose matches no longer exclude every person-linked
 fact. Two or more named people still abstain from person context, and so does a
 proposal set of more than twenty people. Name matching also stops selecting a
-provisional record through a display name that is only that record's
+record through a display name that is only that record's
 unconfirmed role label, such as an unnamed relative recorded as "mom": the word
 names a tie, as the role alias beside it already selects nobody. An
 owner-confirmed role alias still selects. No role vocabulary, merge or inferred
@@ -734,10 +743,13 @@ remain withheld. These checks add no new search or model request.
 | --- | --- |
 | `people.search` | Resolve a person from a name, alias, role, or selected channel endpoint; return candidates and ambiguity. |
 | `people.context` | Get a task-relevant profile for up to three explicit person IDs with current facts, relationship evidence, and open threads. |
-| `people.history` | Page dated interactions for explicit people and time filters across owned sources, with an optional historical knowledge cutoff. An email item names its message; `source_id` returns that message's retained original text (ADR-0126). |
+| `people.history` | Page dated interactions for one explicit person and time filters across owned sources, with an optional historical knowledge cutoff. An email item names its message; `source_id` returns that message's retained original text (ADR-0126). |
 
 All three are ordinary read-only tools requiring exact `people.read`, returning
 `TrustLevel.MEMORY`, with existing run budgets and a maximum 64 KiB response.
+The exception is a `people.history@1.1.0` read by `source_id`: it also requires
+`email.read` and returns the retained original text as
+`TrustLevel.EXTERNAL_UNTRUSTED` (ADR-0126).
 Schemas expose identifier counts, date bounds, page limits, and closed enums;
 executable validation enforces the same limits. The service derives the
 effective sensitivity ceiling from the caller and surface; an argument cannot

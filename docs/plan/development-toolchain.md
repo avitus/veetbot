@@ -238,11 +238,11 @@ docs              mkdocs build --strict
 website-install   validated local reuse or npm ci; always npm ci in CI
 test-website      website-install, static export tests, and lint
 cockpit-install   the same installer for the cockpit/ workspace
-test-cockpit      cockpit-install, Chromium, kit, builder and realm
-                  tests, then ESLint and tsc
+test-cockpit      cockpit-install, Chromium and WebKit, kit, builder
+                  and realm tests, then ESLint and tsc
 ```
 
-Twenty more serve checks, CI steps, or operators; the Apple lanes and
+Twenty-two more serve checks, CI steps, or operators; the Apple lanes and
 `env-pull` are described below. `docs-check` runs
 `scripts/check_docs.py` and `test-deploy` the release, rollback, and Nginx
 deployment script tests; both are inside `make check` and CI's static job,
@@ -259,7 +259,9 @@ image, and `test-browser-image` measures what its browser asks for on its own
 `cockpit-widgets-worktree` checks out the public `cockpit/widgets` branch under
 `.worktrees/` so a person can build widgets against the kit on `main`
 ([cockpit.md](cockpit.md)).
-`cockpit-runtime` exports the board's runtime to the local artifact root, as a
+`cockpit-runtime-build` builds the board's runtime and fails on an empty
+manifest; the macOS CI job runs it before its Swift tests. `cockpit-runtime`
+runs it and then exports the runtime to the local artifact root, as a
 release does, so a local server can serve Cockpit.
 
 `make check` is `test-fast test-browser test-website test-cockpit lint

@@ -1095,7 +1095,7 @@ them is the whole fix.
 
 **`credential_ref` is a name, never a value.** The field is validated
 against the shape of an environment variable name, and a value matching any
-family of the secret scanner at `bootstrap-and-composition.md:1277-1318` is
+family of the secret scanner at `bootstrap-and-composition.md:1290-1331` is
 rejected at load with the match not printed. This is the one field where a
 mistake gets committed to a repository, and
 `gate.structure.no_committed_secrets` catches it a second time.
@@ -1132,7 +1132,7 @@ set, and the narrowing is inside the profile hash, so a run's
 
 `ProviderPin.registry_version` and the `model_calls` column of the same name
 are declared as strings above with no format. The format mirrors
-`policy_version` at `policy-and-approvals.md:911` because it answers the
+`policy_version` at `policy-and-approvals.md:915` because it answers the
 same question about a different ruleset.
 
 ```text
@@ -1631,7 +1631,7 @@ renames are.
 
 `engineering-plan.md:722` defaults `ProviderReasoningItem.trust_level` to
 `TrustLevel.PLATFORM`. That is the highest trust tier in the system, and
-`policy-and-approvals.md:1116-1145` maps trust tiers to policy restrictiveness,
+`policy-and-approvals.md:1120-1149` maps trust tiers to policy restrictiveness,
 so on its face this hands model-generated content the same standing as
 platform configuration. That is backwards: reasoning is model output, and
 `AssistantMessage` correctly defaults to `TrustLevel.EXTERNAL_UNTRUSTED`.

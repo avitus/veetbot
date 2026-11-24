@@ -259,7 +259,7 @@ origin** and applied at a **reduced confidence band**, so it can never read as a
 unqualified fact about the current project:
 
 ```text
-[m:44b9] (learned in veetbot) Postgres with pgvector backs memory.
+[m:44b9d310] (learned in veetbot) Postgres with pgvector backs memory. (inferred, low; direct, durable)
 ```
 
 ### Corroboration across projects promotes
@@ -415,8 +415,12 @@ results rather than delaying the turn.
 - **Structured** (always on). Direct lookup by subject, `belief_type`, and scope. No
   scoring needed. This is what builds the snapshot core and what answers "what do you
   know about X" precisely.
-- **Lexical** (always on). Postgres full-text search over `subject` + `statement` with
-  `ts_rank_cd`, plus trigram similarity for names and typos. Cheap, debuggable, and
+- **Lexical** (always on). Postgres full-text matching over `subject` + `statement`:
+  whole lexemes under the `simple` configuration, ranked in relevance mode by how
+  many distinct query terms a belief matches
+  ([general-memory-recall.md](general-memory-recall.md), "Candidate contract"). The
+  original design's `ts_rank_cd` weighting and trigram similarity for names and
+  typos are not built. Cheap, debuggable, and
   strong on the proper nouns that dominate memory queries.
   Belief recall removes a bounded list of English function words such as "the"
   and "this" before both candidate selection and scoring. Negation and content
@@ -496,9 +500,10 @@ with:
   such hypothesis, and such hypotheses fill at most a third of a recall's
   rendered slots; the three are tested, not assumed.
 
-Two weight vectors, one function. The `core` profile (snapshot) drops `w_match` to
-zero — there is no query — and raises durability and authority. The `task` profile
-weights match and scope affinity heavily. Weights are hand-set, recorded as
+One weight vector (`retrieval.ranking_weights`), one function. The `core` profile
+(snapshot) has no query, so its match term is a fixed durability value: 0.5 for a
+durable belief and 0.15 for any other. The `task` and `deep` profiles take the
+strongest arm's match. Weights are hand-set, recorded as
 `retrieval_policy_version` on every trace, and tuned against the eval harness. A
 learned reranker is deferred until traces provide labeled data; hand weights that can
 be explained beat an unexplainable model at this stage.
@@ -551,13 +556,13 @@ is its Region A half and in-turn recall its Region B half, and in-turn recall is
 **deterministic, trust-labeled block**:
 
 ```text
-<memory as_of="2026-07-24T09:00:00Z" policy="retrieval@3">
-  [m:8f21] Andy prefers concise prose-first writing.  (user-stated, high)
-  [m:1c07] Andy's current project is veetbot.         (user-stated, high)
-  [m:44b9] Andy's stack is Postgres-backed.           (inferred, medium)
-  [m:7ea5] (learned in atlas) Deploys are gated on CI. (inferred, low)
-  [m:9b02] (learned from www.scalevp.com) Andy sits on the CodeRabbit board. (inferred, low; hypothesis, tentative)
-  [m:0d3e] [BLOCKED] withheld: failed injection scan.
+<memory as_of="2026-07-24T09:00:00Z" policy="retrieval@8" search_status="succeeded" coverage="bounded">
+  [m:8f21a0c3] Andy prefers concise prose-first writing. (user, high; direct, durable)
+  [m:1c07e5b2] Andy's current project is veetbot. (user, high; direct, durable)
+  [m:44b9d310] Andy's stack is Postgres-backed. (inferred, medium; direct, durable)
+  [m:7ea5c4f8] (learned in atlas) Deploys are gated on CI. (inferred, low; direct, durable)
+  [m:9b02a6d1] (learned from www.scalevp.com) Andy sits on the CodeRabbit board. (inferred, low; hypothesis, tentative)
+  [m:0d3e7b95] [BLOCKED] (inferred, low; direct, durable)
 </memory>
 ```
 

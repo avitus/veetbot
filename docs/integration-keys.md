@@ -68,8 +68,10 @@ from `Settings.credentials` and never enters the sandbox environment.
 
 ## Job access
 
-New sessions use `job.run` version 1.1.0 when the store is enabled; pinned
-version 1.0.0 keeps its prior specification and cannot propose stored bindings.
+New sessions use `job.run` version 1.3.0 when the store is enabled: 1.1.0 added
+stored bindings, and 1.3.0 adds the MCP servers of ADR-0291 to it. Pinned
+versions 1.0.0 and 1.2.0 keep their specifications and cannot propose stored
+bindings.
 The first consumer is an approved job grant with a host mapping such as
 `{"api.example.com":"stored:<uuid>"}`. Approval shows the label, origin and
 reference. Ownership and the exact origin are checked before granting access

@@ -96,7 +96,8 @@ Review the generated JSON before applying it through Bland's number settings or
 the operator's authenticated `POST /v1/inbound/{phone_number}`. It includes the
 owner's introduction, truthful answers when asked about AI identity or
 transcription, the approved profile, message-taking instructions,
-a five-minute ceiling, recording off and no tools, transfers or dynamic context.
+the configured `max_duration_minutes` ceiling, recording off and no tools,
+transfers or dynamic context.
 It explicitly clears pathway and memory references. A pathway can override the
 prompt, so a prompt update alone is insufficient. Read back the number settings
 and verify that every capability was actually cleared; a provider rejecting or

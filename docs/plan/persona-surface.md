@@ -93,7 +93,7 @@ class PersonaEntry(BaseModel):
     enabled: bool = True            # ADR-0226: kept and counted, unrendered when false
 
 class PersonaDocument(BaseModel):
-    tenant_id: UUID
+    tenant_id: str
     principal_id: str
     version: int                    # dense, monotonic, starts at 1
     entries: tuple[PersonaEntry, ...]
@@ -172,7 +172,7 @@ its lifecycle.
 ```python
 class PersonaNomination(BaseModel):
     id: UUID
-    tenant_id: UUID
+    tenant_id: str
     principal_id: str
     belief_id: UUID
     statement: str                  # canonical copy, self-contained

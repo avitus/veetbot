@@ -49,7 +49,7 @@ there; local tests do not establish production freshness or provider access.
    hosts; private addresses, redirects and arbitrary credential bindings are
    refused.
 
-The four SDK operations are synchronous:
+The SDK operations are synchronous:
 
 ```python
 def main(inputs, job):
@@ -65,8 +65,11 @@ slower or unreachable host fails as `job.service_unavailable`, which a program
 may catch and report in what it publishes. `job.model.complete` returns text.
 `job.feed.publish(feed_id, data, expected_interval_seconds=300, schema=schema)`
 uses the existing feed validator. `job.log(message)` records at most 2,000 bytes
-per line. Declare operations in `manifest.calls` and feeds in `manifest.feeds`.
-Programs receive no tool roster, credentials or direct network access.
+per line. `job.mcp.read(tool, arguments)` calls one read-only tool of an MCP
+server the grant's `mcp_servers` names and returns `{content, structured}`;
+declare `mcp.read` (ADR-0291). Its result is untrusted. Declare operations in
+`manifest.calls` and feeds in `manifest.feeds`. Programs receive no tool
+roster, credentials or direct network access.
 
 ## Create a widget with one approval
 
@@ -134,15 +137,18 @@ previews. It cannot change a live feed or schema. Failure feedback lets the
 agent repair the program and try again. Trial output, source read back from
 storage and job results remain untrusted content.
 
-Use `schedule.create` version 1.7.0 with `task` containing `kind: job`, `slug`,
-`revision_id` and `grant_id`. The existing scheduling approval shows the cadence
+Use `schedule.create` with `task` containing `kind: job`, `slug`,
+`revision_id` and `grant_id`. New chats see version 1.10.0, which adds
+ADR-0291's `use_mcp_servers` for agent-run schedules to version 1.7.0's job
+task. The existing scheduling approval shows the cadence
 and approved access. The scheduler pins both identifiers and derives its run
 limits from the grant and deployment ceilings. Feed jobs support the existing
 interval cadence and stay quiet on success. Failures use the existing
-notification and consecutive-failure pause behavior. `schedule.update` version
-1.2.0 can repin future occurrences; earlier occurrences retain their pins.
+notification and consecutive-failure pause behavior. `schedule.update` (version
+1.5.0 in new chats, 1.2.0 before ADR-0291) can repin future occurrences; earlier
+occurrences retain their pins.
 Previous tool versions and ordinary agent-run schedules remain supported.
-An interrupted update through version 1.2.0 is marked uncertain after its effect
+An interrupted update is marked uncertain after its effect
 boundary; read the schedule's current revision before proposing another update.
 
 The schedule report contains the result's summary, job log and broker operation
@@ -193,6 +199,15 @@ occurrences keep their pins. The ordinary update approval still applies. Match
 the cadence to the collector's expected interval. A count-only job without
 approved feed publication access cannot replace the feed-keeping task. Verify one completed run
 and the resulting live feed. Keep the prior revision for rollback.
+
+A repair raises several approval cards for the same job: the trial, the saved
+revision, the run and the repin. In the owner's own chat each of those cards
+offers **Allow for this request** (ADR-0344). Accepting it covers further
+trials, updates, runs and repins of that one job until the owner's next
+message, for at most two hours, within the access the job's existing grants
+already hold. New hosts, credentials, MCP servers, feeds or larger limits
+still ask, as do creating, archiving or restoring a job, creating a schedule
+and changing a cadence.
 
 `samples/jobs/github-widget` preserves the original PR widget's
 `observedAt`, `expectedIntervalSec` and `repositories` schema. It reads compact

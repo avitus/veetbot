@@ -128,7 +128,7 @@ not find it here should find the reason here.
   match. This milestone reuses that mechanism and generalizes its subject
   from one thread to one bounded batch of senders.
 - **The approval floor.** `EXTERNAL_WRITE` and `EXTERNAL_MESSAGE` require
-  approval in the default matrix (policy-and-approvals.md:640-641), and no
+  approval in the default matrix (policy-and-approvals.md:644-645), and no
   profile may downgrade a mailbox write or send (ADR-0071 decision 8). The
   new request tool joins that floor.
 - **The egress proxy.** One policy function checks every outbound connection
@@ -243,9 +243,9 @@ The package normalizes; it does not authorize. It cannot import
 `is_public_https_url` when it stores the block and again when it dispatches,
 and the proxy decides at connect time.
 
-The read roster in [email-integration.md](email-integration.md) grows by this
-one tool when the implementation lands, amended in the same change, and the
-roster-confinement gate grows with it. The package's endpoint set, its
+The read roster in [email-integration.md](email-integration.md) grew by this
+one tool when the implementation landed, amended in the same change, and the
+roster-confinement gate grew with it. The package's endpoint set, its
 refused redirects, and its import isolation do not change.
 
 ## The census
@@ -292,7 +292,7 @@ Trash never do.
 Summaries are listed only while an account catches up. Once it has, new mail
 arrives through Gmail's change feed and is read as whole conversations, so the
 census also folds each conversation refresh reads. The read server names, on
-every message it returns, the two fields the block carries — `list_id` and
+every message `get_thread_page` returns, the two fields the block carries — `list_id` and
 `unsubscribe_offer`, never a destination — and the census builds the same
 block from the newest received message, with the labels of the newest message
 of all. A conversation read is therefore folded exactly as its summary would
@@ -386,7 +386,7 @@ the arguments an approval of the destination.
 **Classification.** `IDEMPOTENT` is the honest class and not a convenience:
 the request is a constant, and sending it twice leaves the recipient exactly
 as unsubscribed as sending it once. Recovery may therefore re-execute
-(tool-system.md:732-741), which matters because an unsubscribe has no
+(tool-system.md:734-743), which matters because an unsubscribe has no
 read-back that could reconcile an unknown outcome. Per-target outcomes are
 persisted as each completes, so a re-execution skips targets already
 accepted rather than dialling them again.
@@ -551,7 +551,7 @@ unsub@lists.example.org* — because a tap that sends mail must say so and say
 where. Dispatch is the account's ordinary send server under Milestone 18's
 rules without exception: `NON_IDEMPOTENT`, and an outcome lost after
 dispatch is `uncertain`, shown as *Send status unknown*, and never sent again
-automatically (email-integration.md:405-418).
+automatically (email-integration.md:405-406).
 
 **Report spam** applies `SPAM` and removes `INBOX`. It is what the interface
 offers when a sender has no safe mechanism, when it failed authentication,
@@ -606,7 +606,7 @@ change, so retained mail is re-assessed in the existing bounded foreground
 slices.
 
 **The sender check.** The read server adds one closed field to every message
-it returns, `sender_check`: `pass` or `fail` when the first
+`get_thread_page` returns, `sender_check`: `pass` or `fail` when the first
 `Authentication-Results` header carrying Gmail's identifier states that DMARC
 result, and `none` otherwise. It is parsed exactly as the census parses DKIM
 — Gmail's topmost verdict only, with comments and quoted text discarded — so

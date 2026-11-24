@@ -49,6 +49,13 @@ semantic activation. Verify current admission separately; refresh compatibility
 and evidence before restoring semantic retrieval through recomposition. A trial
 still expires on its original clock, and no app update renews it automatically.
 
+A trial admission also stays bound to the reviewed reader
+([ADR-0343](adr/0343-standing-recall-binds-no-reader.md), decision 3). A run
+on another chat model or reasoning effort, or after a release changes the
+model list, gets sparse recall, and the process logs
+`semantic_recall_withheld_reader_changed`. Only the standing admission binds
+no reader.
+
 ## Operator preparation
 
 Follow [ADR-0223](adr/0223-owner-production-recall-trial.md). Before activation,

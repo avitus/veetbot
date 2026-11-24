@@ -160,11 +160,13 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   role (Milestones 14 and 25). `agent_core.adapters.device_channel` and
   `agent_core.application.device_ingest` carry SMS through the owner's iPhone
   as one framed, untrusted triage turn per message (Milestone 24).
-- `src/gmail_mcp`, `src/bland_mcp` and `src/svp_mcp` are first-party MCP server
-  packages beside `agent_core`, which they never import; the platform reaches
-  them only through its MCP process boundary (Milestones 18 and 27, and
+- `src/gmail_mcp`, `src/bland_mcp`, `src/svp_mcp` and `src/calendar_mcp` are
+  first-party MCP server packages beside `agent_core`, which they never
+  import; the platform reaches them only through its MCP process boundary
+  (Milestones 18 and 27,
   [ADR-0153](adr/0153-scale-vp-api-bridge.md) for the default-off Scale VP
-  read bridge). Typed Email work runs
+  read bridge, and [ADR-0305](adr/0305-read-only-google-calendar.md) for
+  default-off read-only Google Calendar). Typed Email work runs
   on the ordinary run, tool, and model path in `agent_core.runtime.email_*`
   (Milestone 26), and `agent_core.adapters.unsubscribe` is the fixed one-click
   unsubscribe transport (Milestone 31). Calling adds the `call-worker` and
@@ -230,6 +232,39 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   (Milestone 35, ADR-0240). `agent_core.application.mcp_servers` and the
   `/v1/mcp-servers` routes are owner-added MCP servers with in-app sign-in
   behind `AGENT_MCP_SERVERS_ENABLED` (ADR-0255).
+- `agent_core.application.jobs`, `job_broker`, `job_execution` and `job_grants`,
+  with `agent_core.tools.jobs` and the in-sandbox `agent_core.execution.job_sdk`,
+  are the saved programs the agent writes and runs once or on a schedule behind
+  `AGENT_JOBS_ENABLED` (ADR-0268); `agent_core.application.integration_secrets`
+  is the owner's encrypted key store those jobs may bind
+  (`AGENT_INTEGRATION_SECRETS_ENABLED`, ADR-0275). `agent_core.tools.run_inspect`
+  and `agent_core.tools.code`, over `agent_core.application.code_drafts` and
+  `code_proposals`, let the agent read a run and read, draft, test and propose
+  changes to the release's own source (`AGENT_CODE_TOOLS_ENABLED`, ADR-0281).
+- `agent_core.tools.sandbox_run_code` is code mode behind
+  `AGENT_CODE_MODE_ENABLED` (ADR-0342): one model-written script runs in the
+  run's sandbox under `agent_core.execution.code_runner`, and each tool call it
+  makes through `agent_core.execution.tool_sdk` re-enters the ordinary tool
+  pipeline over the sandbox bridge.
+- One approval can cover a request: `agent_core.application.browser_request_grants`
+  (ADR-0302), `script_request_grants` (ADR-0342) and `job_request_grants`
+  (ADR-0344) each authorize later actions of one kind until the run ends or
+  reads the owner's next message.
+- `agent_core.domain.pending_inputs` and the runtime's step boundary let a
+  follow-up message steer the run already working behind
+  `AGENT_RUN_STEERING_ENABLED` (ADR-0324), and
+  `agent_core.application.call_follow_ups` reports a finished call in the
+  conversation that placed it (ADR-0325).
+- Email memory grew `agent_core.domain.email_memory`, which keeps a thread's
+  memories by its importance (ADR-0340, ADR-0341), and
+  `agent_core.domain.email_signature` with `agent_core.memory.people_signatures`,
+  which leave a sender's signature out of the reading text and record its
+  title and phone number in People (ADR-0336).
+- `agent_core.application.recall_questions` and the `/v1/recall-questions`
+  routes keep the owner's recall question set in the database behind
+  `AGENT_RECALL_QUESTIONS_ENABLED` (ADR-0339); `agent memory probe` runs it
+  against a copy and `agent memory health` reads the per-trace recall summary
+  (ADR-0338).
 
 Milestone 15, operational hardening, is authorized and adds nothing to this
 page until its implementation lands. Each workstream's status and open items

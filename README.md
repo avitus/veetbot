@@ -42,7 +42,8 @@ box.
 - **Handle work while you are away.** Durable schedules, offline results, and
   notifications let useful work continue beyond an open chat window.
 - **Meet you where you work.** Use the command line, the versioned HTTP API and
-  event stream, the downloadable terminal client, or the native Apple client.
+  event stream, the downloadable terminal client, the native Apple client, or
+  an optional paired Telegram chat.
 - **Make behavior testable.** Reproducible evaluations and named release gates
   turn agent quality, safety, and recovery into things a team can verify.
 
@@ -241,10 +242,14 @@ docker compose exec postgres dropdb -U agent agent_scratch
 Secrets, addresses, and deployment identity belong in Doppler, from which
 `make env-pull` generates `.env`; reviewed tuning values belong in the YAML
 file owned by the relevant package. Optional web, browser, typed-judgment,
-scheduling, notification, email, trajectory-export, memory API, Scale VP,
-owner-added MCP server, records, and Cockpit features are disabled by default.
-Their available environment switches are documented in
-[`.env.example`](.env.example).
+scheduling, notification, email, calendar, trajectory-export, memory API,
+Scale VP, owner-added MCP server, integration-key, records, and Cockpit
+features are disabled by default. Their available environment switches are
+documented in [`.env.example`](.env.example). The switches for calling,
+agent-written jobs, and code mode are described in the
+[deployment runbook](docs/deployment.md), and those for messaging surfaces in
+the [Telegram](docs/telegram-surface-runbook.md) and
+[WhatsApp](docs/whatsapp-integration-runbook.md) runbooks.
 
 The initial public-web comparison keeps the incumbent provider for half of each
 capability and routes the other half to Keenable:

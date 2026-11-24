@@ -1457,7 +1457,7 @@ projection.rebuild.started  event-log-and-persistence.md
 projection.rebuild.completed   event-log-and-persistence.md
 ```
 
-Twenty-two more belong to subsystems this document does not touch, and the
+Twenty-three more belong to subsystems this document does not touch, and the
 loop-owned `memory.recall.limited` sits beside them because ADR-0282 added it
 to the loop's vocabulary after Section 6.8 was written. They are listed here
 for the same reason: Section 6.8's list is where an implementer
@@ -1499,6 +1499,13 @@ arrived with the document that owns it. The four `records.*` types arrived
 with Milestone 34 and are appended to the run's session in the same unit of
 work as the record write. `browser.request_grant.created` (ADR-0302) is
 appended with `approval.resolved` when the owner allows a request.
+
+Later decisions add session-scoped types that this count does not include.
+Among them are `run.input.dropped` and `run.input.promoted` (ADR-0324,
+[below](#follow-ups-to-a-working-run-adr-0324)), and
+`job.request_grant.created` (ADR-0344) and `script.request_grant.created`
+(ADR-0342 decision 11), each appended with `approval.resolved` as the browser
+one is.
 
 Two of the original eighteen were declared after this consolidation was written and
 never folded into it. `mcp.server.reauthenticated` sits in the same

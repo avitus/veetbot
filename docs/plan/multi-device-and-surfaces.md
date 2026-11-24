@@ -501,7 +501,9 @@ on a session or run column, as the attribution finding concluded; and the
 trust question is answered for the one sender this milestone serves — the
 principal pairing their own account, whose message is `USER` for that
 principal — while a third-party sender's label stays open on the roadmap. The
-third registration source and the hand-off suspension kind remain open for the
-device channel. This document still declares no gates; the twenty-one that
-cover Milestone 14 are declared by the surfaces document.
+third registration source and the hand-off suspension kind remained open for the
+device channel; [device-channel-and-sms.md](device-channel-and-sms.md) has since
+landed the third source as capability-derived registration (ADR-0081), and the
+hand-off suspension kind is still unbuilt. This document still declares no gates;
+the twenty-one that cover Milestone 14 are declared by the surfaces document.
 

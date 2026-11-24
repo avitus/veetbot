@@ -821,7 +821,7 @@ Each step begins with its red test, and the gate a step turns green is named.
 3. **Service.** `application/records.py`: create, append, query, delete,
    the scans, the limits, the events, and the provenance detach in the
    session-deletion cascade. Gates 5 and 6.
-4. **Tools.** The five tools with their schemas, descriptions and
+4. **Tools.** The six tools with their schemas, descriptions and
    classification; registration under the flag; the `records` domain in the
    partition table; the two scopes in the vocabulary. Gate 8.
 5. **Policy.** The `EXTERNAL_WRITE` and `EXTERNAL_DELETE` classification of

@@ -72,6 +72,10 @@ as an archival record.
   feature flags and owner scopes, verification, and rollback.
 - [Gmail integration runbook](gmail-integration-runbook.md) — connecting
   Gmail, Email mode, and unsubscribe assistance.
+- [Google Calendar setup](calendar-setup.md) — connecting read-only calendar
+  access.
+- [Integration keys](integration-keys.md) — the in-app store for the keys
+  agent-written jobs use.
 - [People memory operations](people-operations.md) — imports, directory
   repair, duplicates, erasure, and rollback.
 - [Telegram surface runbook](telegram-surface-runbook.md),

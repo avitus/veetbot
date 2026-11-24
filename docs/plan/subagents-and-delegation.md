@@ -33,14 +33,14 @@ eighth run state (runtime-loop.md:304-312); the child-run join is the one
 post-terminal hook that is genuinely part of the run lifecycle
 (runtime-loop.md:1301-1312); a child's result enters the parent labelled
 `EXTERNAL_UNTRUSTED` and the child's tool set is resolved with the child's
-principal (tool-system.md:1124-1130); the child seeds from the parent's concise
+principal (tool-system.md:1126-1132); the child seeds from the parent's concise
 instruction and recalls under its own, smaller, recall class
 (context-engine.md:596-599, memory-retrieval-and-ranking.md:96); and the
 background-review child run of Milestone 10A already materializes a dedicated
 child session and child run with a restricted tool allow-list and
 failure isolation ([skills.md](skills.md#the-background-review-is-a-child-run-with-four-restrictions)).
-The readiness review measured what was left (readiness.md:1016-1020 and
-readiness.md:1020-1021): the objective had a carrier and no schema, the child
+The readiness review measured what was left (readiness.md:1020 and
+readiness.md:1023-1024): the objective had a carrier and no schema, the child
 budget was additive with no rule deriving a child's own limits, the separate
 trace and the artifact references were picked up by no specification, and a
 child run could not be inserted into its parent's session. This document
@@ -207,7 +207,7 @@ In one unit of work, `DelegationMaterializer` does the following:
 7. Inserts one `delegations` row carrying every child and marks the parent's
    `tool_invocations` row `RUNNING` with `suspended_kind = child_run` and
    `suspended_ref` equal to the delegation identifier (the nullable columns
-   tool-system.md:1112-1115 already declares). Steps 3 through 6 repeat per
+   tool-system.md:1114-1117 already declares). Steps 3 through 6 repeat per
    brief inside the one transaction.
 8. Commits, then dispatches the child through the existing run dispatcher.
 
@@ -337,7 +337,7 @@ Trust is already decided: the brief goes down as enveloped data in a `USER`
 message the child's own instruction frames; the result comes up labelled
 `EXTERNAL_UNTRUSTED`, exactly as the model gateway labels any model output; the
 child cannot raise its trust and the parent cannot inherit the child's
-authorizations (tool-system.md:1120-1126). A child result that instructs the
+authorizations (tool-system.md:1122-1128). A child result that instructs the
 parent is therefore in the same position as web content — it can be read and
 it cannot authorize. The result enters the parent's working conversation as a
 tool result, not its stable prefix, so the prefix-stability invariant is
@@ -354,7 +354,7 @@ Cancelling a suspended parent cascades: `cancel_parked_run` requests
 cancellation of every non-terminal `DELEGATED` child (a queued child through
 the same parked path, a running child through the lazy cancellation token) and
 completes the suspended invocation as `failed` with `tool.run_cancelled`, the
-rule tool-system.md:1118-1122 already states for a suspended invocation whose run
+rule tool-system.md:1120-1124 already states for a suspended invocation whose run
 is cancelled. A child's deadline is never later than its parent's, so the
 deadline sweep ends children first and the parent's own sweep handles the
 parent. A child's cancellation or failure never cancels its siblings.
@@ -372,7 +372,7 @@ A child run cannot be inserted into its parent's session: the partial unique
 index that keeps one active run per session admits no row while the parent
 waits in `WAITING_FOR_APPROVAL`, and Section 27.6's "parent's session or a
 dedicated child session per policy" had no policy written
-(readiness.md:1026-1035). The resolution is the one the review log recorded as
+(readiness.md:1029-1038). The resolution is the one the review log recorded as
 a weak preference and ADR-0061 adopted: a dedicated child session, always. The
 index is untouched, which is the point; the branch is deleted rather than
 policed. Child sessions are principal-owned rows carrying the delegation
@@ -526,7 +526,7 @@ before the flag may be turned on for a tenant:
    the delegating re-run is scored as the milestone's exit evidence. The
    scenario's milestone bound, currently ten, moves to thirteen.
 2. **A deterministic two-arm case.** Case 32 uses the `arms` and `delta` form
-   cases 27 and 31 established (evaluation-harness.md:490-540): the first arm
+   cases 27 and 31 established (evaluation-harness.md:512-562): the first arm
    runs without `delegate.run` and is scripted to fail, the second runs with
    it and completes, with `delta: {policy_failures: same, outcome: improves}`.
    The arm model gains a `tools` overlay for this; it is an arm overlay, not
