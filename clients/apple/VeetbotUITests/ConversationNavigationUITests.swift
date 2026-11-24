@@ -3536,7 +3536,13 @@ final class ConversationNavigationUITests: XCTestCase {
         let followUp = app.staticTexts.matching(NSPredicate(
             format: "label CONTAINS %@ OR value CONTAINS %@", "Use metric units", "Use metric units")).firstMatch
         XCTAssertTrue(followUp.exists, "The follow-up is in the transcript before Veetbot has read it")
-        XCTAssertEqual(composer.value as? String, "", "The message box is free for the next words")
+        // On a Mac `chat.composer` marks the scroll view; the words are in its text view.
+        #if os(macOS)
+        let composerText = composer.textViews.firstMatch
+        #else
+        let composerText = composer
+        #endif
+        XCTAssertEqual(composerText.value as? String, "", "The message box is free for the next words")
         XCTAssertTrue(waiting.waitForNonExistence(timeout: 15), "An accepted follow-up stops waiting")
         XCTAssertTrue(followUp.exists, "The words stay in the transcript")
         XCTAssertFalse(app.alerts.firstMatch.exists)

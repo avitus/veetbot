@@ -510,7 +510,7 @@ now so that it does not have to be added later, and the resolution step
 arrives with the second principal.
 
 `AUTH_MODE=dev` binds the full scope set, and this section is what "full"
-means: all forty-two, and no `mcp.` scope. Those exist only once a server
+means: all fifty-two, and no `mcp.` scope. Those exist only once a server
 is configured, and a development principal that silently held every scope
 an operator could declare would make the misdeclaration above the one
 class of mistake development cannot surface.
@@ -1427,7 +1427,7 @@ warning.
 10. **Prompt is not authorization.** Across the injection corpus Section 22
     requires, untrusted content instructing a `REQUIRE_APPROVAL` action produces
     an approval request in every case and an execution in none. **M4.**
-11. **Scope grammar.** Every entry in the forty-two-string vocabulary and
+11. **Scope grammar.** Every entry in the fifty-two-string vocabulary and
     every `required_scopes` entry on a registered `ToolSpec` matches the
     grammar, and registration rejects an MCP tool declaring a scope that is
     neither in the vocabulary nor prefixed `mcp.{server_id}.`. **M4.**
@@ -1593,8 +1593,9 @@ those routes already says.
     `TRUSTED_CONFIGURATION`, and `USER` can authorize anything.
 30. `GET /v1/approvals` and `GET /v1/approvals/{id}` are added so
     `agent approval list` has an endpoint.
-31. The scope vocabulary is one closed set of forty-two dotted strings,
-    shared by the API's route checks and by this pipeline's tool check.
+31. The scope vocabulary is one closed set of dotted strings, forty-two at
+    Milestone 4 and fifty-two today, shared by the API's route checks and by
+    this pipeline's tool check.
     Authorized milestones and ADRs add exact schedule, device, notification,
     memory, delegation, surface, persona, email, call, People, settings, and
     media scopes without changing exact matching or the Milestone 4 policy baseline.

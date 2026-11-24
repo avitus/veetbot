@@ -387,7 +387,7 @@ recorded. The recall health report and stage timings (ADR-0338) and the stored
 owner question set (ADR-0339) reached `main` in pull request 260. That set is a
 diagnostic, not gate evidence: on a production clone of 2026-11-23 it passes 99
 of 114 questions under the ADR-0346 scoring rule (pull request 264), and 103
-with ADR-0348, which is on `dev` and not yet on `main`.
+with ADR-0348 (pull request 265).
 
 - [ ] Verify semantic recall in production under the standing admission (ADR-0290, kept on by ADR-0343 in pull request 262), including semantic role bindings, sparse fallback and jobs; this item first named the ADR-0274 trial release, whose trial expired on 2026-11-02
 - [ ] Complete the staged implementation and comparative activation evidence

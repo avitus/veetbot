@@ -237,9 +237,10 @@ conflict   request_grant_offer_mismatch  approval_id
 ```
 
 `tool_validation_error` carries `{"tool_name": ..., "errors": [...]}`
-where `errors` is the validator's path-and-message list. Together with the
-automatic-email `budget_exceeded` case below, these are the only codes whose
-`details` carry more than a `reason`; adding another is a minor version change.
+where `errors` is the validator's path-and-message list. `conflict`,
+`tool_validation_error` and the automatic-email `budget_exceeded` case below
+are the only codes whose `details` carry more than a `reason`; adding another
+is a minor version change.
 `rate_limited`, `schedule_validation_error`, `device_validation_error`,
 `device_ingest_error` and `device_channel_unavailable` carry
 `{"reason": ...}` alone.
@@ -372,11 +373,15 @@ Scopes are dotted `resource.action` strings, and the set is enumerated:
 
 ```text
 session.read      session.write
-run.read          run.write        run.cancel
+run.read          run.write        run.cancel         run.delegate
 approval.read     approval.resolve
 artifact.read     artifact.write
 media.generate
 skill.write
+workspace.read    workspace.write    sandbox.execute
+demo.write        knowledge.write
+jobs.write        jobs.run
+code.read         code.write
 browser.profile.read   browser.profile.write
 browser.grant.read     browser.grant.write
 schedule.read     schedule.write     schedule.cancel
@@ -396,7 +401,9 @@ settings.read     settings.write
 `records.read` and `records.write` gate no route; they are the
 `required_scopes` of the six `records.*` tools in
 [owner-records.md](owner-records.md), enumerated here because the vocabulary
-is one closed list. `approval.resolve` is the one the corpus already names; the rest follow
+is one closed list. `run.delegate`, the `workspace`, `sandbox`, `demo`,
+`knowledge`, `jobs` and `code` scopes likewise gate no route and are required
+only by tools. `approval.resolve` is the one the corpus already names; the rest follow
 its form. Membership is exact string equality against the principal's
 scope set. There is no wildcard, no prefix rule, and no hierarchy in
 which `run.write` implies `run.read`.

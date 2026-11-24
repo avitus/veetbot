@@ -21,7 +21,7 @@ title: Current Milestone
   recall on when the chat model or the model list changes, a scoring rule that
   counts a fact any live memory delivers, and a rule that a relationship
   selects a person only when the question names it. Pull requests 260, 262 and
-  264 delivered the first four; ADR-0348 is on `dev` and not yet on `main`. On a
+  264 delivered the first four and pull request 265 the fifth. On a
   production clone of 2026-11-23 the set passes 99 of 114 questions, and 103
   with ADR-0348. The set is a diagnostic; no Milestone 33 gate moves.
 

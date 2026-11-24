@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 
+from agent_core.adapters.determinism import heartbeat_wait_for
 from agent_core.api import create_app
 from agent_core.bootstrap import Composition
 from agent_core.domain.agents import Principal
@@ -46,5 +47,7 @@ async def run_worker_once(composition: Composition, worker_id: str) -> bool:
         executor=composition.executor,
         clock=composition.clock,
         worker_id=worker_id,
+        # As bootstrap does: a fixed clock's heartbeat yields without advancing time.
+        heartbeat_wait=heartbeat_wait_for(composition.clock),
     )
     return await worker.run_once()
