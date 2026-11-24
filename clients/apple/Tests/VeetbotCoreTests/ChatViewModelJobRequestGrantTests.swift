@@ -101,7 +101,7 @@ import Testing
 
         await model.resolveApproval(offered, decision: .approveForRequest)
 
-        #expect(model.errorMessage?.hasPrefix("Allow for this request is no longer available.") == true)
+        #expect(model.errorMessage == "Allow for this request is no longer available. Approve once or Deny.")
         let merged = try #require(model.runState.approvals.first { $0.id == Self.approvalID })
         #expect(merged.status == .pending)
         #expect(merged.decision == nil)
