@@ -404,3 +404,44 @@ async def test_experimental_reranker_preserves_strong_relevance_with_uncertain_a
     async with factory() as uow:
         trace = await uow.traces.get(reverted.trace_id, principal())
     assert "+relevance-rerank@1" not in trace.retrieval_policy_version
+
+
+@pytest.mark.parametrize(
+    ("statement", "channel", "lexical_first"),
+    [
+        ("Inspect the kiln gasket", "hybrid", True),
+        ("Inspect the kiln", "hybrid", False),
+        ("Inspect the kiln gasket", "dense", False),
+    ],
+)
+async def test_multiple_matching_words_compete_with_semantic_neighbors_in_long_requests(
+    statement: str, channel: str, lexical_first: bool
+) -> None:
+    from tests.contract.memory_fixtures import recall_query
+
+    clock, factory, _, _ = await formation_stack()
+    lexical = memory(belief_id=501, statement=statement)
+    semantic = memory(belief_id=502, statement="Inspect the workshop").model_copy(
+        update={"subject": "workshop", "store_position": 2}
+    )
+    async with factory() as uow:
+        for row, vector in [(lexical, (0.1, 0.995, 0.0)), (semantic, (0.6, 0.8, 0.0))]:
+            await uow.memories.upsert_belief(row)
+            source = await uow.semantic_memory.capture(principal(), row.id, SPACE)
+            assert source is not None and await uow.semantic_memory.put(principal(), source, vector)
+    retriever = HybridMemoryRetriever(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=i) for i in range(8000, 8010)),
+        principal(),
+        profile=DEFAULT_RETRIEVAL_PROFILE.model_copy(
+            update={"semantic_enabled": True, "semantic_channel": channel, "reranking": "relevance"}
+        ),
+        semantic_queries=LocalQuery(),
+        reranking_admitted=lambda: True,
+    )
+    query = recall_query(text="kiln gasket temperature tolerance calibration interval").model_copy(
+        update={"candidate_selection": "relevance"}
+    )
+    result = await retriever.recall(query, session_id=SESSION_ID)
+    assert result.items[0].belief_id == (lexical.id if lexical_first else semantic.id)

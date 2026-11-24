@@ -490,4 +490,5 @@ nav:
       - "ADR-0349 — Pack more ranked facts within the turn budget": adr/0349-pack-more-ranked-facts-within-the-turn-budget.md
       - "ADR-0350 — Recheck browser destinations in later target windows": adr/0350-recheck-browser-destinations-in-target-windows.md
       - "ADR-0351 — Ground an inferred state in the subject of the question": adr/0351-ground-inferred-state-in-the-requested-subject.md
+      - "ADR-0352 — Scale a multi-word recall match to the available evidence": adr/0352-scale-multiword-recall-to-available-evidence.md
   - Changelog: changelog.md

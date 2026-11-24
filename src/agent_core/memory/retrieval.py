@@ -838,6 +838,23 @@ class HybridMemoryRetriever:
         if rerank:
             term_count = max(1, len(recall_query_terms(effective_query.text)))
             dense_only = semantic_key is not None and self._profile.semantic_channel == "dense"
+            lexical_coverage = {
+                item.belief_id: strengths.get(item.belief_id, (0, 0))[1] for item in recalled
+            }
+            best_coverage = max(lexical_coverage.values(), default=0)
+            if semantic_key is not None and not dense_only and 1 < best_coverage < term_count:
+                # The strongest multi-word match can cover only part of a long request.
+                # Keep a lone shared word on its original absolute scale.
+                policy_version += "+relative-lexical@1"
+                render_policy += "+relative-lexical@1"
+                lexical_scores = {
+                    key: count / (best_coverage if count >= 2 else term_count)
+                    for key, count in lexical_coverage.items()
+                }
+            else:
+                lexical_scores = {
+                    key: count / term_count for key, count in lexical_coverage.items()
+                }
             recalled = [
                 item.model_copy(
                     update={
@@ -847,9 +864,7 @@ class HybridMemoryRetriever:
                             * max(
                                 similarities.get(item.belief_id, 0.0),
                                 0.0 if dense_only else strengths.get(item.belief_id, (0, 0))[0] / 4,
-                                0.0
-                                if dense_only
-                                else strengths.get(item.belief_id, (0, 0))[1] / term_count,
+                                0.0 if dense_only else lexical_scores[item.belief_id],
                             )
                             + 0.2 * before_fusion[item.belief_id],
                         )
