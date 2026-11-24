@@ -25,6 +25,7 @@ title: Architecture Decisions
 - [ADR-0350: Recheck browser destinations in later target windows (Accepted)](0350-recheck-browser-destinations-in-target-windows.md)
 - [ADR-0351: Ground an inferred state in the subject of the question (Proposed)](0351-ground-inferred-state-in-the-requested-subject.md)
 - [ADR-0352: Scale a multi-word recall match to the available evidence (Proposed)](0352-scale-multiword-recall-to-available-evidence.md)
+- [ADR-0353: Measure how the indexed text affects weak semantic matches (Experiment rejected)](0353-measure-weak-semantic-matches.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the

@@ -491,4 +491,5 @@ nav:
       - "ADR-0350 — Recheck browser destinations in later target windows": adr/0350-recheck-browser-destinations-in-target-windows.md
       - "ADR-0351 — Ground an inferred state in the subject of the question": adr/0351-ground-inferred-state-in-the-requested-subject.md
       - "ADR-0352 — Scale a multi-word recall match to the available evidence": adr/0352-scale-multiword-recall-to-available-evidence.md
+      - "ADR-0353 — Measure how the indexed text affects weak semantic matches": adr/0353-measure-weak-semantic-matches.md
   - Changelog: changelog.md
