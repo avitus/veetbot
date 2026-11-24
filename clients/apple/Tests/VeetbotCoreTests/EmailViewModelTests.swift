@@ -4561,6 +4561,7 @@ import SwiftUI
     /// Builds an isolated transport whose selected response can be delivered after an independent request finishes.
     private func makeArchiveRaceModel(
         refreshNanoseconds: UInt64 = 60_000_000_000,
+        pollNanoseconds: UInt64 = 1_000_000_000,
         handler: @escaping (URLRequest) throws -> (Int, String, EmailArchiveResponseGate?)
     ) throws -> EmailViewModel {
         let id = EmailArchiveRaceURLProtocol.register(handler)
@@ -4571,7 +4572,8 @@ import SwiftUI
             configuration: try ConnectionConfiguration(baseURLString: "https://email.test"),
             tokenStore: InMemoryTokenStore(token: "test-token"), session: URLSession(configuration: configuration)
         ))
-        return EmailViewModel(makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds)
+        return EmailViewModel(
+            makeAPIClient: { api }, refreshNanoseconds: refreshNanoseconds, pollNanoseconds: pollNanoseconds)
     }
 
     /// Adds explicit feature support without changing unrelated account fixture defaults.
@@ -4935,6 +4937,84 @@ import SwiftUI
         #expect(!model.canSelectReply)
         gate.release()
         await generating.value
+    }
+
+    /// Refine draft sends the owner's instruction and says Veetbot is working from the press
+    /// until the rewritten revision is in the editor: while the server admits the request, and
+    /// through each read of a run that is still working, with the step the server reports.
+    /// A second press while one is out asks nothing.
+    @Test func testRefineShowsProgressFromThePressUntilTheRewriteArrives() async throws {
+        let requests = EmailRequestRecorder()
+        let admission = EmailArchiveResponseGate()
+        let lastRunRead = EmailArchiveResponseGate()
+        let rewritten = EmailTestFlag()
+        let posts = { requests.snapshot.filter { $0.httpMethod == "POST" } }
+        let model = try makeArchiveRaceModel(pollNanoseconds: 1_000) { request in
+            requests.append(request)
+            let path = request.url!.path
+            if path.hasSuffix("accounts") { return (200, Self.accountsJSON, nil) }
+            if request.httpMethod == "POST" {
+                return (200, "{\"draft\":\(self.draftJSON()),\"run_id\":\"\(self.runID)\",\"status\":\"QUEUED\"}", admission)
+            }
+            if path.contains("/runs/") {
+                // The run is still working at its first read. The second, held, reports it finished.
+                if requests.snapshot.filter({ $0.url!.path.contains("/runs/") }).count == 1 {
+                    return (200, self.runJSON(status: "RUNNING"), nil)
+                }
+                rewritten.set()
+                return (200, self.runJSON(status: "COMPLETED"), lastRunRead)
+            }
+            if path.hasSuffix("/revisions") { return (200, "{\"items\":[],\"next_cursor\":null}", nil) }
+            // The thread names the step while the run works, and holds the rewrite once it has ended.
+            guard !posts().isEmpty else { return (200, self.threadJSON(draft: self.draftJSON()), nil) }
+            let draft = rewritten.isSet ? self.draftJSON(revision: 2, body: "Shorter.") : self.draftJSON()
+            return (200, self.threadJSON(draft: draft).replacingOccurrences(
+                of: "\"complete\":true", with: "\"complete\":true,\"preparation_stage\":"
+                    + "\"\(rewritten.isSet ? "ready_for_review" : "finding_documents")\""), nil)
+        }
+        defer { admission.release(); lastRunRead.release(); model.resetConnection() }
+        await model.openThread(threadID)
+        #expect(!model.isGeneratingDraft)
+        let refining = Task { await model.generateDraft(instruction: "Make it shorter") }
+        try await waitForEmailTestCondition { admission.isWaiting }
+        #expect(model.isGeneratingDraft, "The press shows at once, before the server has admitted it")
+        await model.generateDraft(instruction: "Make it shorter")
+        #expect(posts().count == 1, "A second press while one is out asks nothing")
+        let asked = try #require(posts().first)
+        #expect(asked.url?.path == "/v1/email/threads/\(threadID.uuidString)/drafts")
+        #expect(try Self.archiveRequestBody(asked)["instruction"] as? String == "Make it shorter")
+        admission.release()
+        try await waitForEmailTestCondition { lastRunRead.isWaiting }
+        #expect(model.isGeneratingDraft, "Admitted is not rewritten: the run is still working")
+        #expect(model.draftPreparationMessage == "Finding documents…")
+        #expect(model.currentEdit?.body == "Thanks, I will review the agenda.", "The reply is as it was until the rewrite lands")
+        lastRunRead.release()
+        await refining.value
+        #expect(!model.isGeneratingDraft, "The rewrite has arrived")
+        #expect(model.draft?.revision == 2)
+        #expect(model.currentEdit?.body == "Shorter.")
+        #expect(model.draftActionMessage == nil)
+    }
+
+    /// The line under Refine draft names the step the server reports, and says the draft is
+    /// being prepared when the server names none or one this client does not know.
+    @Test(arguments: [
+        ("finding_context", "Finding context…"), ("finding_documents", "Finding documents…"),
+        ("staging_files", "Attaching files…"), ("ready_for_review", "Ready for review"),
+        ("a_later_step", "Preparing draft…"), ("", "Preparing draft…"),
+    ])
+    func testDraftPreparationMessageNamesTheServersStep(stage: String, message: String) async throws {
+        let model = try makeModel { request in
+            if request.url!.path.hasSuffix("accounts") { return (200, Self.accountsJSON) }
+            let thread = self.threadJSON(draft: self.draftJSON())
+            return (200, stage.isEmpty ? thread : thread.replacingOccurrences(
+                of: "\"complete\":true", with: "\"complete\":true,\"preparation_stage\":\"\(stage)\""))
+        }
+        defer { model.resetConnection() }
+        #expect(model.draftPreparationMessage == "Preparing draft…", "No thread is open")
+        await model.openThread(threadID)
+        #expect(model.thread?.preparationStage == (stage.isEmpty ? nil : stage))
+        #expect(model.draftPreparationMessage == message)
     }
 
     @Test func testOnlyExplicitVeetbotChoiceGeneratesAMissingSuggestion() async throws {
