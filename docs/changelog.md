@@ -4,7 +4,7 @@ title: Changelog
 
 # Changelog
 
-## 2026-11-23 — A question about a relative no longer hides that relative's facts (ADR-0348, proposed)
+## 2026-11-23 — A question about a relative no longer hides that relative's facts (ADR-0348)
 
 - When recall decides a question is about one person, it leaves out every fact
   linked to anyone else. It was choosing the person too easily. A relative
@@ -20,8 +20,9 @@ title: Changelog
 - On a copy of production from 2026-11-23, 103 of 114 questions pass instead
   of 99, and none that passed now fails. Merging the role-only records by hand
   gained nothing by itself.
-- Built on a local branch and tested in the sandboxes. It awaits your
-  acceptance and is not delivered.
+- You accepted the rule on 2026-11-23. It is tested in the sandboxes and is
+  not delivered yet.
+
 ## 2026-11-23 — Scripts are on for app chats, and a script may name a tool as the model sees it (ADR-0342)
 
 - Scripts were turned on in production for chats started in the app.

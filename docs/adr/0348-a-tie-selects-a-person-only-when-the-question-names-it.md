@@ -1,7 +1,8 @@
 # ADR-0348: A tie selects a person only when the question names it
 
-- Status: Proposed (built on a local branch on 2026-11-23 while diagnosing the
-  owner question set; awaits the owner's acceptance)
+- Status: Accepted (built on a local branch on 2026-11-23 while diagnosing the
+  owner question set; the owner accepted it the same day, answering "Accept
+  the new rule for choosing who a question is about?" with "Yes, accept it")
 - Date: 2026-11-23
 - Amends: ADR-0208 (which relationship evidence selects a person), ADR-0310
   (its label requirement no longer applies to focused searches alone)
