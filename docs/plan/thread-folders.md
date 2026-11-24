@@ -560,8 +560,8 @@ from session metadata alone and do not depend on the folder flag.
 constraint, the partial unique index, and the state index, with a
 `downgrade()` that drops them in reverse — written because the round-trip
 gate requires it, not as an operational promise
-(event-log-and-persistence.md:1021-1023). It descends linearly from the current
-head (event-log-and-persistence.md:944-947) and the expected-revision pin
+(event-log-and-persistence.md:1032-1034). It descends linearly from the current
+head (event-log-and-persistence.md:955-958) and the expected-revision pin
 moves in the same change. A pre-migration session reads as unfiled.
 
 **Configuration.** The tuning values are a checked-in document, because none

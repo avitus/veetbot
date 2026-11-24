@@ -11,8 +11,10 @@ title: Current Milestone
   ordinary pipeline, each counted and each still asking where it would ask. It is
   default off behind `AGENT_CODE_MODE_ENABLED`. Pull requests 263 and 264
   delivered it on 2026-11-23, and the owner turned it on in production for app
-  chats that day; schedules and inbound surfaces stay off. No milestone or gate
-  moves.
+  chats that day. Schedules made before that day keep the command tool. On
+  2026-11-24 two production runs failed after an approved script, and the
+  repair keeps a script's own calls out of session history. No milestone or
+  gate moves.
 
 - **Recall measurement and repairs — ADR-0338, ADR-0339, ADR-0343, ADR-0346,
   ADR-0348:** Between 2026-11-20 and 2026-11-23 the owner approved a recall

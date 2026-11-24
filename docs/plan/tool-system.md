@@ -2812,6 +2812,11 @@ The result carries `exit_code`, `stdout`, `stderr`, `timed_out`, `killed_by`,
 `tool_call_limit_reached`. Bridged results never enter the conversation; only
 what the script prints does. The result is `EXTERNAL_UNTRUSTED`.
 
+Every bridged call is identified under the prefix `bridge:`. Its
+`tool.call.*` events are recorded like any call's, for audit and for replay.
+The session-history projection adds no item for its result, because the model
+never proposed the call (`event-log-and-persistence.md`, "Projections").
+
 ### Approval
 
 The owner decided on 2026-11-22 that a script should ask less often. The
@@ -2954,9 +2959,18 @@ and no roster, prompt or pin changes. On, the tool is registered and Chat
 changes as the section above describes. `tests/unit/test_code_mode.py` covers
 the library, the runner, the tool and the bridge refusal offline.
 
-Each service reads the setting from its own settings file. The API and the
-interactive, async and maintenance workers share `veetbot.env`; the schedule,
-surface, notify and call services each have their own. Production has the
-setting on in the shared file since 2026-11-23 and off in the others, so app
-chats have the script tool, and schedules and inbound surfaces keep
-`sandbox.run_command` (ADR-0342, Implementation status).
+Only the API and the interactive, async and maintenance workers read the
+setting; they share `veetbot.env`. The schedule, surface, notify and call
+services never read it. What a run is offered follows the agent version its
+session pins:
+
+- A new app chat takes the version its API process composed.
+- A schedule keeps the version it pinned when it was created or last
+  re-pinned (`scheduling.md`). One made after the setting was turned on has
+  the script tool. An older one keeps `sandbox.run_command`.
+- A new inbound-surface chat takes the newest registered version, so it has
+  the script tool once the setting is on.
+- The call services run no model.
+
+Production has the setting on since 2026-11-23 (ADR-0342, Implementation
+status).

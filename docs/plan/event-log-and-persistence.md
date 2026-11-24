@@ -289,6 +289,17 @@ authority of its own. Three exist:
 | Memory | Episodic events at session boundary (ADR-0018) | Retrieval, snapshot assembly (ADR-0019) | Global, expensive, opt-in per principal |
 | Trajectory export | Whole runs (Section 31) | Eval fixtures, training data | Per run, cheap |
 
+Session history holds the model's conversation: what the owner and the model
+said, each call the model proposed and that call's result. A call a script
+makes over the bridge (ADR-0342) is recorded as `tool.call.*` events like any
+other, and its identifier starts with `bridge:`. The model never proposed it
+and its result went to the script, so the projection adds no item for it.
+`session-history@3` is the first builder version with this rule, and a session
+projected under an older version is rebuilt when it is next read. Version 2
+kept those results. A run that reloaded its conversation after an approval
+then held results without calls, and two production runs failed that way on
+2026-11-24.
+
 ### The properties every projection has
 
 **Deterministic.** The same log prefix produces the same projection state, byte

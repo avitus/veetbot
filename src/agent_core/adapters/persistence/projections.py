@@ -19,13 +19,14 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     TrajectoryProjectionRow,
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
-from agent_core.domain.events import CONVERSATION_ADAPTER, EventEnvelope, conversation_items
+from agent_core.domain.events import CONVERSATION_ADAPTER, EventEnvelope, history_items
 from agent_core.domain.persistence import ProjectionCursor, SessionHistory, TrajectoryProjection
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.ports.determinism import Clock
 
 SESSION_HISTORY_NAME = "session_history"
-SESSION_HISTORY_VERSION = "session-history@2"
+# Version 3 leaves out the results of calls a script made (ADR-0342).
+SESSION_HISTORY_VERSION = "session-history@3"
 TRAJECTORY_NAME = "trajectory_export"
 TRAJECTORY_VERSION = "trajectory@1"
 TERMINAL_EVENTS = frozenset(f"run.{status.value.lower()}" for status in TERMINAL_RUN_STATUSES)
@@ -93,7 +94,7 @@ class PostgresSessionHistoryRepository:
         for event in sorted(events, key=lambda item: (item.sequence, item.id)):
             if event.sequence <= watermark:
                 continue
-            for index, item in enumerate(conversation_items(event)):
+            for index, item in enumerate(history_items(event)):
                 inserts.append(
                     {
                         "session_id": session_id,

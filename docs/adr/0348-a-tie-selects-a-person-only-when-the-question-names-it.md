@@ -82,8 +82,8 @@ ADR-0125).
 
 ## Addition, 2026-11-24: the label is read from the person's side
 
-Found in review of pull request 265, and written there: the owner accepted the
-decisions above on 2026-11-23 and has not yet been asked about this addition.
+Found in review of pull request 265, and written there. The owner accepted it
+on 2026-11-24, answering "Keep it?" with "Keep both".
 Decision 2 labels an edge that has no
 qualifier by its predicate, and does not say from which end. A stored edge
 reads subject, predicate, object, and the predicate is the subject's role

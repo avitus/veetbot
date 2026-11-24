@@ -11,6 +11,14 @@ from agent_core.domain.runs import Run
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.ports.policies import PolicyEngine
 
+# The tools the jobs profile judges; every other tool keeps the base profile.
+JOBS_PROFILE_TOOLS: frozenset[str] = frozenset({"job.manage", "cockpit.install"})
+
+
+def job_policy_version(tool_name: str, *, base: LoadedRuleset, publication: LoadedRuleset) -> str:
+    """The policy version a ``JobPolicyEngine`` decision about this tool carries."""
+    return (publication if tool_name in JOBS_PROFILE_TOOLS else base).policy_version
+
 
 def job_publication_ruleset(base: LoadedRuleset) -> LoadedRuleset:
     """Keep unrelated evaluated policy inputs byte-for-byte unchanged."""
@@ -57,7 +65,7 @@ class JobPolicyEngine:
         self, action: ProposedAction, principal: Principal, run: Run
     ) -> PolicyDecision:
         """Use the jobs profile for job.manage and preserve other policy identities."""
-        engine = self.publication if action.name in {"job.manage", "cockpit.install"} else self.base
+        engine = self.publication if action.name in JOBS_PROFILE_TOOLS else self.base
         decision = await engine.evaluate(action, principal, run)
         if (
             action.name == "job.manage"

@@ -10,7 +10,8 @@
   The owner turned the setting on in production for app chats on 2026-11-23;
   the measurements are in Implementation status. That run found that a
   script could not name a tool the way the model is shown it, which decision
-  12 repairs.
+  12 repairs. On 2026-11-24 two production runs failed after an approved
+  script; decision 5 now states the rule that repairs them.
 - Date: 2026-11-21
 - Amends: ADR-0015 (names the tool of decision 1, defines the
   "orchestration-only turn" of decision 3, counts bridged calls against the
@@ -92,7 +93,10 @@ The owner prefers no new external dependency unless one is necessary.
    standard output, standard error, the exit code and the number of bridged
    calls. Bridged results never enter the conversation. The result is
    `EXTERNAL_UNTRUSTED`, and ADR-0277 still carries the trust of earlier
-   bridged results into later bridged calls.
+   bridged results into later bridged calls. Session history is the stored
+   form of the conversation, so it holds no bridged result either: a bridged
+   call is identified under the prefix `bridge:`, its events stay in the log,
+   and the history projection adds no item for it.
 6. **An orchestration-only turn is a step whose every tool call is
    `sandbox.run_code` and whose scripts dispatched at least one bridged
    call.** Such a step refunds one step and one model call through the
@@ -254,9 +258,16 @@ The work is cut into four slices.
      waiting for its socket, and starting Python.
    - **Activated in production, 2026-11-23.** The owner turned the setting
      on for the API and the interactive, async and maintenance workers, which
-     serve app chats. The schedule, surface, notify and call services read
-     their own settings files and stay off, so schedules and inbound surfaces
-     keep `sandbox.run_command`. The release had already built the image.
+     serve app chats. The release had already built the image.
+   - **Corrected on 2026-11-24.** This record said the schedule, surface,
+     notify and call services stay off because they read their own settings
+     files. They never read the setting. A run is offered what the agent
+     version of its session lists. Every schedule that existed on 2026-11-24
+     pins an older version and keeps `sandbox.run_command`. A schedule made
+     since the activation pins the new version, and a new inbound-surface
+     chat takes it too. No inbound-surface chat exists in production. Moving
+     an existing schedule is a re-pin (`scheduling.md`), which the owner
+     decides.
    - **Measured there (gVisor, the production host), four scripts in three
      requests of one chat.** A script with no tool call returned 4.4 s after
      it started, on the first request after the restart. A script with two
@@ -271,10 +282,28 @@ The work is cut into four slices.
      `system_current_time` and was refused as an unknown tool. Its second
      attempt used the dotted name and asked for approval, because it followed
      the first script's output. Decision 12 repairs the name.
-   - **Not done.** A later script of the same run, which needs an approval
-     in production and was not timed. Each request asked for a script in
-     words, so an unprompted choice of a script by a live model is still
-     unobserved.
+   - **Observed there, 2026-11-24.** A request that named twelve cities and
+     did not mention scripts got one script from the model, unasked. It
+     started without a card and took 3.1 s, and the answer was right. The
+     script made one tool call, which the instructions say to make directly.
+   - **Measured there, 2026-11-24.** A request for three scripts ran its
+     first in 2.4 s. The second asked, the owner allowed the request 51 s
+     later, and it ran in 3.6 s in a new claim, 3.0 s of that before its
+     first call arrived. A script after an approval therefore pays the whole
+     start again.
+   - **Found there, 2026-11-24.** That run, and a chat of the owner's three
+     minutes later, failed with an internal error after the approved script
+     finished. Each run's first script had called a tool. Session history
+     kept the results of those calls, so the conversation reloaded after the
+     approval held results with no call, and building the next model request
+     refused it. A run that never paused did not reload and did not fail,
+     and a later request in such a chat lost its earlier turns to
+     compaction instead. The existing end-to-end case used scripts that
+     called nothing before the card. Decision 5 now states the rule, and
+     `session-history@3` rebuilds a stored session without those results.
+   - **Not done.** A later script inside one claim, which the failure cut
+     off before it started. The trajectory export and the skill review
+     transcript still list bridged results; the export is off in production.
 
 ## Consequences
 
@@ -285,6 +314,13 @@ The work is cut into four slices.
   hand a script. Slice 4 measures whether real tools reach it.
 - An approval inside a script holds the sandbox for up to 300 seconds, then
   the run suspends and the script re-executes from the start on resume.
+- Session history changes builder version to `session-history@3`. Each
+  stored session is rebuilt from its events when it is next read, once.
+  A release from before this change projects under version 2. If such a
+  process reads a session, it rebuilds that session under version 2 and the
+  failure can return for it, so rolling back past this change removes the
+  repair. A release restarts every service that reads history, so the two
+  versions run side by side only while those restarts are in progress.
 - A release builds the sandbox image and tags it for production
   (`docs/deployment.md`), so a deployed release already carries the runner
   and the library. A host whose image was built by hand must rebuild it

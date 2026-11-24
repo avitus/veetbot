@@ -254,11 +254,23 @@ async def job_request_approval_for_run(
 class JobRequestGrantAuthorizer:
     """Authorize a job action the owner allowed for the whole request."""
 
-    def __init__(self, *, uow_factory: UnitOfWorkFactory, now: Callable[[], datetime]) -> None:
-        """Keep the store and the clock the checks read."""
+    def __init__(
+        self,
+        *,
+        uow_factory: UnitOfWorkFactory,
+        now: Callable[[], datetime],
+        loaded_policy_version: Callable[[str], str] | None = None,
+    ) -> None:
+        """Keep the store and the clock the checks read.
+
+        ``loaded_policy_version`` names the policy version this process loaded
+        to judge a tool. ``job.manage`` has its own profile (ADR-0268), so one
+        unchanged policy gives the grant's tools two versions.
+        """
 
         self._uow_factory = uow_factory
         self._now = now
+        self._loaded_policy_version = loaded_policy_version
 
     async def authorize(
         self,
@@ -301,7 +313,7 @@ class JobRequestGrantAuthorizer:
                 return _not_covered(approval, "expired")
             if agent_version != approval.agent_version:
                 return _not_covered(approval, "agent_changed")
-            if decision.policy_version != approval.policy_version:
+            if not self._policy_unchanged(approval, action.name, decision.policy_version):
                 return _not_covered(approval, "policy_changed")
             reason = await job_request_not_covered(
                 uow,
@@ -318,6 +330,28 @@ class JobRequestGrantAuthorizer:
             reason_code=JOB_REQUEST_GRANT_AUTHORIZED_REASON,
             authorization_kind=JOB_REQUEST_GRANT_AUTHORIZATION_KIND,
             authorization_ref=str(approval.id),
+        )
+
+    def _policy_unchanged(
+        self, approval: ApprovalRequest, tool_name: str, policy_version: str
+    ) -> bool:
+        """Whether the policy that judged the card is the one judging this action.
+
+        ADR-0344 decision 2 crosses tools that two profiles of one policy
+        judge, so the card's version and the action's may differ. Each must
+        then be the version this process loaded for its own tool. An edit to
+        the policy moves both profiles' versions, so after one the card's is
+        no longer the loaded version and the grant ends (decision 5).
+        """
+
+        if policy_version == approval.policy_version:
+            return True
+        loaded = self._loaded_policy_version
+        return (
+            loaded is not None
+            and approval.tool_name is not None
+            and loaded(approval.tool_name) == approval.policy_version
+            and loaded(tool_name) == policy_version
         )
 
 

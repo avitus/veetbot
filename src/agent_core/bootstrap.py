@@ -720,7 +720,7 @@ from agent_core.persona.boundaries import persona_boundaries
 from agent_core.persona.preview import PersonaPreviewer
 from agent_core.policy.advised import AdvisedPolicyEngine
 from agent_core.policy.engine import DeterministicPolicyEngine
-from agent_core.policy.jobs import JobPolicyEngine, job_publication_ruleset
+from agent_core.policy.jobs import JobPolicyEngine, job_policy_version, job_publication_ruleset
 from agent_core.policy.judgment_advisor import JudgmentPolicyAdvisor
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
@@ -5223,8 +5223,16 @@ async def _compose(
             standing_authorizers.append(JobGrantAuthorizer(uow_factory))
             standing_authorizers.append(WidgetInstallationAuthorizer(uow_factory))
             # ADR-0344: one approval for a request that changes a saved job.
+            # Its tools are judged under two profiles of the one loaded policy.
+            assert job_ruleset is not None
             standing_authorizers.append(
-                JobRequestGrantAuthorizer(uow_factory=uow_factory, now=clock.now)
+                JobRequestGrantAuthorizer(
+                    uow_factory=uow_factory,
+                    now=clock.now,
+                    loaded_policy_version=partial(
+                        job_policy_version, base=ruleset, publication=job_ruleset
+                    ),
+                )
             )
         if browser_provider is not None:
             standing_authorizers.append(

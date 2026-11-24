@@ -15,6 +15,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from agent_core.domain.events import BRIDGED_CALL_ID_PREFIX
+
 type BridgeDispatch = Callable[[str, dict[str, Any], str], Awaitable[dict[str, Any]]]
 
 logger = logging.getLogger(__name__)
@@ -34,7 +36,7 @@ def _bind_private_socket(bound_socket: socket.socket, bind_path: str) -> None:
 
 def bridge_call_id(script_hash: str, ordinal: int) -> str:
     material = script_hash.encode("ascii") + b"\x00" + str(ordinal).encode("ascii")
-    return "bridge:" + hashlib.sha256(material).hexdigest()[:32]
+    return BRIDGED_CALL_ID_PREFIX + hashlib.sha256(material).hexdigest()[:32]
 
 
 class BridgeProtocolError(ValueError):
