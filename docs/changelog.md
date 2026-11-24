@@ -4,6 +4,17 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-23 — Three repairs where the code disagreed with its documents
+
+- `agent run --idempotency-key`, retried after its run was approved and
+  finished, prints the final message instead of the run identifier.
+- Listing the sign-in ceremonies of a website profile that is not yours
+  answers 404 instead of an empty list.
+- Deleting a memory now answers with the header
+  `Cache-Control: private, no-store`.
+- In the Apple client, a withdrawn "Allow for this request" on a job or script
+  card names that card's own button, Approve once, instead of Allow once.
+
 ## 2026-11-23 — A question about a relative no longer hides that relative's facts (ADR-0348)
 
 - When recall decides a question is about one person, it leaves out every fact

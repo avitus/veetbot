@@ -445,6 +445,8 @@ class BrowserProfileManagementService:
     ) -> builtins.list[BrowserAuthenticationView]:
         require_scope(principal, "browser.profile.read")
         async with self._uow_factory() as uow:
+            # Another principal's profile is not found, like an unknown one.
+            await uow.browser_profiles.get(profile_id, principal)
             records = await uow.browser_authentications.list(principal, profile_id=profile_id)
         return [_authentication_view(record) for record in records]
 

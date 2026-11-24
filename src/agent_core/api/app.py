@@ -1948,7 +1948,7 @@ def create_app(
     ) -> Response:
         """Delete one belief through the governed path; its statement cannot re-form."""
         await services.memory.delete(authenticated, memory_id, ceiling=ceiling, key=idempotency_key)
-        return Response(status_code=204)
+        return Response(status_code=204, headers={"Cache-Control": PRIVATE_NO_STORE})
 
     @memory_router.post(
         "/v1/memories/{memory_id}/review",
