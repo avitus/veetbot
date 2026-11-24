@@ -11,7 +11,10 @@ title: Current Milestone
   ordinary pipeline, each counted and each still asking where it would ask. It is
   default off behind `AGENT_CODE_MODE_ENABLED`. Pull requests 263 and 264
   delivered it on 2026-11-23, and the owner turned it on in production for app
-  chats that day. Schedules made before that day keep the command tool. On
+  chats that day, and had the nine model-run schedules re-pinned to it on
+  2026-11-24; a scheduled run is still offered no script tool until its
+  schedule is approved for scripts (decision 13, built on `dev` behind
+  `AGENT_SCHEDULE_SCRIPTS_ENABLED`, not delivered). On
   2026-11-24 two production runs failed after an approved script, and the
   repair keeps a script's own calls out of session history. No milestone or
   gate moves.

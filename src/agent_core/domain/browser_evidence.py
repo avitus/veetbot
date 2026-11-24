@@ -15,7 +15,9 @@ from agent_core.domain.browser_extraction import (
 from agent_core.domain.web import is_public_https_url
 
 if TYPE_CHECKING:
-    from agent_core.domain.browser import BrowserObservation
+    from agent_core.domain.browser import BrowserCondition, BrowserObservation
+
+MAX_OBSERVATION_URL_BYTES = 4 * 1024
 
 
 class BrowserTextEvidence(BaseModel):
@@ -172,3 +174,61 @@ def evidence_status(
                 lines = lines[:-1]
         matches = sum(" ".join(line.split()) == " ".join(evidence.text.split()) for line in lines)
     return "ambiguous" if matches > 1 else "satisfied" if matches == 1 else "not_observed"
+
+
+def _control_status(
+    observation: BrowserObservation, condition: BrowserCondition
+) -> Literal["satisfied", "not_observed", "ambiguous"]:
+    matches = [
+        element
+        for element in observation.elements
+        if element.role == condition.role and element.name == condition.name
+    ]
+    if len(matches) > 1:
+        return "ambiguous"
+    if not matches:
+        return "not_observed"
+    target = matches[0]
+    if condition.disabled is not None and target.disabled != condition.disabled:
+        return "not_observed"
+    if condition.checked is not None and target.checked != condition.checked:
+        return "not_observed"
+    return "satisfied"
+
+
+def browser_condition_status(
+    observation: BrowserObservation,
+    condition: BrowserCondition,
+    *,
+    row_scope: BrowserExtractionScope = "main_document",
+    projected: bool = False,
+) -> Literal["satisfied", "not_observed", "ambiguous", "failed"]:
+    """Evaluate one capture without polling or substituting older evidence."""
+    if observation.interruption is not None:
+        return "not_observed"
+    if projected:
+        for evidence in (condition.evidence, condition.failure_evidence):
+            if evidence is None:
+                continue
+            if evidence.kind == "text" and observation.text_coverage is None:
+                return "not_observed"
+            if (
+                evidence.kind == "location"
+                and len(observation.url.encode("utf-8")) >= MAX_OBSERVATION_URL_BYTES - 3
+            ):
+                # Projection may discard up to three bytes of a split UTF-8
+                # character without reporting URL truncation. Refuse that edge.
+                return "not_observed"
+    success = (
+        evidence_status(observation, condition.evidence, row_scope=row_scope)
+        if condition.evidence is not None
+        else _control_status(observation, condition)
+    )
+    failure = (
+        evidence_status(observation, condition.failure_evidence)
+        if condition.failure_evidence is not None
+        else "not_observed"
+    )
+    if failure == "ambiguous" or (failure == "satisfied" and success != "not_observed"):
+        return "ambiguous"
+    return "failed" if failure == "satisfied" else success

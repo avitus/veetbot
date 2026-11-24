@@ -1,3 +1,6 @@
+# ADR-0350: Owner-authorized W4/W6 continuation adds reviewed opt-in destination
+# rechecks within each later target capture. Existing defaults, authority and
+# four-window bounds remain; no deployed recipe, milestone or gate moves.
 # ADR-0347: Owner-authorized W4/W6 continuation adds optional reviewed
 # navigation completion checks through bounded ordinary observations. Later
 # steps require positive evidence; no deployed recipe, milestone or gate moves.
@@ -17,8 +20,12 @@
 # script could not name a tool the way the model is shown it, which decision
 # 12 repairs. Pull request 263 delivered code mode and the request approval,
 # and pull request 264 decision 12, both on 2026-11-23, each with hosted CI
-# passing and every review thread resolved. Schedules made before the
-# activation keep the command tool. On 2026-11-24 two production runs failed
+# passing and every review thread resolved. On 2026-11-24 the owner had the
+# nine model-run schedules re-pinned to the activated agent version; job
+# schedules run no model. A scheduled run is offered no script tool until its
+# schedule is approved for scripts at setup (decision 13), which is built
+# behind the default-off `AGENT_SCHEDULE_SCRIPTS_ENABLED` and not delivered.
+# On 2026-11-24 two production runs failed
 # after an approved script: session history held the results of the script's
 # own calls, which no model request may carry. `session-history@3` leaves
 # them out. No milestone or gate moves.

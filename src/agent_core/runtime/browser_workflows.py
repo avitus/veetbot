@@ -16,6 +16,7 @@ from agent_core.domain.browser import (
     BrowserProfileStatus,
     browser_origin,
 )
+from agent_core.domain.browser_evidence import browser_condition_status
 from agent_core.domain.browser_workflows import BrowserWorkflowCatalog, BrowserWorkflowRecipe
 from agent_core.domain.errors import (
     ConflictError,
@@ -51,6 +52,7 @@ def _definition(recipe: BrowserWorkflowRecipe) -> str:
         "precondition": None,
         "minimum_rows": 0,
         "require_complete": False,
+        "recheck_destination": False,
     }
     excluded = {
         "steps": {
@@ -562,16 +564,21 @@ class BrowserWorkflowRunner:
                         ),
                         None,
                     )
-                    # Only this first window can show the reviewed destination in the
-                    # capture that names the target. A focus or continuation read is a
-                    # fresh capture of the live page: the provider ties it to the
-                    # capture before it and to the same document, but compares no
-                    # content. None is issued for this action, and none is accepted.
-                    status = (
-                        observed.condition.status
-                        if asked == destination and observed.condition is not None
-                        else None
-                    )
+                    status = None
+                    if asked == destination and observed.condition is not None:
+                        status = observed.condition.status
+                    elif (
+                        step.recheck_destination
+                        and asked is not None
+                        and any(key in asked for key in ("region_ref", "after", "cursor"))
+                    ):
+                        # The later capture must prove its own destination. Its
+                        # condition field and historical evidence cannot stand in.
+                        status = browser_condition_status(
+                            observed,
+                            BrowserCondition.model_validate(destination["wait_for"]),
+                            projected=True,
+                        )
                     if status != "satisfied":
                         await self._stop(
                             context,
@@ -596,7 +603,7 @@ class BrowserWorkflowRunner:
                             context, state, "ambiguous_region" if regions else "region_not_observed"
                         )
                         return None
-                    if destination is not None:
+                    if destination is not None and not step.recheck_destination:
                         # The region's controls need a focus read, which cannot carry the
                         # destination evidence: as for any region target read without focus.
                         await self._stop(context, state, "unverified")
@@ -622,7 +629,7 @@ class BrowserWorkflowRunner:
                     if not targets:
                         continuation = (
                             None
-                            if destination is not None
+                            if destination is not None and not step.recheck_destination
                             else _control_continuation(result, observed)
                         )
                         if continuation is None:

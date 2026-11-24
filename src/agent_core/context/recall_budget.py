@@ -4,10 +4,10 @@ import asyncio
 import hashlib
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from uuid import UUID
 
-from agent_core.domain.memory import RecallQuery, RecallResult
+from agent_core.domain.memory import RecallProfile, RecallQuery, RecallResult
 from agent_core.domain.messages import (
     ContextRecallRanking,
     ConversationItem,
@@ -32,6 +32,7 @@ class RecallAllowance:
     items: int = 20
     exclude_ids: tuple[UUID, ...] = ()
     preserve_identity: bool = False
+    extra_fact_slots: int = 0
 
     def bound(self, query: RecallQuery) -> RecallQuery | None:
         """Fit recall to remaining capacity while preserving independent identity discovery."""
@@ -41,6 +42,13 @@ class RecallAllowance:
             update={
                 "budget_tokens": min(query.budget_tokens, self.tokens),
                 "max_items": min(query.max_items, self.items),
+                "extra_fact_slots": self.extra_fact_slots
+                if query.profile is RecallProfile.TASK
+                and query.candidate_selection == "relevance"
+                and query.text
+                and query.max_items == FULL_ALLOWANCE.items
+                and query.budget_tokens == FULL_ALLOWANCE.tokens
+                else 0,
                 "exclude_ids": tuple(sorted(set(query.exclude_ids) | set(self.exclude_ids))),
                 **(
                     {
@@ -208,6 +216,9 @@ def select_search_results(
                 }
             )
             omitted = True
+    if blocks == 0 and reserve == AUTOMATIC_RESERVE:
+        # No deliberate block spent any of this turn's shared evidence budget.
+        allowance = replace(allowance, extra_fact_slots=20)
     return result, allowance, omitted
 
 

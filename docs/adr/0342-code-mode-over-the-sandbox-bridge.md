@@ -11,7 +11,10 @@
   the measurements are in Implementation status. That run found that a
   script could not name a tool the way the model is shown it, which decision
   12 repairs. On 2026-11-24 two production runs failed after an approved
-  script; decision 5 now states the rule that repairs them.
+  script; decision 5 now states the rule that repairs them. The same day the
+  owner decided that a schedule's scripts are approved once at setup
+  (decision 13), which is built behind its own default-off setting and not
+  delivered.
 - Date: 2026-11-21
 - Amends: ADR-0015 (names the tool of decision 1, defines the
   "orchestration-only turn" of decision 3, counts bridged calls against the
@@ -225,6 +228,32 @@ The owner prefers no new external dependency unless one is necessary.
       did not already reach.
     - The library in the sandbox is unchanged, so the image needs no rebuild.
 
+13. **A schedule's scripts are approved once, at setup.** The owner's words
+    on 2026-11-24: "I don't want to have to approve a scheduled run every
+    time. It should be approved once at setup."
+    - A scheduled run holds exactly the scopes its schedule requests. No
+      schedule requested `sandbox.execute`, so no scheduled run was offered
+      either sandbox tool. A schedule approved for scripts requests that
+      scope, and the schedule role must hold it.
+    - The approval is a field of the schedule revision, `scripts_approved`.
+      `schedule.create` records it, requests the scope and says so on its
+      card when the agent it pins has the script tool. The model supplies
+      neither. A full-definition update can add or remove it.
+    - In that schedule's own top-level run, a `sandbox.run_code` call whose
+      only reason to ask is outside content starts without a card. The run is
+      tied to its schedule by the stored occurrence link, the agent version
+      must be the revision's, and the newest user message must be trusted.
+    - Unlike the request approval of decision 11 it does not end after two
+      hours or with a policy version. It lasts as long as the revision that
+      holds it is the one a run was materialized from.
+    - It covers starting a script. Each call a script makes is still decided
+      by policy under its own trust, so a write, a send or a delete asks, and
+      an unattended run then waits as before. `sandbox.run_command` and a
+      profile that asks before any code execution are not covered.
+    - It is composed only while `AGENT_CODE_MODE_ENABLED` is on, and
+      `schedule.create` records it only while
+      `AGENT_SCHEDULE_SCRIPTS_ENABLED` is on as well.
+
 ## Implementation status
 
 The work is cut into four slices.
@@ -262,12 +291,22 @@ The work is cut into four slices.
    - **Corrected on 2026-11-24.** This record said the schedule, surface,
      notify and call services stay off because they read their own settings
      files. They never read the setting. A run is offered what the agent
-     version of its session lists. Every schedule that existed on 2026-11-24
-     pins an older version and keeps `sandbox.run_command`. A schedule made
-     since the activation pins the new version, and a new inbound-surface
-     chat takes it too. No inbound-surface chat exists in production. Moving
-     an existing schedule is a re-pin (`scheduling.md`), which the owner
-     decides.
+     version of its session lists and its scopes allow. Every schedule that
+     existed on 2026-11-24 pinned an older version. A schedule made since the
+     activation pins the new version, and a new inbound-surface chat takes it
+     too. No inbound-surface chat exists in production. Moving an existing
+     schedule is a re-pin (`scheduling.md`), which the owner decides.
+   - **Schedules re-pinned, 2026-11-24.** The owner had the nine active
+     schedules that run a model moved to the activated version. Each wrote
+     one new revision and kept its next firing time. The four active job
+     schedules run no model and were left on their versions.
+   - **Corrected again, 2026-11-24.** The re-pin gave those schedules newer
+     instructions and no script tool. A scheduled run holds only the scopes
+     its schedule requests, none of the nine requests `sandbox.execute`, and
+     the schedule role does not hold it. Production plans confirm that no
+     scheduled run has been offered either sandbox tool. So a scheduled run
+     neither writes a script nor waits for a script approval. Decision 13 is
+     what gives a schedule scripts.
    - **Measured there (gVisor, the production host), four scripts in three
      requests of one chat.** A script with no tool call returned 4.4 s after
      it started, on the first request after the restart. A script with two
@@ -301,9 +340,26 @@ The work is cut into four slices.
      compaction instead. The existing end-to-end case used scripts that
      called nothing before the card. Decision 5 now states the rule, and
      `session-history@3` rebuilds a stored session without those results.
-   - **Not done.** A later script inside one claim, which the failure cut
-     off before it started. The trajectory export and the skill review
-     transcript still list bridged results; the export is off in production.
+   - **Repaired and measured there, 2026-11-24.** Pull request 266
+     delivered the rule that day. The same request, sent again in the chat
+     that had failed, ran its three scripts to the answer. The second ran in
+     2.8 s after the approval. The third started under the request approval
+     with no card and ran in 1.1 s, which is the cost of a later script
+     inside one claim. The chat's history was rebuilt under
+     `session-history@3` and held no bridged result, and the request was
+     assembled without the compaction the earlier one needed.
+   - **Not done.** The trajectory export and the skill review transcript
+     still list bridged results; the export is off in production.
+5. **A schedule's script approval (decision 13).** Implemented offline on
+   2026-11-24 behind the default-off `AGENT_SCHEDULE_SCRIPTS_ENABLED`: the
+   revision field and its validation, the standing authorizer, and the
+   `schedule.create` card. On `dev`, not delivered.
+   - **Not done.** Production needs three steps the owner decides: the
+     release, `sandbox.execute` in the schedule role's scopes, and the
+     setting. Recording the approval on the nine re-pinned schedules is a
+     full-definition update of each after that. The app's plain-words
+     schedule form does not offer the approval, and no client shows whether a
+     schedule holds it.
 
 ## Consequences
 
@@ -314,6 +370,15 @@ The work is cut into four slices.
   hand a script. Slice 4 measures whether real tools reach it.
 - An approval inside a script holds the sandbox for up to 300 seconds, then
   the run suspends and the script re-executes from the start on resume.
+- A schedule approved for scripts runs model-written code unattended after
+  reading outside content, with no card. That is the loosening the owner
+  asked for in decision 13. The script still has no network and no
+  credentials, and policy still decides each call it makes.
+- A schedule that requests `sandbox.execute` stops running if the schedule
+  role does not hold that scope, because materialization fails closed.
+- Before creating the schedule, the tool checks its invocation's stored card.
+  A legacy card carries no script approval. A change in script authority
+  while the card is pending requires a fresh approval.
 - Session history changes builder version to `session-history@3`. Each
   stored session is rebuilt from its events when it is next read, once.
   A release from before this change projects under version 2. If such a

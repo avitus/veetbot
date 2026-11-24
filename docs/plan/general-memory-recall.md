@@ -988,3 +988,11 @@ The owner-requested repairs and targeted audit are complete. Production was not
 modified. Existing chats preserve their pinned tool and instruction versions;
 new chats select these defaults after release. Release review, hosted CI and
 production delivery remain separate from this verified dev submission.
+
+## Source text comparison on the owner question set
+
+[ADR-0353](../adr/0353-measure-weak-semantic-matches.md) records the
+paired test of the text supplied to the local encoder. Scoring the same
+permitted semantic candidates from their statements alone preserved 109 of
+114 passing questions and recovered none of the four weak matches. The
+reader keeps its existing source encoding.

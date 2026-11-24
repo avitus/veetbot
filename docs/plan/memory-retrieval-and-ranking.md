@@ -511,7 +511,21 @@ be explained beat an unexplainable model at this stage.
 Below a **relevance floor**, candidates are dropped even if the budget is unspent.
 Filling the budget is not the objective.
 
+[ADR-0352](../adr/0352-scale-multiword-recall-to-available-evidence.md)
+proposes scaling multi-word lexical coverage to the strongest permitted match
+within admitted hybrid relevance reranking. A single shared term keeps its
+absolute query coverage. The comparison preserves the existing item and token
+limits on both paths.
+
 ### 6. Collapse and diversify
+
+[ADR-0351](../adr/0351-ground-inferred-state-in-the-requested-subject.md) proposes
+a subject check for current yes-or-no state questions. An inferred provisional
+recurring state that answers the same predicate about a differently qualified
+subject is withheld when only the final noun matches. The assertion must name
+its stored subject. Linked conflicts, historical reads and explicit identity
+lookups retain their existing semantics. Retained search receipts undergo the
+same subject check on revalidation.
 
 - **Supersession collapse.** Group by `(subject, belief_type, predicate key)` and keep
   the belief valid at `as_of`. Never surface a belief alongside the one it replaced.

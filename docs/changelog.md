@@ -4,6 +4,22 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-24 — A schedule's scripts can be approved once, at setup (ADR-0342)
+
+- Built and not delivered: it is on `dev` behind a setting that is off.
+- When you set up a schedule in chat, its card will say "its runs may run
+  scripts without asking". Approving the card approves that schedule's
+  scripts for good. Its runs then start a script without a card, even after
+  reading the web. Each tool call a script makes is still judged as before,
+  so a send, a write or a delete still asks.
+- Correction to the entry below: a scheduled run has never been offered the
+  script tool or the command tool, because a schedule does not carry the
+  sandbox permission. Moving your nine schedules to the newer agent version
+  gave them newer instructions and no scripts, so their runs do not wait for
+  a script approval. A schedule gets scripts only through this approval.
+- Not built: the app's plain-words schedule form does not offer the approval,
+  and the app does not show which schedules hold it.
+
 ## 2026-11-24 — A chat no longer fails after you approve a script (ADR-0342)
 
 - Two chats failed today with an internal error right after an approved
@@ -19,10 +35,15 @@ title: Changelog
 - The same fault had a quieter effect: a later message in a chat that had run
   a tool-calling script lost its earlier turns to a summary. That stops too.
 - Correction: schedules, Telegram and calls do not have their own switch for
-  scripts. A schedule made before 2026-11-23 keeps the command tool until it
-  is re-pinned. One made since has the script tool.
+  scripts. At your request the nine schedules that run a model were
+  re-pinned to the newer agent version on 2026-11-24; the four job schedules
+  run no model and were left alone. This entry first said a re-pinned
+  schedule has the script tool. It does not; see the entry above.
 - Asked a twelve-city time question with no mention of scripts, the model
   wrote a script by itself and answered correctly.
+- Delivered the same day. The request that had failed then ran all three of
+  its scripts in production: 2.8 s for the one you approved and 1.1 s for the
+  one after it, which needed no card.
 
 ## 2026-11-24 — One approval for a job request now covers the job's later run (ADR-0344)
 

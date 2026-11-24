@@ -710,3 +710,51 @@ async def test_folded_words_rank_a_board_seat_claim_above_a_one_word_flood() -> 
     async with factory() as uow:
         trace = await uow.traces.get(recalled.trace_id, principal())
     assert trace.retrieval_policy_version.startswith("retrieval@8")
+
+
+@pytest.mark.parametrize("long_facts", [False, True], ids=["item-limit", "token-limit"])
+async def test_short_ranked_facts_fill_the_automatic_recall_block(
+    tmp_path: Path, long_facts: bool
+) -> None:
+    """Short eligible facts can use spare tokens, up to forty whole entries."""
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last"),
+    ) as app:
+        session_id = await app.sessions.create()
+        detail = " Details of the measurement." * 20 if long_facts else ""
+        statements = [f"Orchard sample {index:02d} is ready.{detail}" for index in range(48)]
+        async with app.uow_factory() as uow:
+            for index, statement in enumerate(statements):
+                record = memory(belief_id=28000 + index, statement=statement).model_copy(
+                    update={
+                        "tenant_id": app.principal.tenant_id,
+                        "principal_id": app.principal.principal_id,
+                        "source_session_id": session_id,
+                        "subject": f"orchard sample {index:02d}",
+                        "store_position": index + 1,
+                    }
+                )
+                await uow.memories.upsert_belief(record)
+        run_id = await app.runs.submit("Which orchard samples are ready?", session_id)
+        await app.runs.wait_terminal(run_id)
+        async with app.uow_factory() as uow:
+            traces = await uow.traces.for_turn(run_id)
+        (task_trace,) = [trace for trace in traces if trace.query.profile is RecallProfile.TASK]
+        assert len(task_trace.rendered.encode()) <= 2_000 * 4
+        provider = app.executor._model_provider
+        assert isinstance(provider, FakeModelProvider)
+        text = "\n".join(
+            part.text
+            for item in provider.requests[-1].conversation
+            if isinstance(item, UserMessage)
+            for part in item.content
+            if isinstance(part, TextPart)
+        )
+        delivered = sum(statement in text for statement in statements)
+        assert delivered == len(task_trace.returned)
+        if long_facts:
+            assert 0 < delivered < 20
+        else:
+            assert delivered == 40

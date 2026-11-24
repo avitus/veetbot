@@ -241,6 +241,9 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   and `agent_core.tools.code`, over `agent_core.application.code_drafts` and
   `code_proposals`, let the agent read a run and read, draft, test and propose
   changes to the release's own source (`AGENT_CODE_TOOLS_ENABLED`, ADR-0281).
+- `agent_core.application.schedule_script_approvals` lets a schedule's own
+  run start a script without a card once the owner approved the schedule's
+  scripts at setup (ADR-0342 decision 13, `AGENT_SCHEDULE_SCRIPTS_ENABLED`).
 - `agent_core.tools.sandbox_run_code` is code mode behind
   `AGENT_CODE_MODE_ENABLED` (ADR-0342): one model-written script runs in the
   run's sandbox under `agent_core.execution.code_runner`, and each tool call it

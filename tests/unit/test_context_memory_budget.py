@@ -467,3 +467,29 @@ async def test_retention_spends_automatic_slots_on_evidence_missing_from_search(
     assert "Current rent baseline" in second.model_dump_json()
     assert retriever.queries[-1].exclude_ids == tuple(UUID(int=i) for i in (1, 2, 3))
     assert retriever.queries[-1].max_items == 5
+
+
+def test_extra_fact_slots_require_an_unspent_current_automatic_allocation() -> None:
+    from agent_core.context.recall_budget import AUTOMATIC_RESERVE, NO_RESERVE
+    from tests.contract.memory_fixtures import recall_query
+
+    query = recall_query(max_items=20, budget_tokens=2000).model_copy(
+        update={"candidate_selection": "relevance"}
+    )
+    _, fresh, _ = select_search_results([], reserve=AUTOMATIC_RESERVE)
+    _, legacy, _ = select_search_results([], reserve=NO_RESERVE)
+    _, shared, _ = select_search_results(
+        search_result("lookup", text="A prior result", tokens=30, items=1),
+        reserve=AUTOMATIC_RESERVE,
+    )
+    for allowance, request, expected in [
+        (fresh, query, 20),
+        (legacy, query, 0),
+        (shared, query, 0),
+        (fresh, query.model_copy(update={"max_items": 4}), 0),
+        (fresh, query.model_copy(update={"budget_tokens": 500}), 0),
+        (fresh, query.model_copy(update={"candidate_selection": "recent"}), 0),
+    ]:
+        bounded = allowance.bound(request)
+        assert bounded is not None
+        assert bounded.extra_fact_slots == expected

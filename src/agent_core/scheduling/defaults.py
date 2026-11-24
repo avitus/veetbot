@@ -67,6 +67,7 @@ def derived_definition(
     call_plan: CallPlan | None = None,
     notify: ScheduleNotify = ScheduleNotify.EVERY_REPORT,
     mcp_servers: frozenset[str] = frozenset(),
+    scripts_approved: bool = False,
 ) -> ScheduleDefinition:
     """A complete definition whose pins and limits the server chose."""
 
@@ -86,6 +87,7 @@ def derived_definition(
         call_plan=call_plan,
         notify=notify,
         mcp_servers=mcp_servers,
+        scripts_approved=scripts_approved,
     )
 
 

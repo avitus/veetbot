@@ -18,6 +18,7 @@ from agent_core.domain.browser import (
     BrowserSemanticRegion,
     BrowserTextCoverage,
 )
+from agent_core.domain.browser_evidence import MAX_OBSERVATION_URL_BYTES
 from agent_core.domain.browser_extraction import BrowserExtractionResult
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import TrustLevel
@@ -27,7 +28,7 @@ from agent_core.ports.browser import BrowserProvider
 
 MAX_TEXT_BYTES = 256 * 1024
 MAX_PROVIDER_BYTES = 128
-MAX_URL_BYTES = 4 * 1024
+MAX_URL_BYTES = MAX_OBSERVATION_URL_BYTES
 MAX_TITLE_BYTES = 4 * 1024
 MAX_REVISION_BYTES = 512
 ELEMENT_SCHEMA: dict[str, Any] = {

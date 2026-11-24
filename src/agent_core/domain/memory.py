@@ -1147,6 +1147,9 @@ class RecallQuery(BaseModel):
     # An overview group held more people than one overview reads (ADR-0259).
     people_overflow: bool = False
     max_items: PositiveInt
+    # Fresh automatic recall may pack more already-ranked beliefs. Candidate
+    # discovery, People reservations and attention quotas use the base limit.
+    extra_fact_slots: int = Field(default=0, ge=0, le=20, exclude_if=lambda slots: slots == 0)
     min_score: float = Field(ge=0, le=1)
     # The recall delta bounds a query by the store position a session froze its
     # snapshot at, so a belief written since is a query result rather than

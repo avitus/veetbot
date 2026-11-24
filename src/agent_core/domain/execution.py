@@ -12,6 +12,8 @@ from uuid import UUID
 
 # The runtime names this tool to recognize an orchestration-only step (ADR-0342).
 SANDBOX_RUN_CODE_TOOL_NAME: Final = "sandbox.run_code"
+# The scope both sandbox tools require; a schedule approved for scripts requests it.
+SANDBOX_EXECUTE_SCOPE = "sandbox.execute"
 
 
 class ChangeKind(StrEnum):

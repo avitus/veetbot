@@ -431,6 +431,30 @@ scheduler seed. Other actions require ordinary approval or an applicable grant.
 The native schedule detail offers that update as its Website access picker
 (ADR-0154).
 
+### Scripts approved at setup (ADR-0342 decision 13)
+
+A scheduled run holds exactly its schedule's requested scopes, so it is
+offered `sandbox.run_code` only when the schedule requests `sandbox.execute`.
+Nobody is there to answer a card, so the approval of a schedule's scripts is
+given once, at setup, and stored on the revision as `scripts_approved`
+(absent while false).
+
+`ScheduleService` refuses a definition with `scripts_approved` unless it
+requests `sandbox.execute` (`schedule.scripts_scope_required`) and its pinned
+agent version lists the script tool (`schedule.scripts_unavailable`). A job
+schedule cannot hold it. With `AGENT_SCHEDULE_SCRIPTS_ENABLED` on,
+`schedule.create` requests the scope and records the approval when the agent
+it pins has the script tool, and its card says so. Before creation the tool
+checks the stored card for that invocation. If the script authority has
+changed, the owner must approve a fresh proposal. Conversational
+`schedule.update` keeps the approval with the other pins; the full-definition
+update carries it or drops it.
+
+The schedule role must hold `sandbox.execute` before any schedule requests
+it. Materialization fails closed for a scope the role does not hold, as the
+rules above say, so such a schedule would stop running. What the approval
+permits in a run is defined in `tool-system.md`, "Approval".
+
 ## Sessions, context, and results
 
 Each materialized occurrence creates a dedicated session and exactly one run.
