@@ -6,8 +6,10 @@ title: Changelog
 
 ## 2026-11-24 — A schedule's scripts can be approved once, at setup (ADR-0342)
 
-- Built and not delivered: it is on `dev` behind a setting that is off.
-- When you set up a schedule in chat, its card will say "its runs may run
+- Delivered and turned on in production on 2026-11-24. Your nine schedules
+  that run a model hold the approval. None has run under it yet; the first is
+  the weekday briefing on 2026-11-25.
+- When you set up a schedule in chat, its card says "its runs may run
   scripts without asking". Approving the card approves that schedule's
   scripts for good. Its runs then start a script without a card, even after
   reading the web. Each tool call a script makes is still judged as before,

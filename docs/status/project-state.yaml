@@ -23,8 +23,10 @@
 # passing and every review thread resolved. On 2026-11-24 the owner had the
 # nine model-run schedules re-pinned to the activated agent version; job
 # schedules run no model. A scheduled run is offered no script tool until its
-# schedule is approved for scripts at setup (decision 13), which is built
-# behind the default-off `AGENT_SCHEDULE_SCRIPTS_ENABLED` and not delivered.
+# schedule is approved for scripts at setup (decision 13), behind the
+# default-off `AGENT_SCHEDULE_SCRIPTS_ENABLED`. Pull request 267 delivered it
+# on 2026-11-24; the owner turned it on in production that day and had the
+# approval recorded on the nine schedules. None has run under it yet.
 # On 2026-11-24 two production runs failed
 # after an approved script: session history held the results of the script's
 # own calls, which no model request may carry. `session-history@3` leaves

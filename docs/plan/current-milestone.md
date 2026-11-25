@@ -12,9 +12,11 @@ title: Current Milestone
   default off behind `AGENT_CODE_MODE_ENABLED`. Pull requests 263 and 264
   delivered it on 2026-11-23, and the owner turned it on in production for app
   chats that day, and had the nine model-run schedules re-pinned to it on
-  2026-11-24; a scheduled run is still offered no script tool until its
-  schedule is approved for scripts (decision 13, built on `dev` behind
-  `AGENT_SCHEDULE_SCRIPTS_ENABLED`, not delivered). On
+  2026-11-24; a scheduled run is offered no script tool until its
+  schedule is approved for scripts (decision 13, behind
+  `AGENT_SCHEDULE_SCRIPTS_ENABLED`). Pull request 267 delivered that approval
+  on 2026-11-24, and the owner turned it on in production and had it recorded
+  on the nine schedules that day; none has run under it yet. On
   2026-11-24 two production runs failed after an approved script, and the
   repair keeps a script's own calls out of session history. No milestone or
   gate moves.

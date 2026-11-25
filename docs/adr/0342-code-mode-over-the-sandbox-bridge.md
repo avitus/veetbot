@@ -13,8 +13,8 @@
   12 repairs. On 2026-11-24 two production runs failed after an approved
   script; decision 5 now states the rule that repairs them. The same day the
   owner decided that a schedule's scripts are approved once at setup
-  (decision 13), which is built behind its own default-off setting and not
-  delivered.
+  (decision 13). Pull request 267 delivered it behind its own default-off
+  setting that day, and the owner turned it on in production.
 - Date: 2026-11-21
 - Amends: ADR-0015 (names the tool of decision 1, defines the
   "orchestration-only turn" of decision 3, counts bridged calls against the
@@ -353,13 +353,20 @@ The work is cut into four slices.
 5. **A schedule's script approval (decision 13).** Implemented offline on
    2026-11-24 behind the default-off `AGENT_SCHEDULE_SCRIPTS_ENABLED`: the
    revision field and its validation, the standing authorizer, and the
-   `schedule.create` card. On `dev`, not delivered.
-   - **Not done.** Production needs three steps the owner decides: the
-     release, `sandbox.execute` in the schedule role's scopes, and the
-     setting. Recording the approval on the nine re-pinned schedules is a
-     full-definition update of each after that. The app's plain-words
-     schedule form does not offer the approval, and no client shows whether a
-     schedule holds it.
+   `schedule.create` card. Pull request 267 delivered it the same day, with
+   the check that binds the approval to the stored card.
+   - **Activated in production, 2026-11-24.** The owner added
+     `sandbox.execute` to the schedule role's scopes and restarted the
+     schedule service, then turned the setting on and restarted the API and
+     the three workers. The running schedule service and async worker were
+     read back and hold the new values. The nine model-run schedules then
+     each took one full-definition update that added the scope and the
+     approval; each kept its agent version and its next firing time. The four
+     job schedules were left alone and fired on time after the restart.
+   - **Not yet observed.** No approved schedule has run. The first is the
+     weekday briefing on the morning of 2026-11-25.
+   - **Not done.** The app's plain-words schedule form does not offer the
+     approval, and no client shows whether a schedule holds it.
 
 ## Consequences
 
