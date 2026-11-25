@@ -328,7 +328,9 @@ public final class ScheduleViewModel: ObservableObject {
 
     /// "Run scripts without asking": the owner approves a schedule's scripts
     /// once, because nobody is there to answer a card while it runs.
-    public func setRunsScriptsWithoutAsking(_ scheduleID: UUID, _ approved: Bool) async {
+    public func setRunsScriptsWithoutAsking(
+        _ scheduleID: UUID, _ approved: Bool, reviewedRevision: Int
+    ) async {
         guard lifecycleChangingIDs.insert(scheduleID).inserted else { return }
         defer { lifecycleChangingIDs.remove(scheduleID) }
         lifecycleErrors[scheduleID] = nil
@@ -336,10 +338,12 @@ public final class ScheduleViewModel: ObservableObject {
             lifecycleErrors[scheduleID] = "Connect to a Veetbot server to change this schedule."
             return
         }
-        guard let reviewed = detailRecords[scheduleID]?.revision.revision else { return }
         do {
+            // `reviewedRevision` is the revision the switch was drawn from. The
+            // record held here can be refreshed while this call is suspended,
+            // so it is never read to decide what the owner approved.
             detailRecords[scheduleID] = try await api.setScheduleScripts(
-                scheduleID, approved: approved, reviewedRevision: reviewed
+                scheduleID, approved: approved, reviewedRevision: reviewedRevision
             )
             toasts.show("Saved. Applies from the next run.")
         } catch let changed as ScheduleChangedSinceReview {

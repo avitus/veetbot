@@ -504,7 +504,7 @@ import FoundationNetworking
         #expect(offered.offersScripts)
         #expect(offered.revision.scriptsApproved != true)
 
-        await model.setRunsScriptsWithoutAsking(scheduleID, true)
+        await model.setRunsScriptsWithoutAsking(scheduleID, true, reviewedRevision: 1)
 
         let give = try #require(recorder.snapshot.last)
         #expect(give.httpMethod == "PATCH")
@@ -516,7 +516,7 @@ import FoundationNetworking
         #expect(model.detailRecords[scheduleID]?.revision.scriptsApproved == true)
         #expect(toasts.current?.text == "Saved. Applies from the next run.")
 
-        await model.setRunsScriptsWithoutAsking(scheduleID, false)
+        await model.setRunsScriptsWithoutAsking(scheduleID, false, reviewedRevision: 2)
 
         let withdraw = try #require(recorder.snapshot.last)
         #expect(withdraw.httpMethod == "PATCH")
@@ -555,7 +555,7 @@ import FoundationNetworking
         // Edited elsewhere while this screen stays open.
         state.update(approved: false)
 
-        await model.setRunsScriptsWithoutAsking(scheduleID, true)
+        await model.setRunsScriptsWithoutAsking(scheduleID, true, reviewedRevision: 1)
 
         #expect(!recorder.snapshot.contains { $0.httpMethod == "PATCH" })
         #expect(model.detailRecords[scheduleID]?.revision.revision == 2)
@@ -567,12 +567,49 @@ import FoundationNetworking
 
         // Approved elsewhere on a later revision: withdrawing still goes through.
         state.update(approved: true)
-        await model.setRunsScriptsWithoutAsking(scheduleID, false)
+        await model.setRunsScriptsWithoutAsking(scheduleID, false, reviewedRevision: 2)
 
         let withdraw = try #require(recorder.snapshot.last)
         #expect(withdraw.httpMethod == "PATCH")
         #expect(model.detailRecords[scheduleID]?.revision.scriptsApproved != true)
         #expect(model.lifecycleError(for: scheduleID) == nil)
+    }
+
+    /// The switch was drawn from one revision. A refresh that lands before the
+    /// request goes out must not turn the newer revision into the one approved.
+    @Test
+    func testARefreshAfterTheSwitchWasDrawnDoesNotChangeWhatIsApproved() async throws {
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000776"))
+        let recorder = ScheduleRequestRecorder()
+        let state = ScheduleScriptsState()
+        let model = try makeModel { request in
+            recorder.append(request)
+            if request.httpMethod == "PATCH" {
+                let definition = try #require(try Self.body(request)["definition"] as? [String: Any])
+                state.update(approved: definition["scripts_approved"] as? Bool == true)
+            }
+            return Self.response(
+                request,
+                body: Self.detailJSON(
+                    id: scheduleID, revision: state.revision,
+                    scriptsAvailable: true, scriptsApproved: state.approved
+                )
+            )
+        }
+        await model.loadDetail(scheduleID)
+        state.update(approved: false)
+        // The screen's own refresh installs revision 2 before the gesture is sent.
+        await model.loadDetail(scheduleID)
+        #expect(model.detailRecords[scheduleID]?.revision.revision == 2)
+
+        await model.setRunsScriptsWithoutAsking(scheduleID, true, reviewedRevision: 1)
+
+        #expect(!recorder.snapshot.contains { $0.httpMethod == "PATCH" })
+        #expect(model.detailRecords[scheduleID]?.revision.scriptsApproved != true)
+        #expect(
+            model.lifecycleError(for: scheduleID)
+                == "This schedule changed since you opened it. Check it, then turn this on again."
+        )
     }
 
     @Test

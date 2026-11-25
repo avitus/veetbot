@@ -187,10 +187,16 @@ public struct ScheduleDetailView: View {
     private func scripts(_ record: ScheduleRecordView) -> some View {
         if record.offersScripts {
             let id = record.schedule.id
+            // The approval is for the revision this row was drawn from.
+            let shown = record.revision.revision
             A2Group(title: "Scripts") {
                 Toggle(isOn: Binding(
                     get: { record.revision.scriptsApproved == true },
-                    set: { value in Task { await model.setRunsScriptsWithoutAsking(id, value) } }
+                    set: { value in
+                        Task {
+                            await model.setRunsScriptsWithoutAsking(id, value, reviewedRevision: shown)
+                        }
+                    }
                 )) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Run scripts without asking").veetType(.ui).foregroundColor(AppTheme.ink)

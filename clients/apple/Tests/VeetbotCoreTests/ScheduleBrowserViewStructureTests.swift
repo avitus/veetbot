@@ -34,7 +34,8 @@ import Testing
         let detail = try source(at: "Veetbot/Views/ScheduleDetailView.swift")
         #expect(detail.contains("if record.offersScripts {"))
         #expect(detail.contains("Text(\"Run scripts without asking\")"))
-        #expect(detail.contains("await model.setRunsScriptsWithoutAsking(id, value)"))
+        #expect(detail.contains("await model.setRunsScriptsWithoutAsking(id, value, reviewedRevision: shown)"))
+        #expect(detail.contains("let shown = record.revision.revision"))
         #expect(detail.contains(".accessibilityIdentifier(\"schedule.scripts.without-asking\")"))
     }
 
