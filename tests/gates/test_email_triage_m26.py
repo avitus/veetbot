@@ -610,3 +610,58 @@ async def test_a_refusal_names_a_retry_time_the_same_gate_would_accept() -> None
         # Tomorrow the rolling window has room, but with nothing spent that day the
         # live reservations alone sit under the arrival cap, which then applies.
         assert refused.value.details["retry_at"] == (NOW + timedelta(hours=1)).isoformat()
+
+
+async def test_cached_mail_seen_live_times_an_owner_action_in_the_live_session() -> None:
+    async with _app(FixedClock(NOW), await _mailbox([], [])) as app:
+        await _caught_up(app)
+        service = app.services.email
+        service.triage_mode = "local"
+        historical = await app.sessions.create()
+        page = _thread_page("board", NOW - timedelta(minutes=2))
+        page["messages"][0].update(subject="board")
+        await service.import_thread(app.principal, "default", page, historical)
+        await app.services.sessions.delete(app.principal, historical)
+        live = await app.sessions.create()
+
+        seen = await service.import_thread(app.principal, "default", page, live, observed_at=NOW)
+        await service.feedback(
+            app.principal, thread_id=seen.id, target="thread", judgment="important"
+        )
+
+        assert seen.source_session_ids[-1] == live
+        async with app.uow_factory() as uow:
+            events = await uow.events.list_after(live, 0, app.principal)
+        assert [e.event_type for e in events if e.event_type.startswith("email.triage.")] == [
+            "email.triage.discovered",
+            "email.triage.important",
+        ]
+
+
+async def test_a_historical_import_keeps_a_pending_arrival() -> None:
+    clock = FixedClock(NOW)
+    async with _app(clock, await _mailbox([], [])) as app:
+        await _caught_up(app)
+        service = app.services.email
+        service.triage_mode = "local"
+        session = await app.sessions.create()
+        pending = await _imported(app, "board", session, label_ids=["INBOX", "IMPORTANT"])
+        page = _thread_page("board", NOW - timedelta(minutes=2))
+        page["messages"][0].update(subject="board", label_ids=["INBOX", "IMPORTANT"])
+        older = _thread_page("old", NOW - timedelta(days=1))["messages"][0]
+        older["thread_id"] = "board"
+        page.update(messages=[older, *page["messages"]])
+
+        rebuilt = await service.import_thread(app.principal, "default", page, session)
+
+        assert rebuilt.revision == pending.revision + 1
+        assert rebuilt.arrival == pending.arrival
+        assert rebuilt.reason == "Full assessment queued."
+        clock.advance(timedelta(minutes=5))
+        again = await service.import_thread(
+            app.principal, "default", page, session, observed_at=clock.now()
+        )
+        assert again.arrival and again.arrival.discovered_at == NOW
+        async with app.uow_factory() as uow:
+            events = await uow.events.list_after(session, 0, app.principal)
+        assert sum(e.event_type == "email.triage.discovered" for e in events) == 1

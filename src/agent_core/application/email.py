@@ -3575,6 +3575,21 @@ class EmailExperienceService:
                         }
                     )
                     updated = updated.model_copy(update={"arrival": arrival})
+                    if known is None:
+                        # The receipt lives in this session, so an owner action
+                        # times itself here even if the import's session is gone.
+                        updated = updated.model_copy(
+                            update={
+                                "source_session_ids": [
+                                    *(
+                                        s
+                                        for s in updated.source_session_ids
+                                        if s != source_session_id
+                                    ),
+                                    source_session_id,
+                                ]
+                            }
+                        )
                     if arrival.assessed_at is None:
                         if expedited:
                             updated = updated.model_copy(
@@ -3735,6 +3750,26 @@ class EmailExperienceService:
                     await self._discovered(uow, thread, arrival, source_session_id, run, lease)
                 thread = await self._mark_important(
                     uow, thread, feedback, source_session_id, run, lease, "discovery"
+                )
+            elif (
+                observed_at is None
+                and previous is not None
+                and previous.arrival is not None
+                and messages
+                and messages[-1].id == previous.arrival.message_id
+            ):
+                # A historical import observes nothing new. While the arrival's
+                # message is still the newest, its measured wait goes on, as it
+                # does when an older message is removed.
+                waiting = previous.arrival.expedited and previous.arrival.assessed_at is None
+                thread = thread.model_copy(
+                    update={
+                        "arrival": previous.arrival,
+                        "reason": previous.reason
+                        if waiting
+                        and previous.reason in {TRIAGE_BUDGET_HELD_REASON, TRIAGE_QUEUED_REASON}
+                        else thread.reason,
+                    }
                 )
             if thread.draft_id is not None:
                 draft = await read_value(
