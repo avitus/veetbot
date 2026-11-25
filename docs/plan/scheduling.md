@@ -463,7 +463,10 @@ given: both settings are on, it is not a job schedule, the caller holds
 field is absent otherwise and nothing stores it. The native schedule detail
 shows "Run scripts without asking" when that field is true or the revision
 holds the approval, and saves either choice through the full-definition
-update, adding or removing the scope with it.
+update, adding or removing the scope with it. It gives the approval only to
+the revision the owner is looking at; when the schedule has changed since, it
+saves nothing and shows the current version. Withdrawing applies to the
+current revision.
 
 The schedule role must hold `sandbox.execute` before any schedule requests
 it. Materialization fails closed for a scope the role does not hold, as the

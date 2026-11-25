@@ -528,6 +528,53 @@ import FoundationNetworking
         #expect(after.offersScripts, "the switch stays so the approval can be given again")
     }
 
+    /// The approval is given to the revision the owner is looking at. If the
+    /// schedule changed since, nothing is granted and the new version is shown.
+    /// Withdrawing needs no such review.
+    @Test
+    func testTheScriptApprovalIsNotGivenToARevisionTheOwnerHasNotSeen() async throws {
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000775"))
+        let recorder = ScheduleRequestRecorder()
+        let state = ScheduleScriptsState()
+        let model = try makeModel { request in
+            recorder.append(request)
+            if request.httpMethod == "PATCH" {
+                let definition = try #require(try Self.body(request)["definition"] as? [String: Any])
+                state.update(approved: definition["scripts_approved"] as? Bool == true)
+            }
+            return Self.response(
+                request,
+                body: Self.detailJSON(
+                    id: scheduleID, revision: state.revision,
+                    scriptsAvailable: true, scriptsApproved: state.approved
+                )
+            )
+        }
+        await model.loadDetail(scheduleID)
+        #expect(model.detailRecords[scheduleID]?.revision.revision == 1)
+        // Edited elsewhere while this screen stays open.
+        state.update(approved: false)
+
+        await model.setRunsScriptsWithoutAsking(scheduleID, true)
+
+        #expect(!recorder.snapshot.contains { $0.httpMethod == "PATCH" })
+        #expect(model.detailRecords[scheduleID]?.revision.revision == 2)
+        #expect(model.detailRecords[scheduleID]?.revision.scriptsApproved != true)
+        #expect(
+            model.lifecycleError(for: scheduleID)
+                == "This schedule changed since you opened it. Check it, then turn this on again."
+        )
+
+        // Approved elsewhere on a later revision: withdrawing still goes through.
+        state.update(approved: true)
+        await model.setRunsScriptsWithoutAsking(scheduleID, false)
+
+        let withdraw = try #require(recorder.snapshot.last)
+        #expect(withdraw.httpMethod == "PATCH")
+        #expect(model.detailRecords[scheduleID]?.revision.scriptsApproved != true)
+        #expect(model.lifecycleError(for: scheduleID) == nil)
+    }
+
     @Test
     func testAScheduleTheServerOffersNothingForShowsNoScriptSwitch() throws {
         let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000774"))

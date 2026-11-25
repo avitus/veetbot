@@ -3768,11 +3768,14 @@ class EmailExperienceService:
                                         "attention_expires_at",
                                         "profile_revision",
                                         "assessment_version",
-                                        # The reply the kept assessment asked for.
-                                        "needs_reply",
                                         "reply_blocked_reason",
                                     )
                                 },
+                                # The reply the kept assessment asked for, under the
+                                # rule that assessment applied: a reply needs the
+                                # whole thread, so the request returns with it.
+                                "needs_reply": prior.payload.get("needs_reply") is True
+                                and thread.complete,
                                 "dismissed_revision": thread.revision
                                 if previous.dismissed_revision == previous.revision
                                 else None,

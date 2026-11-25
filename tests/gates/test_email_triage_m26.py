@@ -748,8 +748,6 @@ async def test_an_older_page_keeps_the_reply_state_of_the_retained_assessment() 
         _limit(app)
         op = await service.admit_arrival_check(app.principal)
         run = await app.runs.get(op.run_id)
-        first = _thread_page("board", NOW - timedelta(minutes=2))
-        first["messages"][0].update(subject="board", label_ids=["IMPORTANT", "INBOX"])
         async with app.uow_factory() as uow:
             row = next(
                 row
@@ -759,6 +757,15 @@ async def test_an_older_page_keeps_the_reply_state_of_the_retained_assessment() 
             assessed = await read_value(uow.email, app.principal, "thread", row.key, EmailThread)
             assert assessed and assessed.arrival and assessed.arrival.assessed_at
             # The assessment asked for a reply that a missing attachment blocks.
+            prior = await uow.email.get(app.principal, "assessment", row.key)
+            assert prior is not None
+            await service._put_data(
+                uow.email,
+                app.principal,
+                "assessment",
+                row.key,
+                {**prior.payload, "needs_reply": True},
+            )
             await save_value(
                 uow.email,
                 app.principal,
@@ -769,14 +776,28 @@ async def test_an_older_page_keeps_the_reply_state_of_the_retained_assessment() 
                 ),
                 NOW,
             )
-        older = _thread_page("old", NOW - timedelta(days=1))["messages"][0]
-        older["thread_id"] = "board"
-        first.update(messages=[older, *first["messages"]], newest_first=True)
 
-        updated = await service.import_thread(
-            app.principal, "default", first, run.session_id, observed_at=NOW
+        def page(*, complete: bool) -> dict[str, Any]:
+            first = _thread_page("board", NOW - timedelta(minutes=2))
+            first["messages"][0].update(subject="board", label_ids=["IMPORTANT", "INBOX"])
+            older = _thread_page("old", NOW - timedelta(days=1))["messages"][0]
+            older["thread_id"] = "board"
+            first.update(messages=[older, *first["messages"]], newest_first=True)
+            if not complete:
+                first.update(complete=False, next_page_token="older")
+            return first
+
+        # More pages are pending: a reply cannot be prepared yet, so none is asked.
+        partial = await service.import_thread(
+            app.principal, "default", page(complete=False), run.session_id, observed_at=NOW
         )
+        assert not partial.complete and partial.arrival and partial.arrival.assessed_at == NOW
+        assert partial.needs_reply is False
+        assert partial.reply_blocked_reason == "Needs the deck."
 
-        assert updated.arrival and updated.arrival.assessed_at == NOW
-        assert updated.needs_reply is True
-        assert updated.reply_blocked_reason == "Needs the deck."
+        whole = await service.import_thread(
+            app.principal, "default", page(complete=True), run.session_id, observed_at=NOW
+        )
+        assert whole.complete and whole.arrival and whole.arrival.assessed_at == NOW
+        assert whole.needs_reply is True
+        assert whole.reply_blocked_reason == "Needs the deck."

@@ -1118,13 +1118,23 @@ public struct VeetbotAPIClient: Sendable {
     /// through the full-definition update, with the sandbox permission its
     /// runs need to be offered the script tool. Every other field goes back
     /// exactly as the server holds it; a stale revision is retried once.
-    public func setScheduleScripts(_ scheduleID: UUID, approved: Bool) async throws -> ScheduleRecordView {
+    ///
+    /// The approval is the owner's word about the revision on their screen,
+    /// `reviewedRevision`. If the schedule has changed since, nothing is given
+    /// and `ScheduleChangedSinceReview` carries the version to show instead.
+    /// Withdrawing takes authority away, so it applies to whatever is current.
+    public func setScheduleScripts(
+        _ scheduleID: UUID, approved: Bool, reviewedRevision: Int
+    ) async throws -> ScheduleRecordView {
         let path = "/v1/schedules/\(scheduleID.uuidString)"
         var retried = false
         while true {
             let (data, _) = try await transport.sendData(TransportRequest(method: .get, path: path))
             let current = try JSONDecoder.server.decode(ScheduleRecordView.self, from: data)
             if (current.revision.scriptsApproved == true) == approved { return current }
+            if approved && current.revision.revision != reviewedRevision {
+                throw ScheduleChangedSinceReview(current: current)
+            }
             let record = try JSONDecoder.server.decode(JSONValue.self, from: data)
             let update = try scheduleDefinitionUpdate(from: record) { definition in
                 var scopes = (definition["requested_scopes"]?.arrayValue ?? [])
@@ -1187,6 +1197,12 @@ public struct VeetbotAPIClient: Sendable {
             }
         }
     }
+}
+
+/// The schedule changed after the owner last saw it, so an approval of what
+/// they saw was not given. Carries the version to show them.
+public struct ScheduleChangedSinceReview: Error, Sendable {
+    public let current: ScheduleRecordView
 }
 
 private let scheduleWebsiteReadScope = "browser.profile.read"

@@ -336,9 +336,17 @@ public final class ScheduleViewModel: ObservableObject {
             lifecycleErrors[scheduleID] = "Connect to a Veetbot server to change this schedule."
             return
         }
+        guard let reviewed = detailRecords[scheduleID]?.revision.revision else { return }
         do {
-            detailRecords[scheduleID] = try await api.setScheduleScripts(scheduleID, approved: approved)
+            detailRecords[scheduleID] = try await api.setScheduleScripts(
+                scheduleID, approved: approved, reviewedRevision: reviewed
+            )
             toasts.show("Saved. Applies from the next run.")
+        } catch let changed as ScheduleChangedSinceReview {
+            // Show what the schedule now is; the owner decides again from that.
+            detailRecords[scheduleID] = changed.current
+            lifecycleErrors[scheduleID] =
+                "This schedule changed since you opened it. Check it, then turn this on again."
         } catch {
             lifecycleErrors[scheduleID] = displayMessage(for: error)
         }
