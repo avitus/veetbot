@@ -12,7 +12,7 @@ from agent_core.domain.browser import (
     browser_origin,
     normalize_browser_origin,
 )
-from agent_core.domain.browser_evidence import BrowserRegionEvidence
+from agent_core.domain.browser_evidence import BrowserRegionEvidence, BrowserRowField
 from agent_core.domain.browser_extraction import BrowserExtractionField
 
 
@@ -46,6 +46,7 @@ class BrowserWorkflowStep(BaseModel):
     row_limit: int = Field(default=20, ge=1, le=50)
     minimum_rows: int = Field(default=0, ge=0, le=50, strict=True)
     require_complete: bool = Field(default=False, strict=True)
+    expected_row: list[BrowserRowField] | None = Field(default=None, min_length=1, max_length=8)
     branches: BrowserWorkflowBranches | None = None
 
     @model_validator(mode="after")
@@ -74,6 +75,7 @@ class BrowserWorkflowStep(BaseModel):
                 "row_limit",
                 "minimum_rows",
                 "require_complete",
+                "expected_row",
             },
             "collect_feed": {"kind", "role", "name"},
         }[self.kind]
@@ -103,6 +105,12 @@ class BrowserWorkflowStep(BaseModel):
             raise ValueError("extraction requires a collection and fields")
         if self.minimum_rows > self.row_limit:
             raise ValueError("minimum rows exceeds the extraction row limit")
+        if self.expected_row is not None and (
+            len({field.name for field in self.expected_row}) != len(self.expected_row)
+            or [field.model_dump(exclude={"value"}) for field in self.expected_row]
+            != [field.model_dump() for field in self.fields]
+        ):
+            raise ValueError("expected row must match the extraction fields exactly")
         return self
 
     def action_values(self) -> dict[str, str | int]:

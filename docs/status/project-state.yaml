@@ -1,3 +1,6 @@
+# ADR-0354: Owner-authorized W3/W6 continuation adds reviewed expected-row
+# checks within each extraction result before later steps. Existing authority
+# and budgets remain; no deployed recipe, milestone or gate moves.
 # ADR-0350: Owner-authorized W4/W6 continuation adds reviewed opt-in destination
 # rechecks within each later target capture. Existing defaults, authority and
 # four-window bounds remain; no deployed recipe, milestone or gate moves.
