@@ -324,6 +324,26 @@ public final class ScheduleViewModel: ObservableObject {
         }
     }
 
+    // MARK: Scripts (ADR-0342 decision 13)
+
+    /// "Run scripts without asking": the owner approves a schedule's scripts
+    /// once, because nobody is there to answer a card while it runs.
+    public func setRunsScriptsWithoutAsking(_ scheduleID: UUID, _ approved: Bool) async {
+        guard lifecycleChangingIDs.insert(scheduleID).inserted else { return }
+        defer { lifecycleChangingIDs.remove(scheduleID) }
+        lifecycleErrors[scheduleID] = nil
+        guard let api = await makeAPIClient() else {
+            lifecycleErrors[scheduleID] = "Connect to a Veetbot server to change this schedule."
+            return
+        }
+        do {
+            detailRecords[scheduleID] = try await api.setScheduleScripts(scheduleID, approved: approved)
+            toasts.show("Saved. Applies from the next run.")
+        } catch {
+            lifecycleErrors[scheduleID] = displayMessage(for: error)
+        }
+    }
+
     // MARK: Recent runs (ADR-0225 part A)
 
     /// The newest occurrences and, for each that started a run, its status.

@@ -563,6 +563,13 @@ struct ScheduleCreateSheet: View {
                         .veetType(.meta)
                         .foregroundColor(AppTheme.inkSoft)
                 }
+                // ADR-0342 decision 13: Create is the approval, so it is named first.
+                if draft.scriptsApproved {
+                    Text("Its runs may run scripts without asking.")
+                        .veetType(.meta)
+                        .foregroundColor(AppTheme.inkSoft)
+                        .accessibilityIdentifier("schedule.new.scripts")
+                }
             case .unclear(let message):
                 Text(message).foregroundColor(AppTheme.amberText)
             case .unavailable:

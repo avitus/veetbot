@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.errors import RateLimitedError, ScheduleValidationError
 from agent_core.domain.events import ProcessEvent
+from agent_core.domain.execution import SANDBOX_EXECUTE_SCOPE, SANDBOX_RUN_CODE_TOOL_NAME
 from agent_core.domain.hazards import contains_injection_pattern, contains_secret_material
 from agent_core.domain.messages import (
     Capability,
@@ -238,6 +239,7 @@ class ScheduleDrafter:
         agent: AgentSpec,
         limits: ScheduleDefinitionLimits,
         interpreter: ScheduleDraftInterpreter,
+        approve_scripts: bool = False,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -245,8 +247,16 @@ class ScheduleDrafter:
         self._agent = agent
         self._limits = limits
         self._interpreter = interpreter
+        self._approve_scripts = approve_scripts
 
-    async def draft(self, principal: Principal, *, text: str, timezone: str) -> ScheduleDraft:
+    async def draft(
+        self,
+        principal: Principal,
+        *,
+        text: str,
+        timezone: str,
+        offer_script_approval: bool = False,
+    ) -> ScheduleDraft:
         sentence = " ".join(text.split())
         if not sentence or len(sentence) > DRAFT_MAX_TEXT_LENGTH:
             raise ScheduleValidationError(
@@ -263,7 +273,17 @@ class ScheduleDrafter:
             )
         await self._admit(principal)
         reading = await self._interpreter.read(sentence, zone, principal=principal)
-        draft = self._draft_from(reading.answer, sentence, zone)
+        # ADR-0342 decision 13: saving the form is the approval, so the draft
+        # carries it only for a client that shows it, and only where the chat
+        # card would: the setting is on, the pinned agent has the script tool,
+        # and the owner holds the scope the schedule must request.
+        scripts = (
+            offer_script_approval
+            and self._approve_scripts
+            and SANDBOX_RUN_CODE_TOOL_NAME in self._agent.enabled_tools
+            and SANDBOX_EXECUTE_SCOPE in principal.scopes
+        )
+        draft = self._draft_from(reading.answer, sentence, zone, scripts_approved=scripts)
         await self._record(principal, reading, draft)
         return draft
 
@@ -284,7 +304,12 @@ class ScheduleDrafter:
             )
 
     def _draft_from(
-        self, answer: _DraftAnswer | None, sentence: str, zone: ZoneInfo
+        self,
+        answer: _DraftAnswer | None,
+        sentence: str,
+        zone: ZoneInfo,
+        *,
+        scripts_approved: bool = False,
     ) -> ScheduleDraft:
         if answer is None:
             return ScheduleDraft(status=ScheduleDraftStatus.FAILED, reason="unreadable")
@@ -307,6 +332,10 @@ class ScheduleDrafter:
             title=_title(answer.title, sentence),
             instruction=sentence,
             cadence=cadence,
+            requested_scopes=(
+                frozenset({SANDBOX_EXECUTE_SCOPE}) if scripts_approved else frozenset()
+            ),
+            scripts_approved=scripts_approved,
         )
         return ScheduleDraft(
             status=ScheduleDraftStatus.READY, definition=definition, next_fire_at=firings

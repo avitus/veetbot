@@ -443,6 +443,8 @@ class CreateScheduleDraftRequest(BaseModel):
 
     text: str = Field(min_length=1, max_length=1000)
     timezone: str = Field(min_length=1, max_length=64)
+    # ADR-0342 decision 13: this client shows the script approval before saving.
+    offer_script_approval: bool = False
 
 
 class ScheduleRunNowService(Protocol):
@@ -457,7 +459,18 @@ class ScheduleRunNowService(Protocol):
 
 
 class ScheduleDraftService(Protocol):
-    async def draft(self, principal: Principal, *, text: str, timezone: str) -> ScheduleDraft: ...
+    async def draft(
+        self,
+        principal: Principal,
+        *,
+        text: str,
+        timezone: str,
+        offer_script_approval: bool = False,
+    ) -> ScheduleDraft: ...
+
+
+class ScheduleScriptOfferService(Protocol):
+    async def offered(self, principal: Principal, record: ScheduleRecord) -> ScheduleRecord: ...
 
 
 class ExpectedScheduleRevisionRequest(BaseModel):
@@ -1340,6 +1353,13 @@ def create_app(
 
     schedule_router = APIRouter()
 
+    async def _schedule_as_read(principal: Principal, record: ScheduleRecord) -> ScheduleRecord:
+        """Say on a returned schedule whether the app may offer the script approval."""
+        offers: ScheduleScriptOfferService | None = getattr(
+            services, "schedule_script_offers", None
+        )
+        return record if offers is None else await offers.offered(principal, record)
+
     @schedule_router.post(
         "/v1/schedules",
         openapi_extra={"required_scope": "schedule.write"},
@@ -1357,7 +1377,9 @@ def create_app(
         ],
     ) -> Response:
         """Admit an owned schedule with an idempotency key and finite execution settings."""
-        result = await services.schedules.create(authenticated, body, idempotency_key)
+        result = await _schedule_as_read(
+            authenticated, await services.schedules.create(authenticated, body, idempotency_key)
+        )
         return JSONResponse(
             status_code=200 if result.replayed else 201,
             content=result.model_dump(mode="json", exclude={"replayed"}),
@@ -1379,7 +1401,12 @@ def create_app(
             raise ScheduleValidationError(
                 "schedule.drafts_unavailable", "this server cannot read schedules from plain words"
             )
-        return await drafter.draft(authenticated, text=body.text, timezone=body.timezone)
+        return await drafter.draft(
+            authenticated,
+            text=body.text,
+            timezone=body.timezone,
+            offer_script_approval=body.offer_script_approval,
+        )
 
     @schedule_router.get(
         "/v1/schedules",
@@ -1415,7 +1442,9 @@ def create_app(
         authenticated: Annotated[Principal, secured("schedule.read")],
     ) -> ScheduleRecord:
         """Read one owned schedule with its current revision."""
-        return await services.schedules.get(authenticated, schedule_id)
+        return await _schedule_as_read(
+            authenticated, await services.schedules.get(authenticated, schedule_id)
+        )
 
     @schedule_router.patch(
         "/v1/schedules/{schedule_id}",
@@ -1427,11 +1456,14 @@ def create_app(
         authenticated: Annotated[Principal, secured("schedule.write")],
     ) -> ScheduleRecord:
         """Update an owned schedule under its expected revision."""
-        return await services.schedules.update(
+        return await _schedule_as_read(
             authenticated,
-            schedule_id,
-            body.expected_revision,
-            body.definition,
+            await services.schedules.update(
+                authenticated,
+                schedule_id,
+                body.expected_revision,
+                body.definition,
+            ),
         )
 
     @schedule_router.post(
@@ -1444,7 +1476,10 @@ def create_app(
         authenticated: Annotated[Principal, secured("schedule.write")],
     ) -> ScheduleRecord:
         """Pause future firing of an owned schedule at the expected revision."""
-        return await services.schedules.pause(authenticated, schedule_id, body.expected_revision)
+        return await _schedule_as_read(
+            authenticated,
+            await services.schedules.pause(authenticated, schedule_id, body.expected_revision),
+        )
 
     @schedule_router.post(
         "/v1/schedules/{schedule_id}/resume",
@@ -1456,7 +1491,10 @@ def create_app(
         authenticated: Annotated[Principal, secured("schedule.write")],
     ) -> ScheduleRecord:
         """Resume an owned schedule through its governed lifecycle operation."""
-        return await services.schedules.resume(authenticated, schedule_id, body.expected_revision)
+        return await _schedule_as_read(
+            authenticated,
+            await services.schedules.resume(authenticated, schedule_id, body.expected_revision),
+        )
 
     @schedule_router.delete(
         "/v1/schedules/{schedule_id}",

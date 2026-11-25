@@ -22,6 +22,22 @@ import Testing
         #expect(!detail.contains("Button(\"Delete"))
     }
 
+    /// ADR-0342 decision 13: the form names the script approval before
+    /// Create, and the detail shows a switch where the server offers it.
+    @Test
+    func testTheScriptApprovalIsShownWhereItIsGiven() throws {
+        let form = try source(at: "Veetbot/Views/ScheduleBrowserView.swift")
+        #expect(form.contains("if draft.scriptsApproved {"))
+        #expect(form.contains("Text(\"Its runs may run scripts without asking.\")"))
+        #expect(form.contains(".accessibilityIdentifier(\"schedule.new.scripts\")"))
+
+        let detail = try source(at: "Veetbot/Views/ScheduleDetailView.swift")
+        #expect(detail.contains("if record.offersScripts {"))
+        #expect(detail.contains("Text(\"Run scripts without asking\")"))
+        #expect(detail.contains("await model.setRunsScriptsWithoutAsking(id, value)"))
+        #expect(detail.contains(".accessibilityIdentifier(\"schedule.scripts.without-asking\")"))
+    }
+
     @Test
     func testBrowserRetainsPopulatedRowsAcrossLaterFailuresAndPagesByCursor() throws {
         let source = try source(at: "Veetbot/Views/ScheduleBrowserView.swift")

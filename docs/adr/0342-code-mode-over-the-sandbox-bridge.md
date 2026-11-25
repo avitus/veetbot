@@ -253,6 +253,17 @@ The owner prefers no new external dependency unless one is necessary.
     - It is composed only while `AGENT_CODE_MODE_ENABLED` is on, and
       `schedule.create` records it only while
       `AGENT_SCHEDULE_SCRIPTS_ENABLED` is on as well.
+    - The app gives it in two more places, and shows it to the owner before
+      it is saved in both. The plain-words form's draft carries it only for
+      a client that sends `offer_script_approval`, under the conditions of
+      the card and when the owner holds the scope; the form names it before
+      Create, and Create is the approval. The schedule detail has a switch
+      that gives and withdraws it through the full-definition update. A
+      schedule the API returns says `scripts_available` where the switch may
+      be shown: both settings are on, the schedule runs a model, the owner
+      holds the scope, and the pinned agent has the script tool. The switch
+      also shows on any schedule that holds the approval, so it can always
+      be withdrawn.
 
 ## Implementation status
 
@@ -348,8 +359,10 @@ The work is cut into four slices.
      inside one claim. The chat's history was rebuilt under
      `session-history@3` and held no bridged result, and the request was
      assembled without the compaction the earlier one needed.
-   - **Not done.** The trajectory export and the skill review transcript
-     still list bridged results; the export is off in production.
+   - **The other two records, 2026-11-24.** The trajectory export and the
+     skill review transcript are the model's conversation too, and now read
+     events through the same rule, so neither lists a bridged result. On
+     `dev`, not delivered. The export is off in production.
 5. **A schedule's script approval (decision 13).** Implemented offline on
    2026-11-24 behind the default-off `AGENT_SCHEDULE_SCRIPTS_ENABLED`: the
    revision field and its validation, the standing authorizer, and the
@@ -365,8 +378,12 @@ The work is cut into four slices.
      job schedules were left alone and fired on time after the restart.
    - **Not yet observed.** No approved schedule has run. The first is the
      weekday briefing on the morning of 2026-11-25.
-   - **Not done.** The app's plain-words schedule form does not offer the
-     approval, and no client shows whether a schedule holds it.
+   - **In the app, 2026-11-24.** The plain-words form offers the approval
+     and the schedule detail shows it, gives it and withdraws it, as the last
+     item of decision 13 states. Built with the draft field, the
+     `scripts_available` read and the native switch. On `dev`, not delivered:
+     the app change reaches the owner through a release and a TestFlight
+     build.
 
 ## Consequences
 

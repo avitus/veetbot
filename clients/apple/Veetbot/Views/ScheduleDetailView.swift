@@ -49,6 +49,7 @@ public struct ScheduleDetailView: View {
                 lifecycleControls(record)
                 instruction(record)
                 delivery(record)
+                scripts(record)
                 recentRuns
                 A2RecordGroup(title: "Schedule", rows: scheduleRows(record))
                 A2Group(title: "Website access") { websiteAccess(record) }
@@ -179,6 +180,38 @@ public struct ScheduleDetailView: View {
 
     /// The newest occurrences: what happened, when, and the report's
     /// conversation where it still exists (MagicPath quiet-home-5746).
+    /// Scripts (ADR-0342 decision 13): nobody answers a card while a schedule
+    /// runs, so the owner approves its scripts once, here or when it is set
+    /// up. Shown where the server offers the approval or the schedule holds it.
+    @ViewBuilder
+    private func scripts(_ record: ScheduleRecordView) -> some View {
+        if record.offersScripts {
+            let id = record.schedule.id
+            A2Group(title: "Scripts") {
+                Toggle(isOn: Binding(
+                    get: { record.revision.scriptsApproved == true },
+                    set: { value in Task { await model.setRunsScriptsWithoutAsking(id, value) } }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Run scripts without asking").veetType(.ui).foregroundColor(AppTheme.ink)
+                        Text("Its runs can work through several steps in one script. Anything a script sends, writes or deletes still asks.")
+                            .veetType(.meta)
+                            .foregroundColor(AppTheme.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch)
+                .tint(AppTheme.tealFill)
+                .disabled(
+                    model.isChangingLifecycle(id)
+                        || !scheduleAllowsWebsiteAccessChange(record.schedule.stateKind)
+                )
+                .accessibilityIdentifier("schedule.scripts.without-asking")
+                .padding(14)
+            }
+        }
+    }
+
     @ViewBuilder
     private var recentRuns: some View {
         let runs = model.recentRuns(for: summary.id)

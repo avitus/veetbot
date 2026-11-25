@@ -450,6 +450,21 @@ changed, the owner must approve a fresh proposal. Conversational
 `schedule.update` keeps the approval with the other pins; the full-definition
 update carries it or drops it.
 
+The app is the other place the approval is given. A draft request with
+`offer_script_approval: true` says the client shows the approval before
+saving. Its draft then requests the scope and carries `scripts_approved` when
+the setting is on, the drafting agent has the script tool and the owner holds
+`sandbox.execute`; the form names it beside the timing, and Create is the
+approval. A client that does not send the field gets the draft it always got.
+Every schedule the HTTP API returns from a create, a read, an update, a pause
+or a resume carries `scripts_available: true` when its approval could be
+given: both settings are on, it is not a job schedule, the caller holds
+`sandbox.execute`, and its pinned agent version lists the script tool. The
+field is absent otherwise and nothing stores it. The native schedule detail
+shows "Run scripts without asking" when that field is true or the revision
+holds the approval, and saves either choice through the full-definition
+update, adding or removing the scope with it.
+
 The schedule role must hold `sandbox.execute` before any schedule requests
 it. Materialization fails closed for a scope the role does not hold, as the
 rules above say, so such a schedule would stop running. What the approval
@@ -630,7 +645,9 @@ Cross-tenant or cross-principal access returns the same not-found envelope as
 the existing API. Every route declares its required schedule scope in OpenAPI.
 
 `POST /v1/schedules/drafts` (ADR-0225 part B, `schedule.write`) reads
-`{text, timezone}` into a draft and persists nothing. One bounded, tool-less
+`{text, timezone}`, and the optional `offer_script_approval` of
+[Scripts approved at setup](#scripts-approved-at-setup-adr-0342-decision-13),
+into a draft and persists nothing. One bounded, tool-less
 structured-output call (the title-generation model policy, at most USD 0.05,
 4,096 input and 1,024 output tokens, 20 seconds) returns only a short title and
 the timing as closed fields; the server builds the cadence in the given IANA

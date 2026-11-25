@@ -1060,10 +1060,16 @@ public struct VeetbotAPIClient: Sendable {
     }
 
     /// Reads a plain-words description into an unsaved draft (ADR-0225 part B).
+    /// The form shows the script approval before Create, so it asks the
+    /// server to carry that approval in the draft (ADR-0342 decision 13).
     public func draftSchedule(text: String, timezone: String) async throws -> ScheduleDraftView {
         try await transport.send(TransportRequest(
             method: .post, path: "/v1/schedules/drafts",
-            body: try JSONEncoder.server.encode(["text": text, "timezone": timezone])
+            body: try JSONEncoder.server.encode(JSONValue.object([
+                "text": .string(text),
+                "timezone": .string(timezone),
+                "offer_script_approval": .bool(true),
+            ]))
         ))
     }
 
@@ -1089,6 +1095,37 @@ public struct VeetbotAPIClient: Sendable {
             let record = try JSONDecoder.server.decode(JSONValue.self, from: data)
             let update = try scheduleDefinitionUpdate(from: record) { definition in
                 definition["notify"] = .string(notify)
+            }
+            do {
+                return try await transport.send(TransportRequest(
+                    method: .patch, path: path, body: try JSONEncoder.server.encode(update)
+                ))
+            } catch HTTPTransportError.api(let apiError)
+                where !retried && apiError.details.reason == "schedule.revision_conflict"
+            {
+                retried = true
+            }
+        }
+    }
+
+    /// Gives or withdraws a schedule's script approval (ADR-0342 decision 13)
+    /// through the full-definition update, with the sandbox permission its
+    /// runs need to be offered the script tool. Every other field goes back
+    /// exactly as the server holds it; a stale revision is retried once.
+    public func setScheduleScripts(_ scheduleID: UUID, approved: Bool) async throws -> ScheduleRecordView {
+        let path = "/v1/schedules/\(scheduleID.uuidString)"
+        var retried = false
+        while true {
+            let (data, _) = try await transport.sendData(TransportRequest(method: .get, path: path))
+            let current = try JSONDecoder.server.decode(ScheduleRecordView.self, from: data)
+            if (current.revision.scriptsApproved == true) == approved { return current }
+            let record = try JSONDecoder.server.decode(JSONValue.self, from: data)
+            let update = try scheduleDefinitionUpdate(from: record) { definition in
+                var scopes = (definition["requested_scopes"]?.arrayValue ?? [])
+                    .filter { $0.stringValue != scheduleSandboxScope }
+                if approved { scopes.append(.string(scheduleSandboxScope)) }
+                definition["requested_scopes"] = .array(scopes)
+                definition["scripts_approved"] = approved ? .bool(true) : nil
             }
             do {
                 return try await transport.send(TransportRequest(
@@ -1147,6 +1184,8 @@ public struct VeetbotAPIClient: Sendable {
 }
 
 private let scheduleWebsiteReadScope = "browser.profile.read"
+/// The permission a scheduled run needs to be offered the script tool.
+private let scheduleSandboxScope = "sandbox.execute"
 
 /// Revision fields the server derives or records; the definition it accepts
 /// forbids them.
