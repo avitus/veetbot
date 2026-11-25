@@ -34,10 +34,9 @@ from agent_core.domain.argument_views import approval_argument_view
 from agent_core.domain.canonical import canonical_json, canonical_value
 from agent_core.domain.context import TaskState, WorkingState
 from agent_core.domain.email import (
-    EMAIL_ARRIVAL_DAILY_SHARE,
+    EMAIL_ARRIVAL_DAILY_CAP,
     EMAIL_ARRIVAL_MAX_FAILURES_COUNTED,
     EMAIL_ARRIVAL_MAX_WAIT_SECONDS,
-    EMAIL_ARRIVAL_MONTHLY_SHARE,
     EMAIL_EMPTY_CHECK_RETENTION_DAYS,
     EMAIL_HISTORY_DAYS,
     EMAIL_LEARNING_SHARE,
@@ -1363,14 +1362,14 @@ class EmailExperienceService:
         amount: Decimal,
         *,
         share: Decimal = Decimal("1"),
-        monthly_share: Decimal | None = None,
+        daily_cap: Decimal | None = None,
     ) -> None:
         """Count actual or conservative charges once, and retain live reservations."""
         now = self.clock.now().astimezone(UTC)
         daily_limit = self.budget_limits.daily_cost * share
-        monthly_limit = self.budget_limits.monthly_cost * (
-            share if monthly_share is None else monthly_share
-        )
+        if daily_cap is not None:
+            daily_limit = min(daily_limit, daily_cap)
+        monthly_limit = self.budget_limits.monthly_cost * share
         daily_spent = Decimal("0")
         monthly_spent = Decimal("0")
         reserved = Decimal("0")
@@ -1726,8 +1725,7 @@ class EmailExperienceService:
                     uow.email,
                     principal,
                     reservation,
-                    share=EMAIL_ARRIVAL_DAILY_SHARE,
-                    monthly_share=EMAIL_ARRIVAL_MONTHLY_SHARE,
+                    daily_cap=EMAIL_ARRIVAL_DAILY_CAP,
                 )
                 admitted = "arrivals"
             elif kind == "refresh":

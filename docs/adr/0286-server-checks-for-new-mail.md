@@ -96,14 +96,16 @@ Every refresh also reads all 9,072 stored conversations and 6,173 assessments.
    prompt revision changed. It does not page further through the Inbox, advance the
    ninety-day history pass, re-read expired bodies, verify unsubscribe evidence or
    write correspondence summaries. That work stays with foreground slices.
-4. **Checks have their own spending limits.** A check is admitted only while counted
-   spending, live reservations and its USD 1 reservation fit within 50% of the daily
-   ceiling and 90% of the rolling thirty-day ceiling: USD 20 and USD 540 at today's
-   ceilings. The limits are fixed fractions, as in ADR-0256, so raising or lowering a
-   ceiling moves them too. Half of the rolling ceiling would be USD 300, below what
-   has already been spent, and full slices stop at 75%, so checks need room above
-   that share. The remaining 10% stays available while the owner is in Email. The
-   ceilings, the 75% learning share and foreground admission do not change.
+4. **Arrival checks share the full rolling allowance.** On 2026-11-25 the owner
+   raised the background daily limit from USD 20 to USD 25 and removed the
+   10% foreground reserve. The former USD 540 cutoff had stopped five-minute
+   checks even though the production rolling allowance still had room.
+   Admit a check when aggregate counted email spending, live reservations and the
+   new reservation fit within both the smaller of USD 25 and the configured daily
+   allowance (UTC), and the full configured rolling thirty-day allowance
+   (USD 600 in production). A check can therefore use the final available dollar
+   for new arrivals. Foreground work shares that rolling cap. The 75% limit on
+   background learning still applies to full refreshes under ADR-0256.
 5. **A refused check is silent.** It writes no owner-visible pause, because the
    client's pause and its retry time describe foreground work. It logs one content-free
    line and waits for the next interval.

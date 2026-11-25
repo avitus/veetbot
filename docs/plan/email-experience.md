@@ -494,8 +494,9 @@ prompt revision changed, page further through the Inbox, advance the history pas
 re-read expired bodies, verify unsubscribe evidence or write correspondence
 summaries. Foreground slices keep that work, within their scope (ADR-0298).
 
-A check is admitted only within 50% of the daily and 90% of the rolling thirty-day
-allowance. A refusal writes no client pause and waits one interval. Each consecutive failed, timed-out or
+A check is admitted only when aggregate email charges, live reservations and the
+new reservation fit within USD 25 per UTC day, any lower configured daily limit,
+and the full rolling thirty-day allowance (USD 600 in production). A refusal writes no client pause and waits one interval. Each consecutive failed, timed-out or
 conservatively charged check doubles the wait, to 10, 20, 40 and at most 60 minutes;
 a completed refresh resets it. When Gmail reports no change and no arrival is
 waiting, the check loads no stored message content, makes no model call and

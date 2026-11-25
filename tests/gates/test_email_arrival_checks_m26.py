@@ -26,7 +26,7 @@ from agent_core.domain.email import (
     EmailTask,
     EmailThread,
 )
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.errors import BudgetExceededError, NotFoundError
 from agent_core.domain.mcp import MCPCallResult, MCPServerConfig
 from agent_core.domain.messages import FakeModelScript, ModelPermanentError, ScriptedTurn
 from agent_core.domain.notifications import NotificationKind
@@ -317,7 +317,9 @@ async def _assert_a_check_drafts_only_what_it_assessed() -> None:
         assert str(undrafted.id) not in {row.payload["thread_id"] for row in drafts}
 
 
-async def _assert_a_check_stops_at_its_own_limits(today: str, earlier: str, admitted: bool) -> None:
+async def _assert_a_check_stops_at_its_own_limits(
+    today: str, earlier: str, admitted: bool, foreground_admitted: bool
+) -> None:
     clock = FixedClock(NOW)
     async with _app(clock, await _mailbox([], [])) as app:
         await _caught_up(app)
@@ -329,21 +331,25 @@ async def _assert_a_check_stops_at_its_own_limits(today: str, earlier: str, admi
         check = await service.admit_arrival_check(app.principal)
 
         assert (check is not None) is admitted
-        # A refused check writes no pause, and the owner can still refresh.
+        # Foreground can use the rest of the daily allowance. Both share the rolling cap.
         clock.advance(timedelta(minutes=1))
-        foreground = await service.submit_task(app.principal, kind="refresh")
-        assert (await _run_of(app, foreground.run_id)).status is RunStatus.COMPLETED
+        if foreground_admitted:
+            foreground = await service.submit_task(app.principal, kind="refresh")
+            assert (await _run_of(app, foreground.run_id)).status is RunStatus.COMPLETED
+        else:
+            with pytest.raises(BudgetExceededError):
+                await service.submit_task(app.principal, kind="refresh")
 
 
 async def _assert_budget_limits() -> None:
-    """A check stops at its own share of the daily and rolling allowances."""
-    for today, earlier, admitted in [
-        ("19", "0", True),
-        ("19.5", "0", False),
-        ("0", "539", True),
-        ("0", "539.5", False),
+    """The next dollar must fit within USD 25 today and the full rolling allowance."""
+    for today, earlier, admitted, foreground_admitted in [
+        ("24", "0", True, True),
+        ("24.01", "0", False, True),
+        ("0", "599", True, True),
+        ("0", "599.01", False, False),
     ]:
-        await _assert_a_check_stops_at_its_own_limits(today, earlier, admitted)
+        await _assert_a_check_stops_at_its_own_limits(today, earlier, admitted, foreground_admitted)
 
 
 async def _seed_refresh(
@@ -762,15 +768,15 @@ async def _assert_a_refused_check_waits_its_interval() -> None:
     clock = FixedClock(NOW)
     async with _app(clock, await _mailbox([], [])) as app:
         await _caught_up(app)
-        _limit(app)
         service = app.services.email
+        service.budget_limits = EmailBudgetLimits(
+            daily_cost=Decimal("20"), monthly_cost=Decimal("600")
+        )
         await _seed_spend(app, "19.5", NOW - timedelta(minutes=30))
         assert await service.admit_arrival_check(app.principal) is None
 
         # Room appears at once, but the refused check still waits its turn.
-        service.budget_limits = EmailBudgetLimits(
-            daily_cost=Decimal("100"), monthly_cost=Decimal("600")
-        )
+        _limit(app)
         clock.advance(timedelta(seconds=299))
         assert await service.admit_arrival_check(app.principal) is None
         clock.advance(timedelta(seconds=1))

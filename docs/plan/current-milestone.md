@@ -91,9 +91,11 @@ title: Current Milestone
   [the decision](../adr/0286-server-checks-for-new-mail.md) and authorized its
   implementation on `email-checks`. A default-off maintenance pass checks for new
   mail every five minutes while Email is closed. It handles only new or changed
-  mail, within 50% of the daily and 90% of the rolling allowance. Pull request 222
-  delivered it on 2026-11-02 with a thirty-third Milestone 26 gate, which is
-  bound. Activation needs one measured production week.
+  mail. Pull request 222 delivered the original check on 2026-11-02 with a
+  thirty-third Milestone 26 gate. Activation needs one measured production week.
+  On 2026-11-25 the owner approved USD 25 per
+  UTC day (subject to any lower daily limit) and the full rolling allowance for
+  these checks.
 
 - **Veetbot's code power — ADR-0281:** On 2026-11-01 the owner asked for
   first-class coding and debugging power after Veetbot could not explain a

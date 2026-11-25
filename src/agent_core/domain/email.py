@@ -25,9 +25,8 @@ EMAIL_SLICE_RESERVATION = Decimal("1")
 EMAIL_QUEUE_ALLOWANCE_SECONDS = 300
 # Background learning stops here; new mail keeps the rest of each ceiling (ADR-0256).
 EMAIL_LEARNING_SHARE = Decimal("0.75")
-# A server check stops here, leaving the rest for when the owner is in Email (ADR-0286).
-EMAIL_ARRIVAL_DAILY_SHARE = Decimal("0.5")
-EMAIL_ARRIVAL_MONTHLY_SHARE = Decimal("0.9")
+# Server arrival checks share the rolling allowance and stop at USD 25 per UTC day (ADR-0286).
+EMAIL_ARRIVAL_DAILY_CAP = Decimal("25")
 EMAIL_ARRIVAL_DAYS = 7
 EMAIL_ARRIVAL_MAX_WAIT_SECONDS = 3600
 EMAIL_ARRIVAL_MAX_FAILURES_COUNTED = 5
