@@ -376,8 +376,13 @@ The work is cut into four slices.
      each took one full-definition update that added the scope and the
      approval; each kept its agent version and its next firing time. The four
      job schedules were left alone and fired on time after the restart.
-   - **Not yet observed.** No approved schedule has run. The first is the
-     weekday briefing on the morning of 2026-11-25.
+   - **First approved run observed, 2026-11-25.** The weekday briefing fired
+     on time and completed in under two minutes with five scripts. The first
+     ran before the run had read outside content and needed no card; the
+     other four were authorized with kind `schedule_script_approval` against
+     the schedule's revision. No run waited for an approval and none recorded
+     `schedule.scope_revoked`. The other eight approved schedules have not
+     fired since the approval.
    - **In the app, 2026-11-24.** The plain-words form offers the approval
      and the schedule detail shows it, gives it and withdraws it, as the last
      item of decision 13 states. Built with the draft field, the
