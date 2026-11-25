@@ -4098,6 +4098,8 @@ Acceptance criteria:
 - Existing milestones and security requirements are preserved. Completing this
   parallel workstream does not advance the sequential verified ceiling.
 
+Under ADR-0355, email triage minimizes Gmail receipt to first server-visible Important membership within the existing daily and rolling allowances. Model-free discovery, a provisional Inbox row and a work-only shadow judgment each retain their own authority. The grounded assessment and owner feedback determine final membership.
+
 Excluded: background monitoring beyond ADR-0286's arrival checks, Gmail push/digests, automatic Gmail writes,
 Gmail draft synchronization, standing send grants, another provider, public OAuth,
 general attachment processing beyond ADR-0317, calendar writes, permanent mailbox deletion, terminal UI work, autonomous

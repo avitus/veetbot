@@ -9,7 +9,7 @@ import re
 from collections.abc import Awaitable, Callable, Iterable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -28,16 +28,19 @@ from agent_core.domain.email import (
     EmailAssessment,
     EmailDraft,
     EmailDraftStatus,
+    EmailFeedback,
     EmailRecord,
     EmailSyncState,
     EmailTask,
     EmailThread,
+    EmailTriageMode,
     EmailValue,
     apply_feedback,
     archive_result_matches,
     body_cutoff,
     retained_thread,
     send_message_arguments,
+    triage_nomination,
 )
 from agent_core.domain.email_drafting import (
     DraftPreparationError,
@@ -64,6 +67,7 @@ from agent_core.domain.email_semantics import (
     semantic_source_key,
     thread_source_key,
 )
+from agent_core.domain.email_triage import merge_history_signal
 from agent_core.domain.errors import (
     ApprovalRequiredError,
     ArtifactStorageError,
@@ -323,6 +327,11 @@ class _TaskIO:
         self.catch_up_windows: set[tuple[str, str]] = set()
         # Anything a new-mail slice or server check saw that makes it more than an empty look.
         self.found_work = False
+        self.triage = task.triage_mode != EmailTriageMode.OFF
+        self.partners: set[str] = set()
+        self.preferences: list[EmailFeedback] = []
+        self.fast_reads: set[tuple[str, str]] = set()
+        self.observed: dict[tuple[str, str], datetime] = {}
         counts = context.checkpoint.working_state.setdefault("email_read_counts", {})
         if not isinstance(counts, dict):
             raise ConflictError("email read counters are malformed")
@@ -733,6 +742,11 @@ class _TaskIO:
             if not await self._window_analyzed(account_id, provider_id):
                 self.window_waiting.add((account_id, provider_id))
                 return {**progress, "complete": False}, True
+            newest = (
+                max(previous, key=lambda m: (int(m["internal_date"]), m["id"]))
+                if progress.get("newest_first")
+                else None
+            )
             previous = [
                 {
                     **item,
@@ -744,10 +758,13 @@ class _TaskIO:
                 for item in previous
                 if item.get("body_available", True) and item.get("next_body_offset") is not None
             ]
+            body_pending = bool(previous)
+            if newest and not any(m["id"] == newest["id"] for m in previous):
+                previous.append(newest)
             progress = {
                 **progress,
                 "messages": previous,
-                "body_pending": bool(previous),
+                "body_pending": body_pending,
                 "window_partial": True,
             }
         token = progress.get("next_page_token")
@@ -760,6 +777,11 @@ class _TaskIO:
                 {
                     "thread_id": provider_id,
                     "max_messages": 10,
+                    **(
+                        {"newest_first": True}
+                        if not token and (account_id, provider_id) in self.fast_reads
+                        else {}
+                    ),
                     **({"page_token": token} if token else {}),
                 },
             )
@@ -782,6 +804,8 @@ class _TaskIO:
                     for item in page["messages"]
                 ]
                 result = {**progress, **page, "messages": [*previous, *page_messages]}
+                if not token and (account_id, provider_id) in self.fast_reads:
+                    result["newest_first"] = True
         if not result:
             await self._erase_progress(progress_key)
             return None, True
@@ -950,20 +974,53 @@ class _TaskIO:
                 self.context.run.session_id,
                 run=self.context.run,
                 lease=self.context.lease,
+                observed_at=(
+                    self.observed.get((account_id, provider_id), self.context.clock.now())
+                    if not historical
+                    else None
+                ),
+                budget_held=self.task.budget_held,
+                learn_history=self.task.scope != "discovery",
+                reply_partners=self.partners,
             )
             self.imported[thread.id] = thread
             await self._census_read(account_id, value)
         return not pending, thread
+
+    def _ready_for_full_assessment(self) -> bool:
+        return any(
+            t.arrival
+            and t.arrival.expedited
+            and t.arrival.assessed_at is None
+            and t.messages
+            and t.messages[-1].body
+            for t in self.imported.values()
+        )
 
     async def refresh(self) -> None:
         """Advance bounded discovery, assessment, and eligible automatic drafts."""
         c = self.context
         # Above the learning share only new mail is read and ranked (ADR-0256, ADR-0298).
         # A server check also skips expired bodies and unsubscribe evidence (ADR-0286).
-        arrival_check = self.task.scope == "arrivals"
+        arrival_check = self.task.scope in {"arrivals", "discovery", "expedited"}
+        if self.triage:
+            async with c.uow_factory() as uow:
+                self.partners = {
+                    address
+                    async for row in records(uow.email, c.principal, "relationship")
+                    for address in cast(list[str], row.payload["recipients"])
+                }
+                self.preferences = [
+                    EmailFeedback.model_validate(row.payload)
+                    async for row in records(uow.email, c.principal, "feedback")
+                ]
         new_mail_only = self.task.scope != "full"
         for account_id in self.task.account_ids:
+            if self.task.discovery_complete:
+                break
             account, sync = await self._state(account_id)
+            if self.triage:
+                account = account.model_copy(update={"triage_budget_held": self.task.budget_held})
             try:
                 profile = await self.call(account_id, "get_profile", {})
                 if (
@@ -993,7 +1050,9 @@ class _TaskIO:
                 # resynchronization must recover even in a server check. A
                 # new-mail slice continues later pages with the reads new mail
                 # left, since reading them calls no model (ADR-0326).
-                catch_up = not arrival_check or account.inbox_cursor is None
+                catch_up = (not arrival_check or account.inbox_cursor is None) and not (
+                    self.task.scope != "discovery" and self._ready_for_full_assessment()
+                )
                 if not account.inbox_complete and not sync.inbox_page_open and catch_up:
                     page = await self.call(
                         account_id,
@@ -1040,17 +1099,15 @@ class _TaskIO:
                     )
                     sync.inbox_page_open = False
                     await self._save_sync(account, sync)
-                expired = [] if arrival_check else await self._expired_inbox(account_id)
+                urgent = self._ready_for_full_assessment()
+                expired = [] if arrival_check or urgent else await self._expired_inbox(account_id)
                 for thread in sorted(expired, key=lambda item: -item.priority):
                     if not (await self._import(account_id, thread.provider_thread_id))[0]:
                         break
-                learning = await self.service.learning_context(c.principal, None)
-                if (
-                    not learning.get("paused", False)
-                    and not account.history_complete
-                    and not new_mail_only
-                ):
-                    account, sync = await self._history(account, sync)
+                if not urgent and not new_mail_only and not account.history_complete:
+                    learning = await self.service.learning_context(c.principal, None)
+                    if not learning.get("paused", False):
+                        account, sync = await self._history(account, sync)
                 current_complete = (
                     account.inbox_complete and not sync.change_pending and not sync.change_cursor
                 )
@@ -1078,7 +1135,17 @@ class _TaskIO:
                     ),
                     sync,
                 )
-        if new_mail_only:
+        if self.task.scope == "discovery":
+            if not (self.found_work or self.imported or any(self.full_reads.values())):
+                await self._record_empty_look()
+            return
+        if self.triage and not self.task.discovery_complete:
+            self.task = self.task.model_copy(update={"discovery_complete": True})
+            await self._save("task", str(c.run.id), self.task)
+        if new_mail_only or any(
+            t.arrival and t.arrival.expedited and t.arrival.assessed_at is None
+            for t in self.imported.values()
+        ):
             # Without new mail a slice above the learning share has nothing to pay for (ADR-0298).
             assessed = await self._assess_arrivals()
             if not arrival_check:
@@ -1150,6 +1217,12 @@ class _TaskIO:
                 ),
             )
         else:
+            if self.triage:
+                foreground.sort(
+                    key=lambda t: (
+                        not (t.arrival and t.arrival.expedited and t.arrival.assessed_at is None)
+                    )
+                )
             selected = foreground[:3] + historical[:1]
             selected_ids = {thread.id for thread in selected}
             selected.extend(thread for thread in pending if thread.id not in selected_ids)
@@ -1209,7 +1282,16 @@ class _TaskIO:
             waits for its end, when the newest message is there to rank. A full window a
             change waits on keeps its passes: mail behind it stays unread.
             """
-            if reading and not waiting(thread):
+            if (
+                reading
+                and not waiting(thread)
+                and not (
+                    self.triage
+                    and thread.arrival
+                    and thread.arrival.expedited
+                    and thread.arrival.assessed_at is None
+                )
+            ):
                 return False
             return (
                 prior is None
@@ -1218,13 +1300,55 @@ class _TaskIO:
                 or (waiting(thread) and prior.payload.get("analysis_complete") is not True)
             )
 
+        assessed: list[UUID] = []
+        if self.triage and self.task.scope != "expedited":
+            # Admit one freshly fetched high-signal message before scanning the mailbox.
+            # Remaining slots still serve older expedited and ordinary arrivals.
+            for thread in self.imported.values():
+                if (
+                    thread.arrival
+                    and thread.arrival.expedited
+                    and thread.arrival.assessed_at is None
+                    and thread.messages
+                    and thread.messages[-1].body
+                    and thread.in_inbox
+                ):
+                    await self._assess_arrival(thread)
+                    assessed.append(thread.id)
+                    break
         async with c.uow_factory() as uow:
             recent = [
                 summary
                 async for summary in thread_summaries(uow.email, c.principal)
                 if summary.account_id in self.task.account_ids
+                and summary.id not in assessed
                 and ((summary.in_inbox and summary.updated_at >= since) or waiting(summary))
             ]
+        if self.triage and not assessed:
+            waiting_fast = sorted(
+                (
+                    t
+                    for t in recent
+                    if t.arrival
+                    and t.arrival.expedited
+                    and t.arrival.assessed_at is None
+                    and t.in_inbox
+                ),
+                key=lambda t: t.arrival.discovered_at if t.arrival else t.updated_at,
+            )
+            for summary in waiting_fast:
+                async with c.uow_factory() as uow:
+                    stored = await read_value(
+                        uow.email, c.principal, "thread", str(summary.id), EmailThread
+                    )
+                if stored:
+                    candidate = retained_thread(stored, cutoff)
+                    if candidate.messages and candidate.messages[-1].body:
+                        await self._assess_arrival(candidate)
+                        assessed.append(candidate.id)
+                        break
+            recent = [t for t in recent if t.id not in assessed]
+        async with c.uow_factory() as uow:
             priors = {
                 summary.id: await uow.email.get(c.principal, "assessment", str(summary.id))
                 for summary in recent
@@ -1247,9 +1371,30 @@ class _TaskIO:
             ]
         # Marks are looked for among all saved assessments, not only this shortlist:
         # a conversation archived since its assessment was saved is not in it.
-        await self._resume_reratings()
+        if not self.triage:
+            await self._resume_reratings()
         selected.sort(key=lambda thread: (not waiting(thread), -thread.updated_at.timestamp()))
-        assessed: list[UUID] = []
+        if self.triage:
+            expedited = [
+                s
+                for s in selected
+                if s.arrival and s.arrival.expedited and s.arrival.assessed_at is None
+            ]
+            expedited.sort(key=lambda s: s.arrival.discovered_at if s.arrival else s.updated_at)
+            promoted = {s.id for s in expedited}
+            ordinary = [s for s in selected if s.id not in promoted]
+            # Three fast slots and one oldest pending arrival under sustained load.
+            ordinary.sort(
+                key=lambda s: (s.arrival.discovered_at if s.arrival else s.updated_at, s.updated_at)
+            )
+            selected = (
+                expedited
+                if self.task.scope == "expedited"
+                else expedited[: 3 - len(assessed)]
+                + ordinary[:1]
+                + expedited[3 - len(assessed) :]
+                + ordinary[1:]
+            )
         for summary in selected:
             if len(assessed) >= 4:
                 break
@@ -1266,15 +1411,20 @@ class _TaskIO:
             ):
                 continue
             assessed.append(thread.id)
-            learning = await self.service.learning_context(c.principal, thread)
-            try:
-                await self.assess(thread, learning)
-            except ConflictError as exc:
-                if exc.reason != "email_assessment_stale":
-                    raise
-        if assessed:
+            await self._assess_arrival(thread)
+        if assessed and self.task.scope != "expedited":
             await self._draft_assessed(assessed, cutoff)
+        if self.triage and self.task.scope != "expedited":
+            await self._resume_reratings()
         return bool(assessed)
+
+    async def _assess_arrival(self, thread: EmailThread) -> None:
+        learning = await self.service.learning_context(self.context.principal, thread)
+        try:
+            await self.assess(thread, learning)
+        except ConflictError as exc:
+            if exc.reason != "email_assessment_stale":
+                raise
 
     async def _record_empty_look(self) -> None:
         """Mark a slice that found nothing, so it forms no memory and is later removed."""
@@ -1484,6 +1634,7 @@ class _TaskIO:
         self, account: EmailAccount, sync: EmailSyncState, *, read_limit: int = 8
     ) -> tuple[EmailAccount, EmailSyncState]:
         """Page through one account's changes within this slice's read limit."""
+        c = self.context
         further = False
         # An exhausted history page may still have unread threads. Admit the
         # next delta from its watermark before draining those retained reads.
@@ -1556,18 +1707,28 @@ class _TaskIO:
                     "sequence": str(sync.change_sequence),
                 }
                 previous = sync.change_events.get(key)
+                winner = proposed
                 if previous is not None:
                     old_revision, new_revision = previous["history_id"], proposed["history_id"]
-                    if old_revision.isdigit() and new_revision.isdigit():
-                        if int(old_revision) > int(new_revision):
-                            continue
-                        if (
-                            int(old_revision) == int(new_revision)
-                            and previous["kind"] == "message_deleted"
-                            and proposed["kind"] != "message_deleted"
-                        ):
-                            continue
-                sync.change_events[key] = proposed
+                    if (
+                        old_revision.isdigit()
+                        and new_revision.isdigit()
+                        and (
+                            int(old_revision) > int(new_revision)
+                            or (
+                                int(old_revision) == int(new_revision)
+                                and previous["kind"] == "message_deleted"
+                            )
+                        )
+                    ):
+                        winner = previous
+                sync.change_events[key] = (
+                    merge_history_signal(
+                        winner, previous, proposed, change.get("label_ids", []), c.clock.now()
+                    )
+                    if self.triage
+                    else winner
+                )
                 changed.add(key)
             for key in changed:
                 change = sync.change_events[key]
@@ -1594,7 +1755,31 @@ class _TaskIO:
             if sync.change_page_open:
                 sync.change_start = None
             await self._save_sync(account, sync)
+            # Leave reads for already discovered arrivals during a long page chain.
+            # A live provider read revalidates its labels before provisional placement.
+            if (
+                self.triage
+                and sync.change_pending
+                and sync.change_cursor
+                and self.full_reads.get(account.id, 0) >= read_limit - 2
+            ):
+                break
+        if self.triage and sync.change_pending:
+            sync.change_pending = await self._triage_read_order(account.id, sync)
+        ordinary_read = False
         for provider_id in list(sync.change_pending[:50]):
+            ordinary = (account.id, provider_id) not in self.fast_reads
+            # Preserve an aged ordinary slot, then release the cursor to the next
+            # check. Further routine provider reads would delay the ranking write.
+            if (
+                self.triage
+                and self.task.scope != "discovery"
+                and ordinary
+                and ordinary_read
+                and self._ready_for_full_assessment()
+            ):
+                break
+            ordinary_read |= ordinary
             if self.full_reads.get(account.id, 0) >= read_limit:
                 break
             try:
@@ -1615,12 +1800,62 @@ class _TaskIO:
                 if value["thread_id"] != provider_id
             }
             await self._save_sync(account, sync)
-        if not sync.change_pending:
+        if not sync.change_pending and not sync.change_cursor:
             account = account.model_copy(update={"history_id": sync.change_history})
             sync.change_page_open = False
             sync.change_events = {}
             await self._save_sync(account, sync)
         return account, sync
+
+    async def _triage_read_order(self, account: str, sync: EmailSyncState) -> list[str]:
+        """Choose reads from this snapshot, retaining original observation age across polls."""
+        first_sequence: dict[str, int] = {}
+        inbound: set[str] = set()
+        preferred: set[str] = set()
+        for change in sync.change_events.values():
+            tid = change["thread_id"]
+            key = (account, tid)
+            seq = int(change.get("first_sequence", change["sequence"]))
+            first_sequence[tid] = min(first_sequence.get(tid, seq), seq)
+            observed = (
+                datetime.fromisoformat(change["first_seen"])
+                if "first_seen" in change
+                else self.context.clock.now()
+            )
+            self.observed[key] = min(self.observed.get(key, observed), observed)
+            labels = set(change.get("labels", "").split())
+            if (
+                change.get("inbound") != "1"
+                or labels.intersection({"SPAM", "TRASH", "SENT"})
+                or change.get("removed_inbox") == "1"
+            ):
+                continue
+            inbound.add(key[1])
+            if {"IMPORTANT", "INBOX"} <= labels:
+                preferred.add(key[1])
+        if inbound and (self.partners or self.preferences):
+            keys = [hashlib.sha256(f"{account}:{tid}".encode()).hexdigest() for tid in inbound]
+            async with self.context.uow_factory() as uow:
+                ids = await uow.email.thread_ids_for_sources(self.context.principal, keys)
+                cached = await uow.email.get_thread_summaries(self.context.principal, ids)
+            for row in cached:
+                summary = EmailThread.model_validate(row.payload)
+                tid = summary.provider_thread_id
+                if triage_nomination(summary, self.partners, self.preferences, tid in preferred):
+                    preferred.add(tid)
+                else:
+                    preferred.discard(tid)
+        self.fast_reads.update((account, tid) for tid in preferred)
+        quick = [tid for tid in sync.change_pending if tid in preferred]
+        quick.sort(key=lambda tid: self.observed[(account, tid)])
+        ordinary = [tid for tid in sync.change_pending if tid not in preferred]
+        ordinary.sort(
+            key=lambda tid: (
+                self.observed.get((account, tid), self.context.clock.now()),
+                first_sequence[tid],
+            )
+        )
+        return quick[:3] + ordinary[:1] + quick[3:] + ordinary[1:]
 
     async def _remove_message(
         self, account_id: str, provider_id: str, message_id: str | None
@@ -1666,6 +1901,9 @@ class _TaskIO:
                     "messages": messages,
                     "complete": complete,
                     "revision": thread.revision + 1,
+                    "arrival": thread.arrival
+                    if thread.arrival and message_id and message_id != thread.arrival.message_id
+                    else None,
                     "own_reply_floor": None,
                     "source_fingerprint": fingerprint,
                     "in_inbox": any("INBOX" in message.labels for message in messages),
@@ -1843,7 +2081,8 @@ class _TaskIO:
         if not prior.get("junk_bypassed"):
             return True
         return (
-            self.junk_filter is not None
+            not (self.triage and thread.arrival and thread.arrival.expedited)
+            and self.junk_filter is not None
             and self.junk_filter.enabled
             and self.junk_filter.bypass(
                 prior.get("junk_screen"),
@@ -1884,7 +2123,11 @@ class _TaskIO:
                     thread.id,
                     thread.revision,
                     self._owing_rerating(
-                        {**previous, "profile_revision": learning["profile_revision"]}
+                        {
+                            **previous,
+                            "profile_revision": learning["profile_revision"],
+                            "started_at": None,
+                        }
                     ),
                     run=self.context.run,
                     lease=self.context.lease,
@@ -1900,6 +2143,7 @@ class _TaskIO:
         receipt = (
             None
             if self.junk_filter is None
+            or (self.triage and thread.arrival and thread.arrival.expedited)
             else await self.junk_filter.screen(self.context, thread, learning, previous)
         )
         if self.junk_filter is not None and self.junk_filter.bypass(
@@ -1997,6 +2241,24 @@ class _TaskIO:
         }
         next_cursor = len(segments) if was_complete else selected_index + 1
         rejected = False
+        started_at = self.context.clock.now()
+        starting_cost = self.context.run.usage.cost
+        if thread.arrival is not None:
+            async with self.context.uow_factory() as uow:
+                await uow.events.append(
+                    NewEvent(
+                        session_id=self.context.run.session_id,
+                        run_id=self.context.run.id,
+                        actor_type="runtime",
+                        event_type="email.triage.assessment_started",
+                        payload={
+                            "arrival_id": str(thread.arrival.id),
+                            "account_id": thread.account_id,
+                            "started_at": started_at.isoformat(),
+                        },
+                    ),
+                    lease=self.context.lease,
+                )
         try:
             assessment = await self.model(
                 assessment_instruction(
@@ -2021,6 +2283,9 @@ class _TaskIO:
             )
         assert isinstance(assessment, EmailAssessment)
         value = assessment.model_dump(mode="json")
+        if thread.arrival is not None:
+            value["started_at"] = started_at.isoformat()
+            value["assessment_cost"] = str(self.context.run.usage.cost - starting_cost)
         if receipt is not None:
             value["junk_screen"] = receipt
         quotes = assessment.supported_evidence
@@ -2069,6 +2334,16 @@ class _TaskIO:
             run=self.context.run,
             lease=self.context.lease,
         )
+        if (
+            self.task.triage_mode == EmailTriageMode.SHADOW
+            and self.junk_filter is not None
+            and receipt
+            and receipt.get("status") == "completed"
+            and receipt.get("raw_category") == "keep"
+            and thread.arrival
+            and thread.arrival.assessed_at is None
+        ):
+            await self.junk_filter.screen(self.context, thread, learning, previous, positive=True)
         if self.semantics.enabled and not learning.get("paused"):
             facts = [
                 fact

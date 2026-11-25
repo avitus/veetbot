@@ -301,15 +301,23 @@ class GmailSync:
             raise GmailError("gmail.provider_output_invalid")
         return _history(raw.get("historyId")), identifiers
 
-    def _page_token(self, thread_id: str, history_id: str, offset: int) -> str:
-        data = [1, self.client.credential.account_id, thread_id, history_id, offset]
+    def _page_token(
+        self, thread_id: str, history_id: str, offset: int, newest_first: bool = False
+    ) -> str:
+        data = [
+            2 if newest_first else 1,
+            self.client.credential.account_id,
+            thread_id,
+            history_id,
+            offset,
+        ]
         return (
             base64.urlsafe_b64encode(json.dumps(data, separators=(",", ":")).encode())
             .decode()
             .rstrip("=")
         )
 
-    def _page_position(self, token: str, thread_id: str) -> tuple[str, int]:
+    def _page_position(self, token: str, thread_id: str) -> tuple[str, int, bool]:
         self.client._required_text(token, "page_token", maximum=4096)
         try:
             value = json.loads(
@@ -320,10 +328,16 @@ class GmailSync:
         if (
             not isinstance(value, list)
             or len(value) != 5
-            or value[:3] != [1, self.client.credential.account_id, thread_id]
+            or type(value[0]) is not int
+            or value[0] not in {1, 2}
+            or value[1:3] != [self.client.credential.account_id, thread_id]
         ):
             raise GmailError("gmail.arguments_invalid")
-        return self._history_argument(value[3]), _integer(value[4], 0, UPSTREAM_MAXIMUM_BYTES)
+        return (
+            self._history_argument(value[3]),
+            _integer(value[4], 0, UPSTREAM_MAXIMUM_BYTES),
+            value[0] == 2,
+        )
 
     def _message(self, raw: dict[str, Any], thread_id: str) -> dict[str, Any]:
         """Normalize a verified source message with bounded app-only presentation HTML."""
@@ -374,6 +388,7 @@ class GmailSync:
         thread_id: str,
         max_messages: int,
         page_token: str | None,
+        newest_first: bool = False,
     ) -> dict[str, Any]:
         thread_id = self.client._required_text(thread_id, "thread_id", maximum=1024)
         limit = _integer(max_messages, 1, 10)
@@ -409,6 +424,9 @@ class GmailSync:
         if position is not None and position[0] != revision:
             result["source_changed"] = True
             return result
+        newest_first = position[2] if position else newest_first
+        if newest_first:
+            identifiers.reverse()
         offset = position[1] if position else 0
         if offset > len(identifiers):
             raise GmailError("gmail.arguments_invalid")
@@ -453,7 +471,9 @@ class GmailSync:
             item["body_complete"] and item["headers_complete"] for item in result["messages"]
         )
         if next_offset < len(identifiers):
-            result["next_page_token"] = self._page_token(thread_id, revision, next_offset)
+            result["next_page_token"] = self._page_token(
+                thread_id, revision, next_offset, newest_first
+            )
         return _bounded(result)
 
     async def get_unsubscribe(self, message_id: str) -> dict[str, Any]:

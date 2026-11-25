@@ -181,7 +181,7 @@ thread is archived. New clients must not silently substitute this command when
 the server or selected account lacks archive support.
 
 The approved A2 collection controls add **Inbox**, **Needs you**, and **Handled**.
-Inbox contains cached threads still in Gmail's Inbox whose effective priority is at least 0.1 (ADR-0329); Needs you contains
+Inbox contains cached threads still in Gmail's Inbox whose effective priority is at least 0.1 (ADR-0329), plus expedited arrivals awaiting full assessment under ADR-0355; Needs you contains
 Inbox threads, whatever their priority, with a current reply-needed assessment and no current-revision dismissal;
 Handled contains Inbox threads whose dismissed revision equals their source
 revision. Counts cover all authorized, retained cached threads matching the
@@ -468,6 +468,12 @@ schedule row, Gmail push subscription, notification digest, or general
 device-presence router. An explicitly requested email operation in Chat remains
 available through the ordinary agent independently of the Email refresh timer.
 
+### Time to Important
+
+Under [ADR-0355](../adr/0355-discover-and-triage-new-mail-before-full-assessment.md), the figure of merit is Gmail internal receipt time to the first committed membership of the corresponding inbound arrival in Important. The server applies the same Inbox, importance, feedback, expiry and dismissal rules as the collection endpoint. Group observed placements by account and budget state, compare tail latency and track unassessed expedited arrivals alongside dollars per 100 observed arrivals.
+
+With local triage enabled, a due check can discover at a hard cap. A bounded history page and its pending work share a checkpoint. Current provider Inbox and Important labels, prior correspondence and owner feedback select expedited reads. Older ordinary mail receives a share of each batch. The newest evidence of an expedited conversation can enter full assessment while older pages are pending. Until then a verified expedited arrival can appear at zero score in the ordinary Inbox with its waiting reason. Only the existing grounded ranking or an owner signal admits it to Important. The final paid slice is reserved for expedited assessment. A work-only Jev shadow decision runs on eligible keeps after ranking, using the existing permitted input. Production promotion requires the evidence in ADR-0355.
+
 ### Server arrival checks
 
 Behind `AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED`, off by default, the server also
@@ -478,7 +484,7 @@ within `email.check_interval_seconds` (default 300), read from durable task
 records. Foreground requests therefore defer checks, and existing coalescing joins
 a request to any refresh already running.
 
-An arrival is an Inbox conversation with activity in the last seven days whose
+With triage off, an arrival is an Inbox conversation with activity in the last seven days whose
 current source has not had a pass: never assessed, source changed, or its one
 promised retry pending. A conversation still being read waits until the read ends,
 because each page changes the stored source without new mail. A check reads Gmail
@@ -494,7 +500,7 @@ prompt revision changed, page further through the Inbox, advance the history pas
 re-read expired bodies, verify unsubscribe evidence or write correspondence
 summaries. Foreground slices keep that work, within their scope (ADR-0298).
 
-A check is admitted only when aggregate email charges, live reservations and the
+A paid check is admitted only when aggregate email charges, live reservations and the
 new reservation fit within USD 25 per UTC day, any lower configured daily limit,
 and the full rolling thirty-day allowance (USD 600 in production). A refusal writes no client pause and waits one interval. Each consecutive failed, timed-out or
 conservatively charged check doubles the wait, to 10, 20, 40 and at most 60 minutes;

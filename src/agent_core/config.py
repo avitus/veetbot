@@ -28,6 +28,7 @@ from pydantic import SecretStr, ValidationError
 from agent_core.domain.browser import normalize_browser_origin
 from agent_core.domain.browser_task_grants import BrowserTaskGrantScope, parse_task_grant_scopes
 from agent_core.domain.calls import CallConfiguration
+from agent_core.domain.email import EmailTriageMode
 from agent_core.domain.email_junk import EmailJunkMode
 from agent_core.domain.memory import (
     MemoryDistillationEvidence,
@@ -208,6 +209,7 @@ class Settings:
     mcp_oauth_callback_url: str | None = None
     email_enabled: bool = False
     email_mode_enabled: bool = False
+    email_triage_mode: EmailTriageMode = EmailTriageMode.OFF
     email_junk_filter_mode: EmailJunkMode = EmailJunkMode.OFF
     email_junk_filter_evidence: Path | None = None
     email_unsubscribe_enabled: bool = False
@@ -2438,6 +2440,11 @@ def _load_settings(
         mcp_oauth_callback_url=mcp_oauth_callback_url,
         email_enabled=email_enabled,
         email_mode_enabled=email_mode_enabled,
+        email_triage_mode=_parse_enum(
+            EmailTriageMode,
+            values.get("AGENT_EMAIL_TRIAGE_MODE", "off").strip(),
+            "AGENT_EMAIL_TRIAGE_MODE",
+        ),
         email_junk_filter_mode=email_junk_filter_mode,
         email_junk_filter_evidence=email_junk_filter_evidence,
         email_unsubscribe_enabled=email_unsubscribe_enabled,

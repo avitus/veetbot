@@ -164,10 +164,14 @@ def create_server(mode: str, client: GmailClient) -> MCPServer:
             thread_id: str,
             max_messages: Annotated[int, Field(ge=1, le=10)] = 10,
             page_token: str | None = None,
+            # Omitted on ordinary reads, preserving their normalized invocation and replay.
+            newest_first: bool = Field(default_factory=bool),
         ) -> CallToolResult:
             """Read bounded message pages pinned to one thread revision; restart if changed."""
 
-            return await _call(client.get_thread_page, thread_id, max_messages, page_token)
+            return await _call(
+                client.get_thread_page, thread_id, max_messages, page_token, newest_first
+            )
 
         @server.tool(meta={"veetbot/application-only": True})
         async def get_message_body(

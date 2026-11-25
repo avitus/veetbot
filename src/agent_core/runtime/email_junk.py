@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.email import EmailThread
+from agent_core.domain.email import EmailRecord, EmailThread
 from agent_core.domain.email_junk import (
+    EXPEDITE_POLICY,
+    EXPEDITE_QUESTION,
     JUNK_MODEL,
     JUNK_POLICY,
     JUNK_RESERVATION,
@@ -18,6 +21,7 @@ from agent_core.domain.email_junk import (
     JunkAuthorization,
     JunkPilot,
     JunkStandingAuthorization,
+    expedite_result,
     junk_fingerprint,
     junk_pilot_capacity,
     junk_pilot_keys,
@@ -92,7 +96,13 @@ class EmailJunkFilter:
         )
 
     async def screen(
-        self, c: RunContext, thread: EmailThread, learning: dict[str, Any], previous: dict[str, Any]
+        self,
+        c: RunContext,
+        thread: EmailThread,
+        learning: dict[str, Any],
+        previous: dict[str, Any],
+        *,
+        positive: bool = False,
     ) -> dict[str, Any] | None:
         """Reconcile prior attempts, reserve before egress and settle verified usage atomically."""
         if not self.enabled or self.provider is None:
@@ -104,18 +114,29 @@ class EmailJunkFilter:
         request = junk_request(thread, learning, c.clock.now())
         if request is None:
             return None
+        if positive:
+            if self.mode != EmailJunkMode.OWNER_FILTER or thread.account_id != "work":
+                return None
+            request = request.model_copy(update={"questions": {"expedite": EXPEDITE_QUESTION}})
+        prefix = "email.triage.positive" if positive else "email.junk"
         fingerprint = junk_fingerprint(request, thread, learning)
-        cached = previous.get("junk_screen")
+        if positive:
+            fingerprint = hashlib.sha256(
+                f"{EXPEDITE_POLICY}:{self.revision}:{fingerprint}".encode()
+            ).hexdigest()
+        cached = previous.get("positive_screen" if positive else "junk_screen")
         if isinstance(cached, dict) and cached.get("fingerprint") == fingerprint:
             return cached
         fallback: dict[str, Any] = {
             "fingerprint": fingerprint,
-            "policy": JUNK_POLICY,
+            "policy": EXPEDITE_POLICY if positive else JUNK_POLICY,
             "model": JUNK_MODEL,
             "category": "keep",
             "probability": 0.0,
             "status": "uncertain",
         }
+        if positive and thread.arrival:
+            fallback.update(arrival_id=str(thread.arrival.id), account_id=thread.account_id)
         # Reconcile a possibly dispatched judgment before considering another request.
         async with c.uow_factory() as uow, uow.email.lock(c.principal):
             if self.pilot is not None:
@@ -133,11 +154,11 @@ class EmailJunkFilter:
             matching = [
                 e
                 for e in events
-                if e.event_type.startswith("email.junk.")
+                if e.event_type.startswith(prefix + ".")
                 and e.payload.get("fingerprint") == fingerprint
             ]
             for event in reversed(matching):
-                if event.event_type == "email.junk.completed":
+                if event.event_type == prefix + ".completed":
                     return dict(event.payload)
             if matching:
                 return fallback
@@ -159,6 +180,42 @@ class EmailJunkFilter:
                 c.principal, thread.account_id, c.clock.now()
             ):
                 return None
+            if positive:
+                current = await uow.email.get(c.principal, "thread", str(thread.id))
+                state = await uow.email.get(c.principal, "learning", "shared")
+                revision_now = state.payload.get("profile_revision", 1) if state else 1
+                if (
+                    current is None
+                    or not current.payload.get("in_inbox")
+                    or current.payload.get("in_spam")
+                    or current.payload.get("spam_cleared")
+                    or revision_now != learning.get("profile_revision")
+                    or current.payload.get("source_fingerprint") != thread.source_fingerprint
+                ):
+                    return None
+                verified = junk_request(
+                    EmailThread.model_validate(current.payload), learning, c.clock.now()
+                )
+                if verified is None or verified.state != request.state:
+                    return None
+                cached_row = await uow.email.get(c.principal, "positive_screen", str(thread.id))
+                if cached_row and cached_row.payload.get("fingerprint") == fingerprint:
+                    return dict(cached_row.payload)
+                now = c.clock.now()
+                revision = 0 if cached_row is None else cached_row.revision
+                await uow.email.put(
+                    EmailRecord(
+                        tenant_id=c.principal.tenant_id,
+                        principal_id=c.principal.principal_id,
+                        kind="positive_screen",
+                        key=str(thread.id),
+                        revision=revision + 1,
+                        payload=fallback,
+                        created_at=cached_row.created_at if cached_row else now,
+                        updated_at=now,
+                    ),
+                    expected_revision=revision,
+                )
             # Reserve before egress in the same fenced transaction as the audit event.
             updated = c.run.model_copy(deep=True)
             updated.usage.cost += JUNK_RESERVATION
@@ -167,7 +224,7 @@ class EmailJunkFilter:
                 NewEvent(
                     session_id=c.run.session_id,
                     run_id=c.run.id,
-                    event_type="email.junk.started",
+                    event_type=prefix + ".started",
                     actor_type="runtime",
                     payload={**fallback, "reserved_cost": str(JUNK_RESERVATION)},
                 ),
@@ -183,7 +240,10 @@ class EmailJunkFilter:
             actual = result.usage.cost
             if not actual.is_finite() or actual < 0:
                 actual = None
-            receipt = {**fallback, **junk_result(request, result)}
+            receipt = {
+                **fallback,
+                **(expedite_result(request, result) if positive else junk_result(request, result)),
+            }
         except JudgmentProviderError as exc:
             if exc.reason in {
                 JudgmentFailure.AUTH_FAILED,
@@ -210,11 +270,25 @@ class EmailJunkFilter:
                 NewEvent(
                     session_id=c.run.session_id,
                     run_id=c.run.id,
-                    event_type="email.junk.completed",
+                    event_type=prefix + ".completed",
                     actor_type="runtime",
                     payload=receipt,
                 ),
                 lease=c.lease,
             )
+            if positive:
+                # An erasure or a newer source can retire this claim while the provider replies.
+                row = await uow.email.get(c.principal, "positive_screen", str(thread.id))
+                if row and row.payload.get("fingerprint") == fingerprint:
+                    await uow.email.put(
+                        row.model_copy(
+                            update={
+                                "revision": row.revision + 1,
+                                "payload": receipt,
+                                "updated_at": c.clock.now(),
+                            }
+                        ),
+                        expected_revision=row.revision,
+                    )
         c.run.usage = updated.usage
         return receipt

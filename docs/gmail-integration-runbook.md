@@ -992,3 +992,18 @@ resets the cap. Missing, malformed, future-dated or policy/model-mismatched
 permission stops new calls. A model/question change requires newly reviewed
 matching evidence. Roll back with `off` and restart the four roles; cached mail
 returns to ordinary assessment through subsequent bounded refreshes.
+
+### Measure receipt to Important
+
+The primary measure runs from the provider's internal receipt timestamp to the first committed placement in Veetbot's Important inbox. A waiting entry appears in the ordinary Inbox. An owner mark has its own placement cause. The measurement describes server availability. Device rendering can follow on its next refresh.
+
+Run the read-only report against one owner's retained events and task ledger. The timestamp selects a half-open seven-day receipt window. The pending queue query always describes the current snapshot.
+
+```sh
+psql -X -v tenant="$tenant_id" -v owner="$principal_id" -v end_utc="$end_utc" \
+  -f scripts/email_triage_latency.sql
+```
+
+Compare p50, p95 and worst placement time by account and budget state. Investigate expedited arrivals waiting over 15 minutes against account health, paid capacity and queue progress. Include observed arrivals without a placement, and check recent Gmail arrivals against the retained cohort when evaluating coverage. Late unseen mail and arrivals superseded before import need independent reconciliation. Refresh dollars per 100 observed arrivals include settled charges for both models and conservative accounting. Record unsettled runs, drain deferred work, and compare matching periods and owner-labeled outcomes before claiming savings.
+
+Keep background checks enabled for closed-client polling. Set `AGENT_EMAIL_TRIAGE_MODE=local` for provider and relationship ordering on both accounts. Set `shadow` for an additional positive Jev observation on eligible work-account keeps under the standing filter. Shadow uses the existing dollar allowance and cannot promote or suppress a message. Return to `off` to stop admitting new triage tasks and retain the existing cursors. In-flight tasks retain their admitted scope. Compare the same receipt-to-Important measure across modes before promoting a policy.

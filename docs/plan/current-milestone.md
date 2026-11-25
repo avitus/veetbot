@@ -87,6 +87,8 @@ title: Current Milestone
   setting, or scope. Pull request 232 delivered it on 2026-11-04; no real-mailbox
   trial is recorded. No milestone or gate moves.
 
+- On 2026-11-25 the owner approved [two-stage email triage](../adr/0355-discover-and-triage-new-mail-before-full-assessment.md) and selected time from receipt to Important as its figure of merit within existing cost limits. Work-only Jev positive promotion is evidence-gated.
+
 - **Server email checks — ADR-0286:** On 2026-11-01 the owner accepted
   [the decision](../adr/0286-server-checks-for-new-mail.md) and authorized its
   implementation on `email-checks`. A default-off maintenance pass checks for new

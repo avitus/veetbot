@@ -67,6 +67,7 @@ class EmailRecord(EmailValue):
 
 
 class EmailAccount(EmailValue):
+    triage_budget_held: bool | None = None
     id: str
     label: str
     email_address: str | None = None
@@ -252,7 +253,33 @@ def archive_result_matches(consent: EmailArchiveConsent, result: dict[str, Any] 
     )
 
 
+class EmailTriageMode(StrEnum):
+    OFF = "off"
+    LOCAL = "local"
+    SHADOW = "shadow"
+
+
+class EmailArrival(EmailValue):
+    """Timing of the newest inbound message, anchored to Gmail internalDate."""
+
+    id: UUID
+    message_id: str
+    received_at: AwareDatetime
+    discovered_at: AwareDatetime
+    expedited: bool
+    budget_held: bool = False
+    assessment_started_at: AwareDatetime | None = None
+    assessed_at: AwareDatetime | None = None
+    important_at: AwareDatetime | None = None
+
+
 class EmailThread(EmailValue):
+    arrival: EmailArrival | None = None
+
+    def in_important(self) -> bool:
+        """Membership after applying owner feedback and expiry."""
+        return self.in_inbox and self.priority >= 0.7 and self.dismissed_revision != self.revision
+
     id: UUID
     account_id: str
     provider_thread_id: str
@@ -406,7 +433,10 @@ class EmailTask(EmailValue):
     budget_charge_reason: Literal["incomplete_usage", "missing_run"] | None = None
     # A refresh admitted above the learning share reads only new mail (ADR-0256);
     # a server check handles only arrivals (ADR-0286).
-    scope: Literal["full", "new_mail", "arrivals"] = "full"
+    triage_mode: EmailTriageMode = EmailTriageMode.OFF
+    discovery_complete: bool = False
+    budget_held: bool = False
+    scope: Literal["full", "new_mail", "arrivals", "discovery", "expedited"] = "full"
     # A server check that found nothing to do; removed after a retention window.
     empty_check: bool = False
     stage: str = "queued"
@@ -563,6 +593,66 @@ def feedback_matches(feedback: EmailFeedback, thread: EmailThread) -> bool:
             except ValueError:
                 continue
     return bool(set(feedback.target_values) & set(candidates))
+
+
+def pending_review_status(thread: EmailThread, account: EmailAccount | None) -> EmailThread:
+    """Explain the current wait even when this poll did not reread the conversation."""
+    arrival = thread.arrival
+    if not account or not arrival or not arrival.expedited or arrival.assessed_at:
+        return thread
+    held = arrival.budget_held if account.triage_budget_held is None else account.triage_budget_held
+    if account.status == "unavailable":
+        reason = (
+            "Full assessment is waiting for Gmail and budget."
+            if held
+            else "Full assessment is waiting for Gmail."
+        )
+    else:
+        reason = "Full assessment is waiting for budget." if held else "Full assessment queued."
+    return thread if thread.reason == reason else thread.model_copy(update={"reason": reason})
+
+
+def expedite_thread(thread: EmailThread, partners: set[str], feedback: list[EmailFeedback]) -> bool:
+    """Local nomination. Only current inbound Inbox evidence can expedite an assessment."""
+    if not thread.messages or not thread.in_inbox or thread.in_spam:
+        return False
+    latest = thread.messages[-1]
+    if (
+        latest.direction != "received"
+        or "INBOX" not in latest.labels
+        or {"SPAM", "TRASH", "SENT"}.intersection(latest.labels)
+    ):
+        return False
+    return triage_nomination(
+        thread,
+        partners if latest.sender_check != "fail" else set(),
+        feedback,
+        "IMPORTANT" in latest.labels,
+    )
+
+
+def triage_nomination(
+    thread: EmailThread, partners: set[str], feedback: list[EmailFeedback], important_label: bool
+) -> bool:
+    """Fold owner feedback and relationship signals without loading message bodies."""
+    matches = sorted(
+        (f for f in feedback if feedback_matches(f, thread)),
+        key=lambda f: (f.created_at, str(f.id)),
+        reverse=True,
+    )
+    explicit = next((f for f in matches if f.judgment in {"important", "less_important"}), None)
+    if explicit:
+        return explicit.judgment == "important"
+    reply = next((f for f in matches if f.judgment in {"needs_reply", "no_reply_needed"}), None)
+    if important_label or (reply is not None and reply.judgment == "needs_reply"):
+        return True
+    for sender in thread.senders if partners else ():
+        try:
+            if partners.intersection(addresses([sender])):
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def apply_feedback(

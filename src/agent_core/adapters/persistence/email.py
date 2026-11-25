@@ -150,6 +150,17 @@ class InMemoryEmailStore:
         )
         return [record.model_copy(deep=True) for record in selected[:limit]]
 
+    async def thread_ids_for_sources(
+        self, principal: Principal, keys: Sequence[str]
+    ) -> builtins.list[str]:
+        _validate_keys(keys)
+        owner = (principal.tenant_id, principal.principal_id, "thread_source")
+        return [
+            str(row.payload["thread_id"])
+            for key in set(keys)
+            if (row := self._records.get((*owner, key)))
+        ]
+
     async def list_thread_summaries(
         self, principal: Principal, *, after: str | None = None, limit: int = 1000
     ) -> builtins.list[EmailRecord]:
@@ -436,6 +447,19 @@ class PostgresEmailStore:
             .all()
         )
         return [email_record_to_domain(row) for row in rows]
+
+    async def thread_ids_for_sources(
+        self, principal: Principal, keys: Sequence[str]
+    ) -> builtins.list[str]:
+        _validate_keys(keys)
+        query = select(EmailRecordRow.payload["thread_id"].astext).where(
+            EmailRecordRow.tenant_id == principal.tenant_id,
+            EmailRecordRow.principal_id == principal.principal_id,
+            EmailRecordRow.kind == "thread_source",
+            EmailRecordRow.key.in_(set(keys)),
+            ~EmailRecordRow.erasure_pending,
+        )
+        return list((await self._session.scalars(query)).all()) if keys else []
 
     async def list_thread_summaries(
         self, principal: Principal, *, after: str | None = None, limit: int = 1000

@@ -54,6 +54,12 @@ class EmailStore(Protocol):
         self, principal: Principal, kind: str, *, after: str | None = None, limit: int = 1000
     ) -> list[EmailRecord]: ...
 
+    async def thread_ids_for_sources(
+        self, principal: Principal, keys: Sequence[str]
+    ) -> builtins.list[str]:
+        """Resolve at most 1,000 account-qualified source keys without reading mail bodies."""
+        ...
+
     async def list_thread_summaries(
         self, principal: Principal, *, after: str | None = None, limit: int = 1000
     ) -> builtins.list[EmailRecord]:
@@ -310,6 +316,10 @@ class EmailRuntimeServices(Protocol):
         *,
         run: Run | None = None,
         lease: WorkerLease | None = None,
+        observed_at: datetime | None = None,
+        budget_held: bool = False,
+        learn_history: bool = True,
+        reply_partners: set[str] | None = None,
     ) -> EmailThread: ...
 
     async def save_assessment(

@@ -5490,7 +5490,10 @@ async def _compose(
                             if session.metadata.get(SESSION_EMAIL_OPERATIONAL_METADATA_KEY) is True
                             else None
                         )
-                        if record is not None and record.payload.get("empty_check") is True:
+                        if record is not None and (
+                            record.payload.get("empty_check") is True
+                            or record.payload.get("scope") in {"discovery", "expedited"}
+                        ):
                             completed = None
                         else:
                             await uow.events.append(
@@ -6435,6 +6438,7 @@ async def _compose(
                 ),
                 agent=agent,
                 budget_limits=email_budget_limits,
+                triage_mode=settings.email_triage_mode,
                 dispatch=dispatcher.dispatch,
                 seed_checkpoint=checkpoint_seeder,
                 catalogs=skill_catalogs,

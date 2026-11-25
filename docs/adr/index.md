@@ -27,6 +27,7 @@ title: Architecture Decisions
 - [ADR-0352: Scale a multi-word recall match to the available evidence (Proposed)](0352-scale-multiword-recall-to-available-evidence.md)
 - [ADR-0353: Measure how the indexed text affects weak semantic matches (Experiment rejected)](0353-measure-weak-semantic-matches.md)
 - [ADR-0354: Verify expected browser extraction rows (Accepted)](0354-verify-expected-browser-extraction-rows.md)
+- [ADR-0355: Discover and triage new mail before full assessment (Accepted)](0355-discover-and-triage-new-mail-before-full-assessment.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the
