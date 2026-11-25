@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from decimal import Decimal
 from email.utils import getaddresses
@@ -437,10 +438,26 @@ class EmailTask(EmailValue):
     discovery_complete: bool = False
     budget_held: bool = False
     scope: Literal["full", "new_mail", "arrivals", "discovery", "expedited"] = "full"
+    # Whether the server's own check for new mail asked for this refresh. Unset on
+    # tasks written before the origin was kept; `server_check` reads those.
+    arrival_check: bool | None = None
     # A server check that found nothing to do; removed after a retention window.
     empty_check: bool = False
     stage: str = "queued"
     state: dict[str, object] = Field(default_factory=dict)
+
+    @property
+    def server_check(self) -> bool:
+        """Whether the server's own check asked for this refresh.
+
+        Scope cannot say: the budget can hold a foreground refresh to discovery
+        or to expedited arrivals too. A task written before the origin was kept
+        is a server check only in the `arrivals` scope, the one scope those
+        tasks reserved for it.
+        """
+        if self.arrival_check is not None:
+            return self.arrival_check
+        return self.scope == "arrivals"
 
 
 class EmailDraftEdit(EmailValue):
@@ -595,6 +612,11 @@ def feedback_matches(feedback: EmailFeedback, thread: EmailThread) -> bool:
     return bool(set(feedback.target_values) & set(candidates))
 
 
+# The waits an import stores for an expedited arrival that has no assessment yet.
+TRIAGE_QUEUED_REASON = "Full assessment queued."
+TRIAGE_BUDGET_HELD_REASON = "Full assessment is waiting for budget."
+
+
 def pending_review_status(thread: EmailThread, account: EmailAccount | None) -> EmailThread:
     """Explain the current wait even when this poll did not reread the conversation."""
     arrival = thread.arrival
@@ -608,7 +630,7 @@ def pending_review_status(thread: EmailThread, account: EmailAccount | None) -> 
             else "Full assessment is waiting for Gmail."
         )
     else:
-        reason = "Full assessment is waiting for budget." if held else "Full assessment queued."
+        reason = TRIAGE_BUDGET_HELD_REASON if held else TRIAGE_QUEUED_REASON
     return thread if thread.reason == reason else thread.model_copy(update={"reason": reason})
 
 
@@ -628,13 +650,29 @@ def expedite_thread(thread: EmailThread, partners: set[str], feedback: list[Emai
         partners if latest.sender_check != "fail" else set(),
         feedback,
         "IMPORTANT" in latest.labels,
+        # Gmail's verdict belongs to one message: a sender it failed there lends
+        # no partner evidence to a later message from someone else.
+        partner_senders=[
+            message.sender
+            for message in thread.messages
+            if message.direction == "received" and message.sender_check != "fail"
+        ],
     )
 
 
 def triage_nomination(
-    thread: EmailThread, partners: set[str], feedback: list[EmailFeedback], important_label: bool
+    thread: EmailThread,
+    partners: set[str],
+    feedback: list[EmailFeedback],
+    important_label: bool,
+    *,
+    partner_senders: Sequence[str] | None = None,
 ) -> bool:
-    """Fold owner feedback and relationship signals without loading message bodies."""
+    """Fold owner feedback and relationship signals without loading message bodies.
+
+    A message-free summary offers only `thread.senders`; a caller holding the
+    messages names the senders whose own sender check did not fail.
+    """
     matches = sorted(
         (f for f in feedback if feedback_matches(f, thread)),
         key=lambda f: (f.created_at, str(f.id)),
@@ -646,7 +684,8 @@ def triage_nomination(
     reply = next((f for f in matches if f.judgment in {"needs_reply", "no_reply_needed"}), None)
     if important_label or (reply is not None and reply.judgment == "needs_reply"):
         return True
-    for sender in thread.senders if partners else ():
+    senders = thread.senders if partner_senders is None else partner_senders
+    for sender in senders if partners else ():
         try:
             if partners.intersection(addresses([sender])):
                 return True

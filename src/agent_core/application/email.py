@@ -43,6 +43,8 @@ from agent_core.domain.email import (
     EMAIL_POLICY_VERSION,
     EMAIL_QUEUE_ALLOWANCE_SECONDS,
     EMAIL_SLICE_RESERVATION,
+    TRIAGE_BUDGET_HELD_REASON,
+    TRIAGE_QUEUED_REASON,
     EmailAccount,
     EmailArchiveConsent,
     EmailArchiveOperation,
@@ -780,13 +782,21 @@ class EmailExperienceService:
                 or not candidate.source_session_ids
             ):
                 continue
-            current = await self._thread(uow.email, principal, candidate.id)
+            # One read serves both the full conversation and the revision its save needs.
+            row, current = await self._thread_with_record(uow.email, principal, candidate.id)
             marked = await self._mark_important(
                 uow, current, feedback, current.source_session_ids[-1], None, None, "owner_feedback"
             )
             if marked is not current:
-                await save_value(
-                    uow.email, principal, "thread", str(current.id), marked, self.clock.now()
+                await uow.email.put(
+                    row.model_copy(
+                        update={
+                            "revision": row.revision + 1,
+                            "payload": marked.model_dump(mode="json"),
+                            "updated_at": self.clock.now(),
+                        }
+                    ),
+                    expected_revision=row.revision,
                 )
 
     async def _save_feedback(
@@ -1485,15 +1495,24 @@ class EmailExperienceService:
                 monthly_spent += imported.settled_cost
                 if created.date() == now.date():
                     daily_spent += imported.settled_cost
-        if protect_arrivals and self.triage_mode != EmailTriageMode.OFF and share == 1:
-            reserve = min(
-                EMAIL_SLICE_RESERVATION, self.agent.limits.max_cost or EMAIL_SLICE_RESERVATION
-            )
+        configured_daily_limit = daily_limit
+        protected = protect_arrivals and self.triage_mode != EmailTriageMode.OFF and share == 1
+        reserve = min(
+            EMAIL_SLICE_RESERVATION, self.agent.limits.max_cost or EMAIL_SLICE_RESERVATION
+        )
+
+        def daily_limit_for(spent_that_day: Decimal) -> Decimal:
+            """The day's limit, which depends on what that day has already counted."""
+            if not protected:
+                return configured_daily_limit
             # Foreground and People work also count against the server check's
             # daily cap. Protect its last slot while a background check can use it.
-            if daily_spent + reserved < EMAIL_ARRIVAL_DAILY_CAP:
-                daily_limit = min(daily_limit, EMAIL_ARRIVAL_DAILY_CAP)
-            daily_limit -= reserve
+            if spent_that_day + reserved < EMAIL_ARRIVAL_DAILY_CAP:
+                return min(configured_daily_limit, EMAIL_ARRIVAL_DAILY_CAP) - reserve
+            return configured_daily_limit - reserve
+
+        daily_limit = daily_limit_for(daily_spent)
+        if protected:
             monthly_limit -= reserve
         if (
             daily_spent + reserved + amount <= daily_limit
@@ -1519,8 +1538,10 @@ class EmailExperienceService:
             while expired < len(settled) and settled[expired][0] < candidate - timedelta(days=30):
                 monthly -= settled[expired][1]
                 expired += 1
+            # The same gate, with that day's own spending: a stale limit could
+            # name a time the next attempt refuses again.
             if (
-                daily + reserved + amount <= daily_limit
+                daily + reserved + amount <= daily_limit_for(daily)
                 and monthly + reserved + amount <= monthly_limit
             ):
                 retry_at = candidate
@@ -1923,6 +1944,7 @@ class EmailExperienceService:
                 created_at=now,
                 reservation=reservation,
                 scope=admitted,
+                arrival_check=arrival_check if kind == "refresh" else None,
                 budget_held=budget_held,
                 triage_mode=self.triage_mode if triage else EmailTriageMode.OFF,
                 archive_consent=(
@@ -2147,7 +2169,7 @@ class EmailExperienceService:
             failures = 0
             for task in recent[:EMAIL_ARRIVAL_MAX_FAILURES_COUNTED]:
                 # A failed foreground refresh defers a check but is not a failed check.
-                failed = 1 if task.scope in {"arrivals", "discovery", "expedited"} else 0
+                failed = 1 if task.server_check else 0
                 try:
                     run = await uow.runs.get(task.run_id, principal)
                 except NotFoundError:
@@ -2160,8 +2182,7 @@ class EmailExperienceService:
                 # A completed refresh resets the count, unless it is a check charged
                 # conservatively, which counts as a failure.
                 if run.status is RunStatus.COMPLETED and (
-                    task.scope not in {"arrivals", "discovery", "expedited"}
-                    or task.budget_charge is None
+                    not task.server_check or task.budget_charge is None
                 ):
                     break
                 failures += failed
@@ -3522,32 +3543,54 @@ class EmailExperienceService:
                         else previous.assessment_version,
                     }
                 )
-                if updated.arrival is not None and observed_at is not None:
+                known = updated.arrival
+                # Mail cached by a historical import has no arrival. Its first live
+                # observation starts one while its content still awaits assessment,
+                # under the rule that admits newly read mail below.
+                first_seen = (
+                    known is None
+                    and observed_at is not None
+                    and not updated.assessment_version
+                    and bool(messages)
+                    and messages[-1].direction == "received"
+                    and messages[-1].sent_at >= now - timedelta(days=7)
+                    and in_inbox
+                )
+                if observed_at is not None and (known is not None or first_seen):
                     feedback = await self._feedback(uow.email, principal)
                     expedited = self.triage_mode != EmailTriageMode.OFF and expedite_thread(
                         updated, reply_partners or set(), feedback
                     )
-                    updated = updated.model_copy(
+                    arrival = known or EmailArrival(
+                        id=uuid5(updated.id, messages[-1].id),
+                        message_id=messages[-1].id,
+                        received_at=messages[-1].sent_at,
+                        discovered_at=observed_at,
+                        expedited=expedited,
+                    )
+                    arrival = arrival.model_copy(
                         update={
-                            "arrival": updated.arrival.model_copy(
-                                update={
-                                    "expedited": expedited,
-                                    "budget_held": budget_held
-                                    and updated.arrival.assessed_at is None,
-                                }
-                            )
+                            "expedited": expedited,
+                            "budget_held": budget_held and arrival.assessed_at is None,
                         }
                     )
-                    if expedited and updated.arrival and updated.arrival.assessed_at is None:
-                        updated = updated.model_copy(
-                            update={
-                                "reason": (
-                                    "Full assessment is waiting for budget."
+                    updated = updated.model_copy(update={"arrival": arrival})
+                    if arrival.assessed_at is None:
+                        if expedited:
+                            updated = updated.model_copy(
+                                update={
+                                    "reason": TRIAGE_BUDGET_HELD_REASON
                                     if budget_held
-                                    else "Full assessment queued."
-                                )
-                            }
-                        )
+                                    else TRIAGE_QUEUED_REASON
+                                }
+                            )
+                        elif updated.reason in {TRIAGE_BUDGET_HELD_REASON, TRIAGE_QUEUED_REASON}:
+                            # The nomination is gone; so is the wait only it explained.
+                            updated = updated.model_copy(
+                                update={"reason": EmailThread.model_fields["reason"].default}
+                            )
+                    if known is None:
+                        await self._discovered(uow, updated, arrival, source_session_id, run, lease)
                     updated = await self._mark_important(
                         uow, updated, feedback, source_session_id, run, lease, "mailbox_change"
                     )
@@ -3628,9 +3671,7 @@ class EmailExperienceService:
                     update={
                         "arrival": arrival,
                         "reason": (
-                            "Full assessment is waiting for budget."
-                            if budget_held
-                            else "Full assessment queued."
+                            TRIAGE_BUDGET_HELD_REASON if budget_held else TRIAGE_QUEUED_REASON
                         )
                         if arrival.expedited
                         else thread.reason,
@@ -3691,24 +3732,7 @@ class EmailExperienceService:
                             }
                         )
                 if previous_arrival is None or previous_arrival.id != arrival.id:
-                    await uow.events.append(
-                        NewEvent(
-                            session_id=source_session_id,
-                            run_id=run.id if run else None,
-                            event_type="email.triage.discovered",
-                            actor_type="application",
-                            payload={
-                                "arrival_id": str(arrival.id),
-                                "account_id": account_id,
-                                "mode": self.triage_mode,
-                                "received_at": arrival.received_at.isoformat(),
-                                "discovered_at": arrival.discovered_at.isoformat(),
-                                "expedited": arrival.expedited,
-                                "budget_held": arrival.budget_held,
-                            },
-                        ),
-                        lease=lease,
-                    )
+                    await self._discovered(uow, thread, arrival, source_session_id, run, lease)
                 thread = await self._mark_important(
                     uow, thread, feedback, source_session_id, run, lease, "discovery"
                 )
@@ -3763,6 +3787,35 @@ class EmailExperienceService:
                 await self._learn_history(uow.email, principal, thread, automatic=run is not None)
             return thread
 
+    async def _discovered(
+        self,
+        uow: RepositoryUnitOfWork,
+        thread: EmailThread,
+        arrival: EmailArrival,
+        session_id: UUID,
+        run: Run | None,
+        lease: WorkerLease | None,
+    ) -> None:
+        """Record the receipt that starts an arrival's measured wait."""
+        await uow.events.append(
+            NewEvent(
+                session_id=session_id,
+                run_id=run.id if run else None,
+                event_type="email.triage.discovered",
+                actor_type="application",
+                payload={
+                    "arrival_id": str(arrival.id),
+                    "account_id": thread.account_id,
+                    "mode": self.triage_mode,
+                    "received_at": arrival.received_at.isoformat(),
+                    "discovered_at": arrival.discovered_at.isoformat(),
+                    "expedited": arrival.expedited,
+                    "budget_held": arrival.budget_held,
+                },
+            ),
+            lease=lease,
+        )
+
     async def _learn_history(
         self,
         store: EmailStore,
@@ -3772,6 +3825,9 @@ class EmailExperienceService:
         automatic: bool = False,
     ) -> None:
         """Learn eligible owner-authored Sent evidence without duplicating source contributions."""
+        if not any(message.direction == "sent" and message.complete for message in thread.messages):
+            # Nothing here can teach style or correspondence; skip the draft scans.
+            return
         state = await self._learning_state(store, principal)
         if state.paused:
             return
@@ -3908,28 +3964,44 @@ class EmailExperienceService:
             or not apply_feedback(thread, feedback, now=now).in_important()
         ):
             return thread
-        await uow.events.append(
-            NewEvent(
-                session_id=session_id,
-                run_id=run.id if run else None,
-                event_type="email.triage.important",
-                actor_type="application",
-                payload={
-                    "account_id": thread.account_id,
-                    "cause": cause,
-                    "arrival_id": str(arrival.id),
-                    "mode": self.triage_mode,
-                    "received_at": arrival.received_at.isoformat(),
-                    "discovered_at": arrival.discovered_at.isoformat(),
-                    "assessment_started_at": arrival.assessment_started_at.isoformat()
-                    if arrival.assessment_started_at
-                    else None,
-                    "important_at": now.isoformat(),
-                    "elapsed_ms": int((now - arrival.received_at).total_seconds() * 1000),
-                },
-            ),
-            lease=lease,
+        # A run's own session exists. An owner action names the thread's source
+        # sessions, which the owner may since have deleted: the placement then
+        # stands on the arrival record, and the timing event goes to the newest
+        # source session that survives, or nowhere when none does.
+        sessions = (
+            [session_id]
+            if run is not None
+            else list(dict.fromkeys([session_id, *reversed(thread.source_session_ids)]))
         )
+        for candidate in sessions:
+            try:
+                await uow.events.append(
+                    NewEvent(
+                        session_id=candidate,
+                        run_id=run.id if run else None,
+                        event_type="email.triage.important",
+                        actor_type="application",
+                        payload={
+                            "account_id": thread.account_id,
+                            "cause": cause,
+                            "arrival_id": str(arrival.id),
+                            "mode": self.triage_mode,
+                            "received_at": arrival.received_at.isoformat(),
+                            "discovered_at": arrival.discovered_at.isoformat(),
+                            "assessment_started_at": arrival.assessment_started_at.isoformat()
+                            if arrival.assessment_started_at
+                            else None,
+                            "important_at": now.isoformat(),
+                            "elapsed_ms": int((now - arrival.received_at).total_seconds() * 1000),
+                        },
+                    ),
+                    lease=lease,
+                )
+            except NotFoundError:
+                if run is not None:
+                    raise
+                continue
+            break
         return thread.model_copy(
             update={"arrival": arrival.model_copy(update={"important_at": now})}
         )

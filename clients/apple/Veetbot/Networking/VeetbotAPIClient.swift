@@ -1062,15 +1062,21 @@ public struct VeetbotAPIClient: Sendable {
     /// Reads a plain-words description into an unsaved draft (ADR-0225 part B).
     /// The form shows the script approval before Create, so it asks the
     /// server to carry that approval in the draft (ADR-0342 decision 13).
+    /// A server from before that decision rejects the field it does not know;
+    /// the draft is then read without it, and comes back unapproved.
     public func draftSchedule(text: String, timezone: String) async throws -> ScheduleDraftView {
-        try await transport.send(TransportRequest(
-            method: .post, path: "/v1/schedules/drafts",
-            body: try JSONEncoder.server.encode(JSONValue.object([
-                "text": .string(text),
-                "timezone": .string(timezone),
-                "offer_script_approval": .bool(true),
-            ]))
-        ))
+        let request: [String: JSONValue] = ["text": .string(text), "timezone": .string(timezone)]
+        func read(_ body: [String: JSONValue]) async throws -> ScheduleDraftView {
+            try await transport.send(TransportRequest(
+                method: .post, path: "/v1/schedules/drafts",
+                body: try JSONEncoder.server.encode(JSONValue.object(body))
+            ))
+        }
+        do {
+            return try await read(request.merging(["offer_script_approval": .bool(true)]) { $1 })
+        } catch HTTPTransportError.api(let apiError) where apiError.code == .malformedRequest {
+            return try await read(request)
+        }
     }
 
     /// Creates a schedule from a definition the server derived, unchanged.

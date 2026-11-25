@@ -398,6 +398,36 @@ import FoundationNetworking
         #expect(model.items.map(\.id) == [scheduleID])
     }
 
+    /// A server from before ADR-0342 decision 13 rejects the field it does not
+    /// know. The form asks again without it and shows the unapproved draft.
+    @Test
+    func testANewScheduleIsStillReadByAServerThatDoesNotKnowTheScriptApproval() async throws {
+        let recorder = ScheduleRequestRecorder()
+        let model = try makeModel { request in
+            recorder.append(request)
+            let asked = (try? Self.body(request)["offer_script_approval"]) != nil
+            if asked {
+                return Self.response(
+                    request, statusCode: 400,
+                    body: #"{"error":{"code":"malformed_request","message":"The request body or parameters are malformed: body.offer_script_approval.","details":{},"request_id":"r"}}"#
+                )
+            }
+            return Self.response(request, body: Self.draftJSON)
+        }
+
+        await model.readDraft("Every weekday at 7 am, tell me what needs me today.", timezone: "America/Los_Angeles")
+
+        guard case .ready(let draft) = model.draftState else {
+            Issue.record("expected a ready draft, got \(model.draftState)")
+            return
+        }
+        #expect(draft.scriptsApproved == false)
+        let drafts = recorder.snapshot.filter { $0.url?.path == "/v1/schedules/drafts" }
+        #expect(drafts.count == 2)
+        #expect(try Self.body(#require(drafts.last))["offer_script_approval"] == nil)
+        #expect(try Self.body(#require(drafts.last))["text"] as? String == "Every weekday at 7 am, tell me what needs me today.")
+    }
+
     /// ADR-0342 decision 13: the form asks the server for the script approval,
     /// shows it before anything is saved, and saves the draft unchanged.
     @Test

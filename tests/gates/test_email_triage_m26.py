@@ -321,7 +321,7 @@ async def test_wait_to_important_includes_provider_read_time() -> None:
         async with app.uow_factory() as uow:
             events = await uow.events.list_after(run.session_id, 0, app.principal)
         [placed] = [event for event in events if event.event_type == "email.triage.important"]
-        assert placed.payload["elapsed_ms"] <= 124_000
+        assert 122_000 <= placed.payload["elapsed_ms"] <= 124_000
 
 
 async def test_foreground_leaves_last_background_dollar_for_expedited_assessment() -> None:
@@ -395,3 +395,218 @@ async def test_provisional_inbox_shows_a_subsequent_provider_delay() -> None:
         page = await service.threads(app.principal, view="inbox")
         row = next(row for row in page["items"] if row["subject"] == "board")
         assert "Gmail" in row["reason"] and "budget" in row["reason"]
+
+
+# --- review of pull request 268 ---------------------------------------------------
+
+
+def _mail(name: str, sender: str, check: str, minutes: int) -> Any:
+    from agent_core.domain.email import EmailMessage
+
+    return EmailMessage(
+        id=name,
+        sender=sender,
+        sent_at=NOW - timedelta(minutes=minutes),
+        labels=["INBOX"],
+        sender_check=check,
+    )
+
+
+@pytest.mark.parametrize(("check", "expedited"), [("fail", False), ("pass", True)])
+def test_partner_evidence_comes_only_from_mail_that_did_not_fail_its_sender_check(
+    check: str, expedited: bool
+) -> None:
+    from uuid import uuid4
+
+    from agent_core.domain.email import EmailThread, expedite_thread
+
+    partner, stranger = "Partner <partner@example.test>", "Stranger <stranger@example.test>"
+    thread = EmailThread(
+        id=uuid4(),
+        account_id="default",
+        provider_thread_id="t",
+        subject="s",
+        senders=[partner, stranger],
+        updated_at=NOW,
+        last_accessed_at=NOW,
+        messages=[_mail("older", partner, check, 10), _mail("newest", stranger, "pass", 1)],
+    )
+
+    assert expedite_thread(thread, {"partner@example.test"}, []) is expedited
+
+
+async def _imported(app: Any, name: str, session: Any, **message: Any) -> Any:
+    page = _thread_page(name, NOW - timedelta(minutes=2))
+    page["messages"][0].update(subject=name, **message)
+    return await app.services.email.import_thread(
+        app.principal, "default", page, session, observed_at=NOW
+    )
+
+
+async def test_owner_important_and_restore_survive_a_deleted_source_session() -> None:
+    async with _app(FixedClock(NOW), await _mailbox([], [])) as app:
+        await _caught_up(app)
+        service = app.services.email
+        service.triage_mode = "local"
+        session = await app.sessions.create()
+        marked = await _imported(app, "marked", session)
+        restored = await _imported(app, "restored", session)
+        assert marked.arrival and marked.arrival.important_at is None
+        await app.services.sessions.delete(app.principal, session)
+
+        await service.feedback(
+            app.principal, thread_id=marked.id, target="thread", judgment="important"
+        )
+        await service.dismiss(app.principal, restored.id, restored.revision)
+        await service.feedback(
+            app.principal, thread_id=restored.id, target="thread", judgment="important"
+        )
+        await service.dismiss(app.principal, restored.id, restored.revision, dismissed=False)
+
+        page = await service.threads(app.principal, view="priority")
+        assert {row["subject"] for row in page["items"]} == {"marked", "restored"}
+        async with app.uow_factory() as uow:
+            for thread_id in (marked.id, restored.id):
+                stored = await uow.email.get(app.principal, "thread", str(thread_id))
+                assert stored and stored.payload["arrival"]["important_at"] is not None
+
+
+async def test_a_lost_nomination_clears_the_reason_only_triage_wrote() -> None:
+    async with _app(FixedClock(NOW), await _mailbox([], [])) as app:
+        await _caught_up(app)
+        service = app.services.email
+        service.triage_mode = "local"
+        session = await app.sessions.create()
+        hinted = await _imported(app, "board", session, label_ids=["INBOX", "IMPORTANT"])
+        assert hinted.arrival and hinted.arrival.expedited
+        assert hinted.reason == "Full assessment queued."
+
+        plain = await _imported(app, "board", session, label_ids=["INBOX"])
+
+        assert plain.arrival and not plain.arrival.expedited
+        assert plain.reason == "Assessment pending"
+
+
+async def test_cached_mail_gets_its_arrival_on_the_first_live_observation() -> None:
+    async with _app(FixedClock(NOW), await _mailbox([], [])) as app:
+        await _caught_up(app)
+        service = app.services.email
+        service.triage_mode = "local"
+        session = await app.sessions.create()
+        page = _thread_page("board", NOW - timedelta(minutes=2))
+        page["messages"][0].update(subject="board", label_ids=["INBOX", "IMPORTANT"])
+        cached = await service.import_thread(app.principal, "default", page, session)
+        assert cached.arrival is None
+
+        seen = await service.import_thread(app.principal, "default", page, session, observed_at=NOW)
+
+        assert seen.arrival and seen.arrival.expedited
+        assert seen.arrival.received_at == NOW - timedelta(minutes=2)
+        assert seen.revision == cached.revision
+        assert seen.reason == "Full assessment queued."
+        async with app.uow_factory() as uow:
+            events = await uow.events.list_after(session, 0, app.principal)
+        assert [e.event_type for e in events if e.event_type.startswith("email.triage.")] == [
+            "email.triage.discovered"
+        ]
+
+
+async def test_an_unchanged_thread_without_sent_mail_scans_no_learning_history() -> None:
+    async with _app(FixedClock(NOW), await _mailbox([], [])) as app:
+        await _caught_up(
+            app, email_address="owner@example.test", verified_addresses=["owner@example.test"]
+        )
+        service = app.services.email
+        session = await app.sessions.create()
+        await _imported(app, "inbound", session)
+        scans: list[str] = []
+        original = service._learning_state
+
+        async def counted(*args: Any) -> Any:
+            scans.append("scan")
+            return await original(*args)
+
+        vars(service)["_learning_state"] = counted
+        await _imported(app, "inbound", session)
+
+        assert scans == []
+
+
+async def _refresh_task(app: Any, minutes_ago: int, **fields: Any) -> None:
+    from uuid import uuid4
+
+    from agent_core.application.email import save_value
+    from agent_core.domain.email import EmailTask
+
+    created = NOW - timedelta(minutes=minutes_ago)
+    task = EmailTask(
+        id=uuid4(),
+        run_id=uuid4(),
+        session_id=uuid4(),
+        kind="refresh",
+        account_ids=["default"],
+        created_at=created,
+        **fields,
+    )
+    async with app.uow_factory() as uow:
+        await save_value(uow.email, app.principal, "task", str(task.run_id), task, created)
+
+
+@pytest.mark.parametrize(
+    ("fields", "due"),
+    [
+        # A foreground refresh the budget held to discovery is not a failed check.
+        ({"scope": "discovery", "arrival_check": False}, True),
+        ({"scope": "expedited", "arrival_check": False}, True),
+        ({"scope": "discovery", "arrival_check": True}, False),
+        # Tasks from before the origin was kept: only `arrivals` was a server check.
+        ({"scope": "arrivals"}, False),
+        ({"scope": "new_mail"}, True),
+    ],
+)
+async def test_only_a_failed_server_check_widens_the_wait(
+    fields: dict[str, Any], due: bool
+) -> None:
+    async with _app(FixedClock(NOW), await _mailbox([], [])) as app:
+        await _caught_up(app)
+        service = app.services.email
+        service.triage_mode = "local"
+        # Its run is gone, so the refresh counts as failed. One interval has passed.
+        await _refresh_task(app, 6, **fields)
+
+        assert await service._arrival_check_due(app.principal) is due
+
+
+async def test_a_refusal_names_a_retry_time_the_same_gate_would_accept() -> None:
+    from uuid import uuid4
+
+    from agent_core.application.email import save_value
+    from agent_core.domain.email import EmailTask
+    from agent_core.domain.errors import BudgetExceededError
+
+    async with _app(FixedClock(NOW), await _mailbox([], [])) as app:
+        await _caught_up(app)
+        _limit(app)
+        service = app.services.email
+        service.triage_mode = "local"
+        await _seed_spend(app, "1", NOW - timedelta(minutes=20))
+        await _seed_spend(app, "23", NOW - timedelta(days=5))
+        # Leaves the rolling window at 09:00 tomorrow.
+        await _seed_spend(app, "574", NOW - timedelta(days=30) + timedelta(hours=20))
+        live = EmailTask(
+            id=uuid4(),
+            run_id=uuid4(),
+            session_id=uuid4(),
+            kind="draft",
+            account_ids=["default"],
+            created_at=NOW,
+            reservation=Decimal("24.5"),
+        )
+        async with app.uow_factory() as uow:
+            await save_value(uow.email, app.principal, "task", str(live.run_id), live, NOW)
+            with pytest.raises(BudgetExceededError) as refused:
+                await service._check_budget(uow.email, app.principal, Decimal("1"))
+
+        # Tomorrow the rolling window has room, but with nothing spent that day the
+        # live reservations alone sit under the arrival cap, which then applies.
+        assert refused.value.details["retry_at"] == (NOW + timedelta(hours=1)).isoformat()
