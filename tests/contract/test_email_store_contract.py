@@ -484,3 +484,35 @@ async def test_memory_belief_messages_contract() -> None:
     _, factory = await memory_uow_factory()
     async with factory() as uow:
         await belief_messages_contract(uow.email)
+
+
+async def thread_batch_contract(store: EmailStore) -> None:
+    """Whole conversations are read many at a time, in key order, for one owner."""
+    for key in ("batch-c", "batch-a", "batch-b"):
+        await store.put(thread_record(key), expected_revision=0)
+    await store.put(record("batch-draft"), expected_revision=0)
+    read = getattr(store, "get_threads", None)
+    assert read is not None, "a placement over many conversations needs one read for all"
+    rows = await read(
+        principal(), ["batch-b", "batch-missing", "batch-a", "batch-draft", "batch-b"]
+    )
+    assert [row.key for row in rows] == ["batch-a", "batch-b"]
+    assert rows[0] == await store.get(principal(), "thread", "batch-a")
+    assert rows[1].payload["messages"] == [{"id": "batch-b-1", "body": "Private body"}]
+    rows[0].payload["senders"].append("changed@example.test")
+    [again] = await read(principal(), ["batch-a"])
+    assert again.payload["senders"] == ["sender@example.test"]
+    assert await read(principal(), []) == []
+    for owner in (
+        principal().model_copy(update={"principal_id": "foreign"}),
+        principal().model_copy(update={"tenant_id": "foreign"}),
+    ):
+        assert await read(owner, ["batch-a"]) == []
+    with pytest.raises(ValueError):
+        await read(principal(), [f"key-{index}" for index in range(1001)])
+
+
+async def test_whole_threads_are_read_in_one_batch() -> None:
+    _, factory = await memory_uow_factory()
+    async with factory() as uow:
+        await thread_batch_contract(uow.email)

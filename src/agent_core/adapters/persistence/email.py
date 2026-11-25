@@ -194,6 +194,16 @@ class InMemoryEmailStore:
             for copy in (row.model_copy(deep=True) for row in rows if row is not None)
         ]
 
+    async def get_threads(
+        self, principal: Principal, keys: Sequence[str]
+    ) -> builtins.list[EmailRecord]:
+        _validate_keys(keys)
+        rows = [
+            self._records.get((principal.tenant_id, principal.principal_id, "thread", key))
+            for key in sorted(set(keys))
+        ]
+        return [row.model_copy(deep=True) for row in rows if row is not None]
+
     async def list_semantic_window(
         self,
         principal: Principal,
@@ -532,6 +542,25 @@ class PostgresEmailStore:
         if not keys:
             return []
         return await self._thread_summaries(principal, EmailRecordRow.key.in_(set(keys)), None)
+
+    async def get_threads(
+        self, principal: Principal, keys: Sequence[str]
+    ) -> builtins.list[EmailRecord]:
+        _validate_keys(keys)
+        if not keys:
+            return []
+        rows = await self._session.execute(
+            select(EmailRecordRow)
+            .where(
+                EmailRecordRow.tenant_id == principal.tenant_id,
+                EmailRecordRow.principal_id == principal.principal_id,
+                EmailRecordRow.kind == "thread",
+                EmailRecordRow.key.in_(set(keys)),
+            )
+            .order_by(EmailRecordRow.key)
+            .execution_options(populate_existing=True)
+        )
+        return [email_record_to_domain(row) for row in rows.scalars()]
 
     async def list_semantic_window(
         self,

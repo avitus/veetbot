@@ -665,3 +665,71 @@ async def test_a_historical_import_keeps_a_pending_arrival() -> None:
         async with app.uow_factory() as uow:
             events = await uow.events.list_after(session, 0, app.principal)
         assert sum(e.event_type == "email.triage.discovered" for e in events) == 1
+
+
+async def test_person_feedback_places_every_matching_arrival_from_one_batch_read() -> None:
+    async with _app(FixedClock(NOW), await _mailbox([], [])) as app:
+        await _caught_up(app)
+        service = app.services.email
+        service.triage_mode = "local"
+        session = await app.sessions.create()
+        threads = [await _imported(app, f"note-{n}", session) for n in range(3)]
+        other = await _imported(
+            app, "other", session, **{"from": "Someone Else <else@example.test>"}
+        )
+        single_reads: list[str] = []
+        async with app.uow_factory() as uow:
+            store_type = type(uow.email)
+        original = store_type.get
+
+        async def counted(self: Any, principal: Any, kind: str, key: str) -> Any:
+            if kind == "thread":
+                single_reads.append(key)
+            return await original(self, principal, kind, key)
+
+        store_type.get = counted  # type: ignore[method-assign]
+        try:
+            await service.feedback(
+                app.principal,
+                thread_id=threads[0].id,
+                target="person",
+                judgment="important",
+                target_value="colleague@example.test",
+            )
+        finally:
+            store_type.get = original  # type: ignore[method-assign]
+
+        # The gesture's own conversation is read once to authorize it; the three
+        # placements come from one batch.
+        assert single_reads == [str(threads[0].id)]
+        async with app.uow_factory() as uow:
+            marked = [
+                (await uow.email.get(app.principal, "thread", str(thread.id)))
+                for thread in [*threads, other]
+            ]
+            events = await uow.events.list_after(session, 0, app.principal)
+        assert [bool(row and row.payload["arrival"]["important_at"]) for row in marked] == [
+            True,
+            True,
+            True,
+            False,
+        ]
+        assert sum(e.event_type == "email.triage.important" for e in events) == 3
+
+
+async def test_turning_triage_off_shows_nothing_only_triage_wrote() -> None:
+    async with _app(FixedClock(NOW), await _mailbox([], [])) as app:
+        await _caught_up(app)
+        service = app.services.email
+        service.triage_mode = "local"
+        session = await app.sessions.create()
+        board = await _imported(app, "board", session, label_ids=["INBOX", "IMPORTANT"])
+        inbox = await service.threads(app.principal, view="inbox")
+        assert [row["subject"] for row in inbox["items"]] == ["board"]
+
+        service.triage_mode = "off"
+
+        inbox = await service.threads(app.principal, view="inbox")
+        assert inbox["items"] == [] and inbox["collection_counts"]["inbox"] == 0
+        shown = await service.thread(app.principal, board.id)
+        assert shown["reason"] == "Assessment pending"

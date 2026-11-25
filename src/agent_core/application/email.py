@@ -114,6 +114,9 @@ from agent_core.ports.skills import SkillCatalog
 
 logger = logging.getLogger(__name__)
 
+# Conversations one owner gesture marks per store read.
+EMAIL_PLACEMENT_BATCH = 100
+
 # Inbox omits conversations ranked below this; Needs you still lists them (ADR-0329).
 INBOX_RELEVANCE_FLOOR = 0.1
 # Other threads one piece of person or topic feedback lengthens memories in at
@@ -438,6 +441,27 @@ class EmailExperienceService:
         """Read an account-authorized thread through the caller's unit of work."""
         return await self._thread(store, principal, thread_id)
 
+    def _waiting_as_shown(self, thread: EmailThread, account: EmailAccount | None) -> EmailThread:
+        """Present a waiting arrival: its current wait, or nothing of triage once it is off.
+
+        Turning triage off stops expedited treatment at once, so a read no
+        longer shows a stored nomination or the wait it explained. The stored
+        conversation is untouched and is assessed as ordinary mail.
+        """
+        if self.triage_mode != EmailTriageMode.OFF:
+            return pending_review_status(thread, account)
+        arrival = thread.arrival
+        if arrival is None or not arrival.expedited or arrival.assessed_at is not None:
+            return thread
+        return thread.model_copy(
+            update={
+                "arrival": arrival.model_copy(update={"expedited": False}),
+                "reason": EmailThread.model_fields["reason"].default
+                if thread.reason in {TRIAGE_BUDGET_HELD_REASON, TRIAGE_QUEUED_REASON}
+                else thread.reason,
+            }
+        )
+
     async def _thread(
         self, store: EmailStore, principal: Principal, thread_id: UUID
     ) -> EmailThread:
@@ -515,7 +539,7 @@ class EmailExperienceService:
                     if current is None:
                         continue
                     thread = await self._reconcile_archive_in(uow, principal, current)
-            thread = pending_review_status(thread, pending_accounts.get(thread.account_id))
+            thread = self._waiting_as_shown(thread, pending_accounts.get(thread.account_id))
             thread = apply_feedback(thread, feedback, now=self.clock.now())
             if (
                 thread.account_id not in self.account_servers
@@ -660,7 +684,7 @@ class EmailExperienceService:
                 account = await read_value(
                     uow.email, principal, "account", thread.account_id, EmailAccount
                 )
-                thread = pending_review_status(thread, account)
+                thread = self._waiting_as_shown(thread, account)
             selected = apply_feedback(
                 thread, await self._feedback(uow.email, principal), now=self.clock.now()
             )
@@ -775,29 +799,41 @@ class EmailExperienceService:
                 and feedback_matches(item, candidate)
                 and apply_feedback(candidate, feedback, now=self.clock.now()).in_important()
             ]
-        for candidate in candidates:
-            if (
-                not candidate.arrival
-                or candidate.arrival.important_at
-                or not candidate.source_session_ids
+        placed = [
+            str(candidate.id)
+            for candidate in candidates
+            if candidate.arrival
+            and not candidate.arrival.important_at
+            and candidate.source_session_ids
+        ]
+        cutoff = body_cutoff(self.clock.now())
+        for start in range(0, len(placed), EMAIL_PLACEMENT_BATCH):
+            # One read per batch serves each whole conversation and the revision
+            # its save needs; the account scope was checked while selecting.
+            for row in await uow.email.get_threads(
+                principal, placed[start : start + EMAIL_PLACEMENT_BATCH]
             ):
-                continue
-            # One read serves both the full conversation and the revision its save needs.
-            row, current = await self._thread_with_record(uow.email, principal, candidate.id)
-            marked = await self._mark_important(
-                uow, current, feedback, current.source_session_ids[-1], None, None, "owner_feedback"
-            )
-            if marked is not current:
-                await uow.email.put(
-                    row.model_copy(
-                        update={
-                            "revision": row.revision + 1,
-                            "payload": marked.model_dump(mode="json"),
-                            "updated_at": self.clock.now(),
-                        }
-                    ),
-                    expected_revision=row.revision,
+                current = retained_thread(EmailThread.model_validate(row.payload), cutoff)
+                marked = await self._mark_important(
+                    uow,
+                    current,
+                    feedback,
+                    current.source_session_ids[-1],
+                    None,
+                    None,
+                    "owner_feedback",
                 )
+                if marked is not current:
+                    await uow.email.put(
+                        row.model_copy(
+                            update={
+                                "revision": row.revision + 1,
+                                "payload": marked.model_dump(mode="json"),
+                                "updated_at": self.clock.now(),
+                            }
+                        ),
+                        expected_revision=row.revision,
+                    )
 
     async def _save_feedback(
         self,

@@ -90,6 +90,16 @@ class EmailStore(Protocol):
         """
         ...
 
+    async def get_threads(
+        self, principal: Principal, keys: Sequence[str]
+    ) -> builtins.list[EmailRecord]:
+        """The named threads' whole records in key order; at most one thousand keys.
+
+        Each row equals what `get` returns for it. Absent and foreign keys are
+        omitted, so one read serves a change to many conversations.
+        """
+        ...
+
     async def list_semantic_window(
         self,
         principal: Principal,

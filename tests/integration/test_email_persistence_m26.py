@@ -70,6 +70,15 @@ async def test_postgres_thread_summaries_omit_content_and_mask_pending_erasure()
         await session.rollback()
 
 
+async def test_postgres_reads_whole_threads_in_one_batch() -> None:
+    from tests.contract.test_email_store_contract import thread_batch_contract
+
+    async with database() as engine, create_session_factory(engine)() as session:
+        await configure(session)
+        await thread_batch_contract(PostgresEmailStore(session))
+        await session.rollback()
+
+
 async def test_postgres_thread_marks_change_with_the_summary_and_pending_erasure() -> None:
     from tests.contract.test_email_store_contract import thread_mark_contract, thread_record
 
