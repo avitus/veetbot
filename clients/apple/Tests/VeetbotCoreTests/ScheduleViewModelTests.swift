@@ -525,6 +525,8 @@ import FoundationNetworking
         #expect(withdrawn["requested_scopes"] as? [String] == [])
         let after = try #require(model.detailRecords[scheduleID])
         #expect(after.revision.scriptsApproved != true)
+        // A run queued before the withdrawal keeps the revision it was queued on.
+        #expect(toasts.current?.text == "Saved. A run already queued may still run scripts.")
         #expect(after.offersScripts, "the switch stays so the approval can be given again")
     }
 

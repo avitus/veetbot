@@ -262,7 +262,8 @@ The owner prefers no new external dependency unless one is necessary.
       gives the approval only to the revision on the owner's screen: if the
       schedule has changed since, nothing is given and the app shows the
       current version to decide from. Withdrawing applies to whatever is
-      current. A schedule the API returns says `scripts_available` where the switch may
+      current, and the app says that a run already queued keeps the
+      approval of the revision it was queued on. A schedule the API returns says `scripts_available` where the switch may
       be shown: both settings are on, the schedule runs a model, the owner
       holds the scope, and the pinned agent has the script tool. The switch
       also shows on any schedule that holds the approval, so it can always

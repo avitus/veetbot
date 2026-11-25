@@ -345,7 +345,13 @@ public final class ScheduleViewModel: ObservableObject {
             detailRecords[scheduleID] = try await api.setScheduleScripts(
                 scheduleID, approved: approved, reviewedRevision: reviewedRevision
             )
-            toasts.show("Saved. Applies from the next run.")
+            // A run keeps the revision it was queued on, so a withdrawal does
+            // not reach a run that is already waiting to start.
+            toasts.show(
+                approved
+                    ? "Saved. Applies from the next run."
+                    : "Saved. A run already queued may still run scripts."
+            )
         } catch let changed as ScheduleChangedSinceReview {
             // Show what the schedule now is; the owner decides again from that.
             detailRecords[scheduleID] = changed.current
