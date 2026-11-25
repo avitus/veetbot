@@ -733,3 +733,50 @@ async def test_turning_triage_off_shows_nothing_only_triage_wrote() -> None:
         assert inbox["items"] == [] and inbox["collection_counts"]["inbox"] == 0
         shown = await service.thread(app.principal, board.id)
         assert shown["reason"] == "Assessment pending"
+
+
+async def test_an_older_page_keeps_the_reply_state_of_the_retained_assessment() -> None:
+    from agent_core.application.email import read_value, save_value
+    from agent_core.domain.email import EmailThread
+
+    async with _app(
+        FixedClock(NOW), await _backlog([]), *[_assessment_turn() for _ in range(8)]
+    ) as app:
+        await _caught_up(app)
+        service = app.services.email
+        service.triage_mode = "local"
+        _limit(app)
+        op = await service.admit_arrival_check(app.principal)
+        run = await app.runs.get(op.run_id)
+        first = _thread_page("board", NOW - timedelta(minutes=2))
+        first["messages"][0].update(subject="board", label_ids=["IMPORTANT", "INBOX"])
+        async with app.uow_factory() as uow:
+            row = next(
+                row
+                for row in await uow.email.list_thread_summaries(app.principal)
+                if row.payload["subject"] == "board"
+            )
+            assessed = await read_value(uow.email, app.principal, "thread", row.key, EmailThread)
+            assert assessed and assessed.arrival and assessed.arrival.assessed_at
+            # The assessment asked for a reply that a missing attachment blocks.
+            await save_value(
+                uow.email,
+                app.principal,
+                "thread",
+                row.key,
+                assessed.model_copy(
+                    update={"needs_reply": True, "reply_blocked_reason": "Needs the deck."}
+                ),
+                NOW,
+            )
+        older = _thread_page("old", NOW - timedelta(days=1))["messages"][0]
+        older["thread_id"] = "board"
+        first.update(messages=[older, *first["messages"]], newest_first=True)
+
+        updated = await service.import_thread(
+            app.principal, "default", first, run.session_id, observed_at=NOW
+        )
+
+        assert updated.arrival and updated.arrival.assessed_at == NOW
+        assert updated.needs_reply is True
+        assert updated.reply_blocked_reason == "Needs the deck."

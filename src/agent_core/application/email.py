@@ -3768,6 +3768,9 @@ class EmailExperienceService:
                                         "attention_expires_at",
                                         "profile_revision",
                                         "assessment_version",
+                                        # The reply the kept assessment asked for.
+                                        "needs_reply",
+                                        "reply_blocked_reason",
                                     )
                                 },
                                 "dismissed_revision": thread.revision
