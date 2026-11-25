@@ -6,14 +6,20 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import timedelta
+from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.application.trajectory_service import TrajectoryRedactor
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.errors import ConflictError
-from agent_core.domain.events import NewEvent, ProcessEvent, conversation_items
+from agent_core.domain.events import (
+    EventEnvelope,
+    NewEvent,
+    ProcessEvent,
+    history_items,
+)
 from agent_core.domain.runs import Run, RunKind, RunLimits, RunStatus
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.ports.determinism import Clock
@@ -42,6 +48,24 @@ REVIEW_INSTRUCTIONS = (
     "archive a skill. Do nothing when no durable procedure is justified."
 )
 logger = logging.getLogger(__name__)
+
+
+def review_transcript_messages(
+    events: Sequence[EventEnvelope], run_id: UUID
+) -> list[dict[str, Any]]:
+    """The reviewed run's conversation, as the reviewer is shown it.
+
+    A script's own calls are no part of it: their results went to the script
+    and have no call beside them (ADR-0342 decision 5).
+    """
+
+    return [
+        item.model_dump(mode="json")
+        for event in events
+        if event.run_id == run_id
+        for item in history_items(event)
+        if item.kind != "provider_reasoning"
+    ]
 
 
 def _review_agent(source: AgentSpec) -> AgentSpec:
@@ -147,13 +171,7 @@ class SkillBackgroundReview:
                 self._principal,
             )
 
-        messages = [
-            item.model_dump(mode="json")
-            for event in events
-            if event.run_id == run.id
-            for item in conversation_items(event)
-            if item.kind != "provider_reasoning"
-        ]
+        messages = review_transcript_messages(events, run.id)
         self._redactor.redact(messages)
         transcript = json.dumps(messages, ensure_ascii=False, separators=(",", ":"))
         encoded = transcript.encode("utf-8")
