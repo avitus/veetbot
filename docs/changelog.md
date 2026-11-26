@@ -6,8 +6,11 @@ title: Changelog
 
 ## 2026-11-24 — The app shows and gives a schedule's script approval (ADR-0342)
 
-- Built and not delivered: it is on `dev` and needs a release and a new app
-  build.
+- Delivered on 2026-11-25. The server part is live; the app part is in the
+  TestFlight build of that release.
+- The switch approves only the version of the schedule on your screen. If
+  the schedule changed while its page was open, nothing is approved and the
+  page shows the current version.
 - When you add a schedule in plain words, the form says "Its runs may run
   scripts without asking" under the timing, before you press Create.
 - A schedule's page has a switch, "Run scripts without asking". It shows

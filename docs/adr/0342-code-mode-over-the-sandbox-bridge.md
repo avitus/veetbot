@@ -390,9 +390,11 @@ The work is cut into four slices.
    - **In the app, 2026-11-24.** The plain-words form offers the approval
      and the schedule detail shows it, gives it and withdraws it, as the last
      item of decision 13 states. Built with the draft field, the
-     `scripts_available` read and the native switch. On `dev`, not delivered:
-     the app change reaches the owner through a release and a TestFlight
-     build.
+     `scripts_available` read and the native switch. Delivered by pull
+     request 268 on 2026-11-25 as release `20261126-010337-838256c`, with
+     its TestFlight build. In production each of the nine approved schedules
+     reads `scripts_available`, and the four job schedules do not. The two
+     screens have not been looked at on a device.
 
 ## Consequences
 
