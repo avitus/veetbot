@@ -2349,6 +2349,21 @@ the selected visible collection in the pinned scope, not hidden/virtualized data
 website truth or semantic row uniqueness. Empty collections may satisfy a zero
 minimum. No public tool schema or deployed recipe changes.
 
+[ADR-0354](../adr/0354-verify-expected-browser-extraction-rows.md) adds an optional
+extraction-only `expected_row`: one to eight required typed fields with values,
+whose definitions exactly match the extraction fields in order. Collection kind,
+index and row limit come from the same step. After existing schema, count and
+coverage checks, exactly one retained row must satisfy the existing typed-row
+predicate in this result's revision and pinned scope. Missing or duplicate
+matches stop `insufficient_evidence` before later steps; malformed extraction
+remains `unverified`. No status flag or historical capture can replace the row.
+Omitted/null expectations preserve legacy identities; values bind the recipe.
+This local check adds no polling or calls and cannot replay earlier effects.
+It proves only a unique match in returned evidence, not website truth or global
+uniqueness. Completeness remains separately configurable, and later actions need
+their own fresh target and current approval. ADR-0350's exclusion of typed-row
+destination rechecks in later target captures is unchanged.
+
 [ADR-0314](../adr/0314-reviewed-browser-read-branches.md) adds optional
 `branches` to reviewed observe steps with a postcondition and positive
 `failure_evidence`. The closed object names `satisfied` and `failed` destinations

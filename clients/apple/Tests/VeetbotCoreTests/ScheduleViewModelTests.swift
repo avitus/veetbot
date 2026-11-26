@@ -398,6 +398,236 @@ import FoundationNetworking
         #expect(model.items.map(\.id) == [scheduleID])
     }
 
+    /// A server from before ADR-0342 decision 13 rejects the field it does not
+    /// know. The form asks again without it and shows the unapproved draft.
+    @Test
+    func testANewScheduleIsStillReadByAServerThatDoesNotKnowTheScriptApproval() async throws {
+        let recorder = ScheduleRequestRecorder()
+        let model = try makeModel { request in
+            recorder.append(request)
+            let asked = (try? Self.body(request)["offer_script_approval"]) != nil
+            if asked {
+                return Self.response(
+                    request, statusCode: 400,
+                    body: #"{"error":{"code":"malformed_request","message":"The request body or parameters are malformed: body.offer_script_approval.","details":{},"request_id":"r"}}"#
+                )
+            }
+            return Self.response(request, body: Self.draftJSON)
+        }
+
+        await model.readDraft("Every weekday at 7 am, tell me what needs me today.", timezone: "America/Los_Angeles")
+
+        guard case .ready(let draft) = model.draftState else {
+            Issue.record("expected a ready draft, got \(model.draftState)")
+            return
+        }
+        #expect(draft.scriptsApproved == false)
+        let drafts = recorder.snapshot.filter { $0.url?.path == "/v1/schedules/drafts" }
+        #expect(drafts.count == 2)
+        #expect(try Self.body(#require(drafts.last))["offer_script_approval"] == nil)
+        #expect(try Self.body(#require(drafts.last))["text"] as? String == "Every weekday at 7 am, tell me what needs me today.")
+    }
+
+    /// ADR-0342 decision 13: the form asks the server for the script approval,
+    /// shows it before anything is saved, and saves the draft unchanged.
+    @Test
+    func testANewScheduleShowsTheScriptApprovalBeforeItIsSaved() async throws {
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000772"))
+        let recorder = ScheduleRequestRecorder()
+        let approved = Self.draftJSON
+            .replacingOccurrences(of: #""requested_scopes":[]"#, with: #""requested_scopes":["sandbox.execute"]"#)
+            .replacingOccurrences(of: #""notify":"every_report""#, with: #""notify":"every_report","scripts_approved":true"#)
+        let model = try makeModel { request in
+            recorder.append(request)
+            switch (request.httpMethod, request.url!.path) {
+            case ("POST", "/v1/schedules/drafts"):
+                return Self.response(request, body: approved)
+            case ("POST", "/v1/schedules"):
+                return Self.response(
+                    request, statusCode: 201,
+                    body: Self.detailJSON(id: scheduleID, scriptsAvailable: true, scriptsApproved: true)
+                )
+            default:
+                return Self.response(request, body: #"{"items":[\#(Self.summaryJSON(id: scheduleID))],"next_cursor":null}"#)
+            }
+        }
+
+        await model.readDraft("Every weekday at 7 am, tell me what needs me today.", timezone: "America/Los_Angeles")
+
+        let read = try #require(recorder.snapshot.last)
+        #expect(try Self.body(read)["offer_script_approval"] as? Bool == true)
+        guard case .ready(let draft) = model.draftState else {
+            Issue.record("expected a ready draft, got \(model.draftState)")
+            return
+        }
+        #expect(draft.scriptsApproved)
+
+        #expect(await model.createFromDraft())
+        let create = try #require(recorder.snapshot.first { $0.url?.path == "/v1/schedules" && $0.httpMethod == "POST" })
+        let posted = try Self.body(create)
+        #expect(posted["scripts_approved"] as? Bool == true)
+        #expect(posted["requested_scopes"] as? [String] == ["sandbox.execute"])
+        #expect(model.detailRecords[scheduleID]?.revision.scriptsApproved == true)
+    }
+
+    @Test
+    func testADraftWithoutTheApprovalShowsNone() throws {
+        let draft = try JSONDecoder.server.decode(ScheduleDraftView.self, from: Data(Self.draftJSON.utf8))
+        #expect(!draft.scriptsApproved)
+    }
+
+    /// ADR-0342 decision 13: the switch gives and withdraws the approval
+    /// through the full-definition update, with the sandbox permission the
+    /// schedule's runs need to be offered the script tool at all.
+    @Test
+    func testRunScriptsWithoutAskingIsGivenAndWithdrawnWithItsPermission() async throws {
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000773"))
+        let recorder = ScheduleRequestRecorder()
+        let state = ScheduleScriptsState()
+        let toasts = ToastCenter(sleep: { _ in try await Task.sleep(nanoseconds: .max) })
+        let model = try makeModel(toasts: toasts) { request in
+            recorder.append(request)
+            if request.httpMethod == "PATCH" {
+                let definition = try #require(try Self.body(request)["definition"] as? [String: Any])
+                state.update(approved: definition["scripts_approved"] as? Bool == true)
+            }
+            return Self.response(
+                request,
+                body: Self.detailJSON(
+                    id: scheduleID, revision: state.revision, notify: "every_report",
+                    scriptsAvailable: true, scriptsApproved: state.approved
+                )
+            )
+        }
+        await model.loadDetail(scheduleID)
+        let offered = try #require(model.detailRecords[scheduleID])
+        #expect(offered.offersScripts)
+        #expect(offered.revision.scriptsApproved != true)
+
+        await model.setRunsScriptsWithoutAsking(scheduleID, true, reviewedRevision: 1)
+
+        let give = try #require(recorder.snapshot.last)
+        #expect(give.httpMethod == "PATCH")
+        let given = try #require(try Self.body(give)["definition"] as? [String: Any])
+        #expect(given["scripts_approved"] as? Bool == true)
+        #expect(given["requested_scopes"] as? [String] == ["sandbox.execute"])
+        #expect(given["instruction"] as? String == "Full instruction")
+        #expect(given["notify"] as? String == "every_report")
+        #expect(model.detailRecords[scheduleID]?.revision.scriptsApproved == true)
+        #expect(toasts.current?.text == "Saved. Applies from the next run.")
+
+        await model.setRunsScriptsWithoutAsking(scheduleID, false, reviewedRevision: 2)
+
+        let withdraw = try #require(recorder.snapshot.last)
+        #expect(withdraw.httpMethod == "PATCH")
+        let withdrawn = try #require(try Self.body(withdraw)["definition"] as? [String: Any])
+        #expect(withdrawn["scripts_approved"] == nil)
+        #expect(withdrawn["requested_scopes"] as? [String] == [])
+        let after = try #require(model.detailRecords[scheduleID])
+        #expect(after.revision.scriptsApproved != true)
+        // A run queued before the withdrawal keeps the revision it was queued on.
+        #expect(toasts.current?.text == "Saved. A run already queued may still run scripts.")
+        #expect(after.offersScripts, "the switch stays so the approval can be given again")
+    }
+
+    /// The approval is given to the revision the owner is looking at. If the
+    /// schedule changed since, nothing is granted and the new version is shown.
+    /// Withdrawing needs no such review.
+    @Test
+    func testTheScriptApprovalIsNotGivenToARevisionTheOwnerHasNotSeen() async throws {
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000775"))
+        let recorder = ScheduleRequestRecorder()
+        let state = ScheduleScriptsState()
+        let model = try makeModel { request in
+            recorder.append(request)
+            if request.httpMethod == "PATCH" {
+                let definition = try #require(try Self.body(request)["definition"] as? [String: Any])
+                state.update(approved: definition["scripts_approved"] as? Bool == true)
+            }
+            return Self.response(
+                request,
+                body: Self.detailJSON(
+                    id: scheduleID, revision: state.revision,
+                    scriptsAvailable: true, scriptsApproved: state.approved
+                )
+            )
+        }
+        await model.loadDetail(scheduleID)
+        #expect(model.detailRecords[scheduleID]?.revision.revision == 1)
+        // Edited elsewhere while this screen stays open.
+        state.update(approved: false)
+
+        await model.setRunsScriptsWithoutAsking(scheduleID, true, reviewedRevision: 1)
+
+        #expect(!recorder.snapshot.contains { $0.httpMethod == "PATCH" })
+        #expect(model.detailRecords[scheduleID]?.revision.revision == 2)
+        #expect(model.detailRecords[scheduleID]?.revision.scriptsApproved != true)
+        #expect(
+            model.lifecycleError(for: scheduleID)
+                == "This schedule changed since you opened it. Check it, then turn this on again."
+        )
+
+        // Approved elsewhere on a later revision: withdrawing still goes through.
+        state.update(approved: true)
+        await model.setRunsScriptsWithoutAsking(scheduleID, false, reviewedRevision: 2)
+
+        let withdraw = try #require(recorder.snapshot.last)
+        #expect(withdraw.httpMethod == "PATCH")
+        #expect(model.detailRecords[scheduleID]?.revision.scriptsApproved != true)
+        #expect(model.lifecycleError(for: scheduleID) == nil)
+    }
+
+    /// The switch was drawn from one revision. A refresh that lands before the
+    /// request goes out must not turn the newer revision into the one approved.
+    @Test
+    func testARefreshAfterTheSwitchWasDrawnDoesNotChangeWhatIsApproved() async throws {
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000776"))
+        let recorder = ScheduleRequestRecorder()
+        let state = ScheduleScriptsState()
+        let model = try makeModel { request in
+            recorder.append(request)
+            if request.httpMethod == "PATCH" {
+                let definition = try #require(try Self.body(request)["definition"] as? [String: Any])
+                state.update(approved: definition["scripts_approved"] as? Bool == true)
+            }
+            return Self.response(
+                request,
+                body: Self.detailJSON(
+                    id: scheduleID, revision: state.revision,
+                    scriptsAvailable: true, scriptsApproved: state.approved
+                )
+            )
+        }
+        await model.loadDetail(scheduleID)
+        state.update(approved: false)
+        // The screen's own refresh installs revision 2 before the gesture is sent.
+        await model.loadDetail(scheduleID)
+        #expect(model.detailRecords[scheduleID]?.revision.revision == 2)
+
+        await model.setRunsScriptsWithoutAsking(scheduleID, true, reviewedRevision: 1)
+
+        #expect(!recorder.snapshot.contains { $0.httpMethod == "PATCH" })
+        #expect(model.detailRecords[scheduleID]?.revision.scriptsApproved != true)
+        #expect(
+            model.lifecycleError(for: scheduleID)
+                == "This schedule changed since you opened it. Check it, then turn this on again."
+        )
+    }
+
+    @Test
+    func testAScheduleTheServerOffersNothingForShowsNoScriptSwitch() throws {
+        let scheduleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000774"))
+        let plain = try JSONDecoder.server.decode(
+            ScheduleRecordView.self, from: Data(Self.detailJSON(id: scheduleID).utf8)
+        )
+        #expect(!plain.offersScripts)
+        // A schedule that holds the approval can always have it withdrawn.
+        let held = try JSONDecoder.server.decode(
+            ScheduleRecordView.self, from: Data(Self.detailJSON(id: scheduleID, scriptsApproved: true).utf8)
+        )
+        #expect(held.offersScripts)
+    }
+
     @Test
     func testAnUnclearOrUnavailableDraftSaysWhyAndCreatesNothing() async throws {
         var answer = (200, #"{"status":"needs_clarification","reason":"no_timing","definition":null,"next_fire_at":[]}"#)
@@ -731,12 +961,18 @@ import FoundationNetworking
         revision: Int = 1,
         profile: UUID? = nil,
         state: String = "ACTIVE",
-        notify: String? = nil
+        notify: String? = nil,
+        scriptsAvailable: Bool = false,
+        scriptsApproved: Bool = false
     ) -> String {
-        let notifyField = notify.map { #","notify":"\#($0)""# } ?? ""
+        let notifyField = (notify.map { #","notify":"\#($0)""# } ?? "")
+            + (scriptsApproved ? #","scripts_approved":true"# : "")
+        let availableField = scriptsAvailable ? #","scripts_available":true"# : ""
         let binding = profile.map { #""\#($0.uuidString.lowercased())""# } ?? "null"
-        let scopes = profile == nil ? "[]" : #"["browser.profile.read"]"#
-        return #"{"schedule":{"id":"\#(id.uuidString)","tenant_id":"local","principal_id":"principal","state":"\#(state)","pause_reason":null,"current_revision":\#(revision),"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"},"revision":{"schedule_id":"\#(id.uuidString)","revision":\#(revision),"title":"Daily review","instruction":"Full instruction","agent_id":"00000000-0000-0000-0000-000000000742","agent_version":"1","policy_profile":"default","requested_scopes":\#(scopes),"browser_profile_id":\#(binding),"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1\#(notifyField),"created_by_principal_id":"principal","created_at":"2026-08-29T00:00:00Z"},"replayed":false}"#
+        let scopes = scriptsApproved
+            ? #"["sandbox.execute"]"#
+            : (profile == nil ? "[]" : #"["browser.profile.read"]"#)
+        return #"{"schedule":{"id":"\#(id.uuidString)","tenant_id":"local","principal_id":"principal","state":"\#(state)","pause_reason":null,"current_revision":\#(revision),"next_fire_at":"2026-08-30T16:00:00Z","consecutive_failures":0,"created_at":"2026-08-29T00:00:00Z","updated_at":"2026-08-29T00:00:00Z"},"revision":{"schedule_id":"\#(id.uuidString)","revision":\#(revision),"title":"Daily review","instruction":"Full instruction","agent_id":"00000000-0000-0000-0000-000000000742","agent_version":"1","policy_profile":"default","requested_scopes":\#(scopes),"browser_profile_id":\#(binding),"limits":{"max_steps":12,"max_model_calls":12,"max_tool_calls":24,"max_input_tokens":null,"max_output_tokens":null,"max_cost":"1","deadline_at":null,"synthesis_reserve_steps":0,"synthesis_reserve_model_calls":0,"synthesis_reserve_cost":"0"},"run_timeout_seconds":300,"cadence":{"kind":"DAILY","local_time":"09:00:00","timezone":"America/Los_Angeles"},"timezone":"America/Los_Angeles","misfire_grace_seconds":3600,"max_consecutive_failures":1\#(notifyField),"created_by_principal_id":"principal","created_at":"2026-08-29T00:00:00Z"},"replayed":false\#(availableField)}"#
     }
 
     nonisolated private static func profileJSON(id: UUID, origin: String, status: String) -> String {
@@ -759,6 +995,19 @@ import FoundationNetworking
             lastUsedAt: nil,
             lastSignInMode: nil
         )
+    }
+}
+
+/// What the stand-in server holds for the script approval across requests.
+private final class ScheduleScriptsState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var held = (approved: false, revision: 1)
+
+    var approved: Bool { lock.withLock { held.approved } }
+    var revision: Int { lock.withLock { held.revision } }
+
+    func update(approved: Bool) {
+        lock.withLock { held = (approved, held.revision + 1) }
     }
 }
 

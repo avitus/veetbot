@@ -150,6 +150,17 @@ class InMemoryEmailStore:
         )
         return [record.model_copy(deep=True) for record in selected[:limit]]
 
+    async def thread_ids_for_sources(
+        self, principal: Principal, keys: Sequence[str]
+    ) -> builtins.list[str]:
+        _validate_keys(keys)
+        owner = (principal.tenant_id, principal.principal_id, "thread_source")
+        return [
+            str(row.payload["thread_id"])
+            for key in set(keys)
+            if (row := self._records.get((*owner, key)))
+        ]
+
     async def list_thread_summaries(
         self, principal: Principal, *, after: str | None = None, limit: int = 1000
     ) -> builtins.list[EmailRecord]:
@@ -182,6 +193,16 @@ class InMemoryEmailStore:
             copy.model_copy(update={"payload": _without_messages(copy.payload)})
             for copy in (row.model_copy(deep=True) for row in rows if row is not None)
         ]
+
+    async def get_threads(
+        self, principal: Principal, keys: Sequence[str]
+    ) -> builtins.list[EmailRecord]:
+        _validate_keys(keys)
+        rows = [
+            self._records.get((principal.tenant_id, principal.principal_id, "thread", key))
+            for key in sorted(set(keys))
+        ]
+        return [row.model_copy(deep=True) for row in rows if row is not None]
 
     async def list_semantic_window(
         self,
@@ -437,6 +458,19 @@ class PostgresEmailStore:
         )
         return [email_record_to_domain(row) for row in rows]
 
+    async def thread_ids_for_sources(
+        self, principal: Principal, keys: Sequence[str]
+    ) -> builtins.list[str]:
+        _validate_keys(keys)
+        query = select(EmailRecordRow.payload["thread_id"].astext).where(
+            EmailRecordRow.tenant_id == principal.tenant_id,
+            EmailRecordRow.principal_id == principal.principal_id,
+            EmailRecordRow.kind == "thread_source",
+            EmailRecordRow.key.in_(set(keys)),
+            ~EmailRecordRow.erasure_pending,
+        )
+        return list((await self._session.scalars(query)).all()) if keys else []
+
     async def list_thread_summaries(
         self, principal: Principal, *, after: str | None = None, limit: int = 1000
     ) -> builtins.list[EmailRecord]:
@@ -508,6 +542,25 @@ class PostgresEmailStore:
         if not keys:
             return []
         return await self._thread_summaries(principal, EmailRecordRow.key.in_(set(keys)), None)
+
+    async def get_threads(
+        self, principal: Principal, keys: Sequence[str]
+    ) -> builtins.list[EmailRecord]:
+        _validate_keys(keys)
+        if not keys:
+            return []
+        rows = await self._session.execute(
+            select(EmailRecordRow)
+            .where(
+                EmailRecordRow.tenant_id == principal.tenant_id,
+                EmailRecordRow.principal_id == principal.principal_id,
+                EmailRecordRow.kind == "thread",
+                EmailRecordRow.key.in_(set(keys)),
+            )
+            .order_by(EmailRecordRow.key)
+            .execution_options(populate_existing=True)
+        )
+        return [email_record_to_domain(row) for row in rows.scalars()]
 
     async def list_semantic_window(
         self,

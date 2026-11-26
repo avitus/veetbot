@@ -62,7 +62,8 @@ collection and the default on each switch into Email; this supersedes
 ADR-0231's Inbox default. On every device every list, Inbox, Needs you, Handled,
 Important, Other mail and search results alike, loads up to 100 threads per
 page and scrolls (ADR-0303, ADR-0326). Account badges and an account filter identify the source
-of each conversation. Inbox omits threads whose effective priority is below 0.1;
+of each conversation. Inbox omits threads whose effective priority is below 0.1,
+except an expedited arrival still awaiting its full assessment (ADR-0355);
 Needs you still lists low-ranked reply requests (owner-requested, ADR-0329).
 
 Each row shows the correspondent, subject, a concise statement of what needs
@@ -169,7 +170,10 @@ next refresh. The client decides which numbers hold a conversation by its own
 copy of the server's rules (the Important and Inbox thresholds, Needs you,
 Handled, Suspected spam, Other mail, the account filter and the search match),
 so a server rule that changes first makes the adjustment wrong for as long as
-an archive is pending. A number may therefore be off by one per hidden
+an archive is pending. A list row does not say that it is an expedited arrival
+awaiting assessment, so the client applies the Inbox threshold alone to such a
+row and its Inbox number is wrong in the same way until the next refresh
+(ADR-0355). A number may therefore be off by one per hidden
 conversation for a moment. Making it exact would need a list response that
 says, with its numbers, which of them hold each conversation that has a
 pending archive; that is not planned, and the client adds no further machinery
@@ -181,7 +185,7 @@ thread is archived. New clients must not silently substitute this command when
 the server or selected account lacks archive support.
 
 The approved A2 collection controls add **Inbox**, **Needs you**, and **Handled**.
-Inbox contains cached threads still in Gmail's Inbox whose effective priority is at least 0.1 (ADR-0329); Needs you contains
+Inbox contains cached threads still in Gmail's Inbox whose effective priority is at least 0.1 (ADR-0329), plus expedited arrivals awaiting full assessment under ADR-0355; Needs you contains
 Inbox threads, whatever their priority, with a current reply-needed assessment and no current-revision dismissal;
 Handled contains Inbox threads whose dismissed revision equals their source
 revision. Counts cover all authorized, retained cached threads matching the
@@ -468,6 +472,12 @@ schedule row, Gmail push subscription, notification digest, or general
 device-presence router. An explicitly requested email operation in Chat remains
 available through the ordinary agent independently of the Email refresh timer.
 
+### Time to Important
+
+Under [ADR-0355](../adr/0355-discover-and-triage-new-mail-before-full-assessment.md), the figure of merit is Gmail internal receipt time to the first committed membership of the corresponding inbound arrival in Important. The server applies the same Inbox, importance, feedback, expiry and dismissal rules as the collection endpoint. Group observed placements by account and budget state, compare tail latency and track unassessed expedited arrivals alongside dollars per 100 observed arrivals.
+
+With local triage enabled, a due check can discover at a hard cap. A bounded history page and its pending work share a checkpoint. Current provider Inbox and Important labels, prior correspondence and owner feedback select expedited reads. Older ordinary mail receives a share of each batch. The newest evidence of an expedited conversation can enter full assessment while older pages are pending. Until then a verified expedited arrival can appear at zero score in the ordinary Inbox with its waiting reason. Only the existing grounded ranking or an owner signal admits it to Important. The final paid slice is reserved for expedited assessment: a refresh admitted into it assesses expedited arrivals alone. Mail a historical import cached gets its arrival at its first live observation while it still awaits assessment. An owner's Important or restore action succeeds even when the conversation's source session was deleted; the placement stays on the arrival record. A work-only Jev shadow decision runs on eligible keeps after ranking, using the existing permitted input. Production promotion requires the evidence in ADR-0355.
+
 ### Server arrival checks
 
 Behind `AGENT_EMAIL_BACKGROUND_CHECKS_ENABLED`, off by default, the server also
@@ -478,7 +488,7 @@ within `email.check_interval_seconds` (default 300), read from durable task
 records. Foreground requests therefore defer checks, and existing coalescing joins
 a request to any refresh already running.
 
-An arrival is an Inbox conversation with activity in the last seven days whose
+With triage off, an arrival is an Inbox conversation with activity in the last seven days whose
 current source has not had a pass: never assessed, source changed, or its one
 promised retry pending. A conversation still being read waits until the read ends,
 because each page changes the stored source without new mail. A check reads Gmail
@@ -494,8 +504,9 @@ prompt revision changed, page further through the Inbox, advance the history pas
 re-read expired bodies, verify unsubscribe evidence or write correspondence
 summaries. Foreground slices keep that work, within their scope (ADR-0298).
 
-A check is admitted only within 50% of the daily and 90% of the rolling thirty-day
-allowance. A refusal writes no client pause and waits one interval. Each consecutive failed, timed-out or
+A paid check is admitted only when aggregate email charges, live reservations and the
+new reservation fit within USD 25 per UTC day, any lower configured daily limit,
+and the full rolling thirty-day allowance (USD 600 in production). A refusal writes no client pause and waits one interval. Each consecutive failed, timed-out or
 conservatively charged check doubles the wait, to 10, 20, 40 and at most 60 minutes;
 a completed refresh resets it. When Gmail reports no change and no arrival is
 waiting, the check loads no stored message content, makes no model call and
@@ -691,7 +702,10 @@ nothing makes no model call, requests no memory formation and is removed after s
 days, as an empty check is. Owner-requested drafts and People imports use the full
 ceilings.
 Each refresh task records its admitted `scope`, `full`, `new_mail` or `arrivals`
-(ADR-0286); earlier tasks read as `full`.
+(ADR-0286); earlier tasks read as `full`. With triage on, the budget can also hold
+any refresh to the `discovery` or `expedited` scope, so each task also records
+whether the server's check asked for it; only such a task counts as a failed
+check, and an earlier task counts as one only in the `arrivals` scope (ADR-0355).
 
 The shipped `runtime/limits.yaml` values `email.daily_cost` and
 `email.monthly_cost` hold these defaults. A reviewed operator overlay under

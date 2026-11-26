@@ -887,11 +887,15 @@ public struct ScheduleRevisionView: Codable, Equatable, Sendable {
     /// `every_report` or `attention_only` (ADR-0225 part D); absent on servers
     /// that predate the preference, which hides the switch.
     public let notify: String?
+    /// Whether this schedule's runs start scripts without asking (ADR-0342
+    /// decision 13); present only once the owner has approved it.
+    public let scriptsApproved: Bool?
     public let createdByPrincipalID: String
     public let createdAt: Date
 
     enum CodingKeys: String, CodingKey {
         case revision, title, instruction, limits, cadence, timezone, notify
+        case scriptsApproved = "scripts_approved"
         case scheduleID = "schedule_id"
         case agentID = "agent_id"
         case agentVersion = "agent_version"
@@ -909,6 +913,18 @@ public struct ScheduleRevisionView: Codable, Equatable, Sendable {
 public struct ScheduleRecordView: Codable, Equatable, Sendable {
     public let schedule: ScheduleIdentityView
     public let revision: ScheduleRevisionView
+    /// Whether the server lets this schedule be given the script approval
+    /// (ADR-0342 decision 13); absent where it cannot be.
+    public let scriptsAvailable: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case schedule, revision
+        case scriptsAvailable = "scripts_available"
+    }
+
+    /// The switch shows where the approval can be given, and wherever it is
+    /// held, so it can always be withdrawn.
+    public var offersScripts: Bool { scriptsAvailable == true || revision.scriptsApproved == true }
 }
 
 /// A schedule read from plain words (`POST /v1/schedules/drafts`, ADR-0225
@@ -926,6 +942,12 @@ public struct ScheduleDraftView: Decodable, Equatable, Sendable {
     }
 
     public var title: String? { definition?.objectValue?["title"]?.stringValue }
+
+    /// Whether saving this draft also approves the schedule's scripts
+    /// (ADR-0342 decision 13), so the form says so before Create.
+    public var scriptsApproved: Bool {
+        definition?.objectValue?["scripts_approved"]?.boolValue == true
+    }
 
     public var cadence: ScheduleCadenceView? {
         guard let cadence = definition?.objectValue?["cadence"],

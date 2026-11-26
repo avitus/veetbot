@@ -19,7 +19,7 @@ from decimal import Decimal
 from difflib import SequenceMatcher
 from email.utils import getaddresses
 from typing import Any, Literal, cast
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from agent_core.application.authorization import require_scope
 from agent_core.application.email_draft_files import EmailDraftFiles
@@ -34,19 +34,21 @@ from agent_core.domain.argument_views import approval_argument_view
 from agent_core.domain.canonical import canonical_json, canonical_value
 from agent_core.domain.context import TaskState, WorkingState
 from agent_core.domain.email import (
-    EMAIL_ARRIVAL_DAILY_SHARE,
+    EMAIL_ARRIVAL_DAILY_CAP,
     EMAIL_ARRIVAL_MAX_FAILURES_COUNTED,
     EMAIL_ARRIVAL_MAX_WAIT_SECONDS,
-    EMAIL_ARRIVAL_MONTHLY_SHARE,
     EMAIL_EMPTY_CHECK_RETENTION_DAYS,
     EMAIL_HISTORY_DAYS,
     EMAIL_LEARNING_SHARE,
     EMAIL_POLICY_VERSION,
     EMAIL_QUEUE_ALLOWANCE_SECONDS,
     EMAIL_SLICE_RESERVATION,
+    TRIAGE_BUDGET_HELD_REASON,
+    TRIAGE_QUEUED_REASON,
     EmailAccount,
     EmailArchiveConsent,
     EmailArchiveOperation,
+    EmailArrival,
     EmailAttachment,
     EmailAttachmentSelection,
     EmailBudgetLimits,
@@ -62,6 +64,7 @@ from agent_core.domain.email import (
     EmailSendConsent,
     EmailTask,
     EmailThread,
+    EmailTriageMode,
     EmailValue,
     addresses,
     apply_feedback,
@@ -69,8 +72,10 @@ from agent_core.domain.email import (
     assessment_priority,
     body_cutoff,
     draft_expired,
+    expedite_thread,
     feedback_matches,
     own_reply_floor,
+    pending_review_status,
     retained_thread,
     send_arguments_digest,
     send_gesture,
@@ -108,6 +113,9 @@ from agent_core.ports.persistence import CheckpointSeeder, RepositoryUnitOfWork,
 from agent_core.ports.skills import SkillCatalog
 
 logger = logging.getLogger(__name__)
+
+# Conversations one owner gesture marks per store read.
+EMAIL_PLACEMENT_BATCH = 100
 
 # Inbox omits conversations ranked below this; Needs you still lists them (ADR-0329).
 INBOX_RELEVANCE_FLOOR = 0.1
@@ -277,6 +285,7 @@ def thread_summary(thread: EmailThread) -> dict[str, object]:
             "source_fingerprint",
             "last_accessed_at",
             "own_reply_floor",
+            "arrival",
         },
     )
 
@@ -339,6 +348,7 @@ class EmailExperienceService:
         | None = None,
         resolve_send_approval: Callable[[Principal, UUID, WorkerLease | None], Awaitable[None]]
         | None = None,
+        triage_mode: EmailTriageMode = EmailTriageMode.OFF,
         send_undo_seconds: int = 10,
         owner_timezone: str | None = None,
         archive_self_approval_enabled: bool = True,
@@ -358,6 +368,7 @@ class EmailExperienceService:
         self.ids = ids
         self.account_ids = account_ids
         self.budget_limits = budget_limits
+        self.triage_mode = triage_mode
         self.agent = agent
         self.dispatch = dispatch
         self.seed_checkpoint = seed_checkpoint
@@ -404,7 +415,7 @@ class EmailExperienceService:
                     )
                 items.append(
                     {
-                        **account.model_dump(mode="json"),
+                        **account.model_dump(mode="json", exclude={"triage_budget_held"}),
                         "read_server_id": self.account_servers[account_id]["read"],
                         "send_server_id": self.account_servers[account_id]["send"],
                         "write_server_id": self.account_servers[account_id].get("write"),
@@ -429,6 +440,27 @@ class EmailExperienceService:
     ) -> EmailThread:
         """Read an account-authorized thread through the caller's unit of work."""
         return await self._thread(store, principal, thread_id)
+
+    def _waiting_as_shown(self, thread: EmailThread, account: EmailAccount | None) -> EmailThread:
+        """Present a waiting arrival: its current wait, or nothing of triage once it is off.
+
+        Turning triage off stops expedited treatment at once, so a read no
+        longer shows a stored nomination or the wait it explained. The stored
+        conversation is untouched and is assessed as ordinary mail.
+        """
+        if self.triage_mode != EmailTriageMode.OFF:
+            return pending_review_status(thread, account)
+        arrival = thread.arrival
+        if arrival is None or not arrival.expedited or arrival.assessed_at is not None:
+            return thread
+        return thread.model_copy(
+            update={
+                "arrival": arrival.model_copy(update={"expedited": False}),
+                "reason": EmailThread.model_fields["reason"].default
+                if thread.reason in {TRIAGE_BUDGET_HELD_REASON, TRIAGE_QUEUED_REASON}
+                else thread.reason,
+            }
+        )
 
     async def _thread(
         self, store: EmailStore, principal: Principal, thread_id: UUID
@@ -471,6 +503,7 @@ class EmailExperienceService:
             raise ValueError("email page is malformed")
         async with self.uow_factory() as uow:
             feedback = await self._feedback(uow.email, principal)
+            pending_accounts: dict[str, EmailAccount | None] = {}
             threads = []
             for stored, digest in await self._summaries.read_versioned(uow.email, principal):
                 if (
@@ -479,6 +512,15 @@ class EmailExperienceService:
                     not in principal.scopes
                 ):
                     continue
+                if (
+                    stored.arrival
+                    and stored.arrival.expedited
+                    and stored.arrival.assessed_at is None
+                    and stored.account_id not in pending_accounts
+                ):
+                    pending_accounts[stored.account_id] = await read_value(
+                        uow.email, principal, "account", stored.account_id, EmailAccount
+                    )
                 threads.append((stored, digest))
         eligible: list[EmailThread] = []
         digests: dict[UUID, str] = {}
@@ -497,6 +539,7 @@ class EmailExperienceService:
                     if current is None:
                         continue
                     thread = await self._reconcile_archive_in(uow, principal, current)
+            thread = self._waiting_as_shown(thread, pending_accounts.get(thread.account_id))
             thread = apply_feedback(thread, feedback, now=self.clock.now())
             if (
                 thread.account_id not in self.account_servers
@@ -504,10 +547,16 @@ class EmailExperienceService:
                 not in principal.scopes
             ):
                 continue
-            priority = (
-                thread.in_inbox
-                and thread.priority >= 0.7
+            priority = thread.in_important()
+            provisional = (
+                thread.arrival is not None
+                and thread.arrival.expedited
+                and thread.arrival.assessed_at is None
+                and not thread.in_spam
                 and thread.dismissed_revision != thread.revision
+                and not any(
+                    f.judgment == "less_important" and feedback_matches(f, thread) for f in feedback
+                )
             )
             if account_id is not None and account_id != thread.account_id:
                 continue
@@ -526,7 +575,8 @@ class EmailExperienceService:
                 and thread.suspected_spam
                 and not thread.spam_cleared
                 and not thread.in_spam,
-                "inbox": thread.in_inbox and thread.priority >= INBOX_RELEVANCE_FLOOR,
+                "inbox": thread.in_inbox
+                and (thread.priority >= INBOX_RELEVANCE_FLOOR or provisional),
                 "needs_you": thread.in_inbox and thread.needs_reply and not handled,
                 "handled": thread.in_inbox and handled,
             }
@@ -630,10 +680,15 @@ class EmailExperienceService:
             else:
                 # Archive recovery may have written a newer durable revision.
                 await save_value(uow.email, principal, "thread", str(thread.id), thread, now)
+            if thread.arrival and thread.arrival.expedited and thread.arrival.assessed_at is None:
+                account = await read_value(
+                    uow.email, principal, "account", thread.account_id, EmailAccount
+                )
+                thread = self._waiting_as_shown(thread, account)
             selected = apply_feedback(
                 thread, await self._feedback(uow.email, principal), now=self.clock.now()
             )
-            result = selected.model_dump(mode="json", exclude={"own_reply_floor"})
+            result = selected.model_dump(mode="json", exclude={"own_reply_floor", "arrival"})
             draft = (
                 None
                 if thread.draft_id is None
@@ -707,6 +762,8 @@ class EmailExperienceService:
                     now=now,
                 )
                 feedback_id = str(item.id)
+            if item and item.undone_at is None and item.judgment == "important":
+                await self._record_feedback_placements(uow, principal, thread, item)
             result: dict[str, object] = {
                 "feedback_id": feedback_id,
                 "thread": thread_summary(
@@ -719,6 +776,64 @@ class EmailExperienceService:
         # feedback committed and before the memories followed.
         await self._memories_follow(principal, thread, item, judgment)
         return result
+
+    async def _record_feedback_placements(
+        self,
+        uow: RepositoryUnitOfWork,
+        principal: Principal,
+        thread: EmailThread,
+        item: EmailFeedback,
+    ) -> None:
+        """Record new collection memberships in the transaction applying the owner's judgment."""
+        feedback = await self._feedback(uow.email, principal)
+        candidates = [thread]
+        if item.target != "thread":
+            candidates = [
+                candidate
+                async for candidate in thread_summaries(uow.email, principal)
+                if candidate.arrival
+                and candidate.arrival.important_at is None
+                and candidate.account_id in self.account_servers
+                and f"mcp.{self.account_servers[candidate.account_id]['read']}.use"
+                in principal.scopes
+                and feedback_matches(item, candidate)
+                and apply_feedback(candidate, feedback, now=self.clock.now()).in_important()
+            ]
+        placed = [
+            str(candidate.id)
+            for candidate in candidates
+            if candidate.arrival
+            and not candidate.arrival.important_at
+            and candidate.source_session_ids
+        ]
+        cutoff = body_cutoff(self.clock.now())
+        for start in range(0, len(placed), EMAIL_PLACEMENT_BATCH):
+            # One read per batch serves each whole conversation and the revision
+            # its save needs; the account scope was checked while selecting.
+            for row in await uow.email.get_threads(
+                principal, placed[start : start + EMAIL_PLACEMENT_BATCH]
+            ):
+                current = retained_thread(EmailThread.model_validate(row.payload), cutoff)
+                marked = await self._mark_important(
+                    uow,
+                    current,
+                    feedback,
+                    current.source_session_ids[-1],
+                    None,
+                    None,
+                    "owner_feedback",
+                )
+                if marked is not current:
+                    await uow.email.put(
+                        row.model_copy(
+                            update={
+                                "revision": row.revision + 1,
+                                "payload": marked.model_dump(mode="json"),
+                                "updated_at": self.clock.now(),
+                            }
+                        ),
+                        expected_revision=row.revision,
+                    )
 
     async def _save_feedback(
         self,
@@ -866,6 +981,10 @@ class EmailExperienceService:
                 )
                 await self._bump_profile(uow.email, principal)
             thread = await self._thread(uow.email, principal, item.thread_id)
+            if item.judgment == "less_important":
+                await self._record_feedback_placements(
+                    uow, principal, thread, item.model_copy(update={"undone_at": None})
+                )
             summary = thread_summary(
                 apply_feedback(
                     thread, await self._feedback(uow.email, principal), now=self.clock.now()
@@ -1363,14 +1482,15 @@ class EmailExperienceService:
         amount: Decimal,
         *,
         share: Decimal = Decimal("1"),
-        monthly_share: Decimal | None = None,
+        daily_cap: Decimal | None = None,
+        protect_arrivals: bool = True,
     ) -> None:
         """Count actual or conservative charges once, and retain live reservations."""
         now = self.clock.now().astimezone(UTC)
         daily_limit = self.budget_limits.daily_cost * share
-        monthly_limit = self.budget_limits.monthly_cost * (
-            share if monthly_share is None else monthly_share
-        )
+        monthly_limit = self.budget_limits.monthly_cost * share
+        if daily_cap is not None:
+            daily_limit = min(daily_limit, daily_cap)
         daily_spent = Decimal("0")
         monthly_spent = Decimal("0")
         reserved = Decimal("0")
@@ -1411,6 +1531,25 @@ class EmailExperienceService:
                 monthly_spent += imported.settled_cost
                 if created.date() == now.date():
                     daily_spent += imported.settled_cost
+        configured_daily_limit = daily_limit
+        protected = protect_arrivals and self.triage_mode != EmailTriageMode.OFF and share == 1
+        reserve = min(
+            EMAIL_SLICE_RESERVATION, self.agent.limits.max_cost or EMAIL_SLICE_RESERVATION
+        )
+
+        def daily_limit_for(spent_that_day: Decimal) -> Decimal:
+            """The day's limit, which depends on what that day has already counted."""
+            if not protected:
+                return configured_daily_limit
+            # Foreground and People work also count against the server check's
+            # daily cap. Protect its last slot while a background check can use it.
+            if spent_that_day + reserved < EMAIL_ARRIVAL_DAILY_CAP:
+                return min(configured_daily_limit, EMAIL_ARRIVAL_DAILY_CAP) - reserve
+            return configured_daily_limit - reserve
+
+        daily_limit = daily_limit_for(daily_spent)
+        if protected:
+            monthly_limit -= reserve
         if (
             daily_spent + reserved + amount <= daily_limit
             and monthly_spent + reserved + amount <= monthly_limit
@@ -1435,8 +1574,10 @@ class EmailExperienceService:
             while expired < len(settled) and settled[expired][0] < candidate - timedelta(days=30):
                 monthly -= settled[expired][1]
                 expired += 1
+            # The same gate, with that day's own spending: a stale limit could
+            # name a time the next attempt refuses again.
             if (
-                daily + reserved + amount <= daily_limit
+                daily + reserved + amount <= daily_limit_for(daily)
                 and monthly + reserved + amount <= monthly_limit
             ):
                 retry_at = candidate
@@ -1470,7 +1611,7 @@ class EmailExperienceService:
         try:
             await self._check_budget(store, principal, amount, share=EMAIL_LEARNING_SHARE)
         except BudgetExceededError:
-            await self._check_budget(store, principal, amount)
+            await self._check_budget(store, principal, amount, protect_arrivals=False)
             return "new_mail"
         return "full"
 
@@ -1618,6 +1759,7 @@ class EmailExperienceService:
                         if archived
                         else "only a conversation in Spam can be restored"
                     )
+            paid_refresh_active = False
             async for row in task_records(
                 uow.email, principal, send_draft=draft if consented else None
             ):
@@ -1649,6 +1791,15 @@ class EmailExperienceService:
                     )
                     or old.attachment != attachment
                 ):
+                    continue
+                if (
+                    kind == "refresh"
+                    and self.triage_mode != EmailTriageMode.OFF
+                    and old.discovery_complete
+                    and old.scope != "discovery"
+                ):
+                    # The paid worker released discovery and will never write its cursor again.
+                    paid_refresh_active = True
                     continue
                 if kind == "send" and old.expected_revision != expected_revision:
                     raise ConflictError(
@@ -1720,20 +1871,44 @@ class EmailExperienceService:
                     self.agent.limits.max_cost or EMAIL_SLICE_RESERVATION,
                 )
             )
-            admitted: Literal["full", "new_mail", "arrivals"] = "full"
-            if arrival_check:
-                await self._check_budget(
-                    uow.email,
-                    principal,
-                    reservation,
-                    share=EMAIL_ARRIVAL_DAILY_SHARE,
-                    monthly_share=EMAIL_ARRIVAL_MONTHLY_SHARE,
-                )
-                admitted = "arrivals"
-            elif kind == "refresh":
-                admitted = await self._refresh_scope(uow.email, principal, reservation)
-            elif not operational and not thread_gesture:
-                await self._check_budget(uow.email, principal, reservation)
+            admitted: Literal["full", "new_mail", "arrivals", "discovery", "expedited"] = "full"
+            budget_held = False
+            triage = kind == "refresh" and self.triage_mode != EmailTriageMode.OFF
+            try:
+                if paid_refresh_active:
+                    admitted = "discovery"
+                elif arrival_check:
+                    await self._check_budget(
+                        uow.email,
+                        principal,
+                        reservation,
+                        daily_cap=EMAIL_ARRIVAL_DAILY_CAP,
+                        protect_arrivals=False,
+                    )
+                    admitted = "arrivals"
+                elif kind == "refresh":
+                    admitted = await self._refresh_scope(uow.email, principal, reservation)
+                elif not operational and not thread_gesture:
+                    await self._check_budget(uow.email, principal, reservation)
+                if triage and admitted != "discovery":
+                    # Leave the final paid slice in each allowance for expedited arrivals.
+                    try:
+                        await self._check_budget(
+                            uow.email,
+                            principal,
+                            reservation,
+                            protect_arrivals=True,
+                            daily_cap=EMAIL_ARRIVAL_DAILY_CAP if arrival_check else None,
+                        )
+                    except BudgetExceededError:
+                        admitted = "expedited"
+            except BudgetExceededError:
+                if not triage:
+                    raise
+                budget_held = True
+                admitted = "discovery"
+            if admitted == "discovery":
+                reservation = Decimal("0")
             session = await self._session_in(
                 uow,
                 principal,
@@ -1805,6 +1980,9 @@ class EmailExperienceService:
                 created_at=now,
                 reservation=reservation,
                 scope=admitted,
+                arrival_check=arrival_check if kind == "refresh" else None,
+                budget_held=budget_held,
+                triage_mode=self.triage_mode if triage else EmailTriageMode.OFF,
                 archive_consent=(
                     EmailArchiveConsent(
                         tenant_id=principal.tenant_id,
@@ -2027,18 +2205,20 @@ class EmailExperienceService:
             failures = 0
             for task in recent[:EMAIL_ARRIVAL_MAX_FAILURES_COUNTED]:
                 # A failed foreground refresh defers a check but is not a failed check.
-                failed = 1 if task.scope == "arrivals" else 0
+                failed = 1 if task.server_check else 0
                 try:
                     run = await uow.runs.get(task.run_id, principal)
                 except NotFoundError:
                     failures += failed
                     continue
                 if run.status not in TERMINAL_RUN_STATUSES:
+                    if self.triage_mode != EmailTriageMode.OFF and task.discovery_complete:
+                        continue
                     return False
                 # A completed refresh resets the count, unless it is a check charged
                 # conservatively, which counts as a failure.
                 if run.status is RunStatus.COMPLETED and (
-                    task.scope != "arrivals" or task.budget_charge is None
+                    not task.server_check or task.budget_charge is None
                 ):
                     break
                 failures += failed
@@ -2495,6 +2675,16 @@ class EmailExperienceService:
                     "suspected_spam": thread.suspected_spam and not cleared,
                 }
             )
+            if thread.arrival and thread.arrival.important_at is None and thread.source_session_ids:
+                thread = await self._mark_important(
+                    uow,
+                    thread,
+                    await self._feedback(uow.email, principal),
+                    thread.source_session_ids[-1],
+                    None,
+                    None,
+                    "owner_restore",
+                )
             now = self.clock.now()
             await save_value(uow.email, principal, "thread", str(thread.id), thread, now)
             assessment = await uow.email.get(principal, "assessment", str(thread.id))
@@ -2708,6 +2898,16 @@ class EmailExperienceService:
                     # Not spam is the owner's verdict; later assessments never flag it again.
                     update.update(spam_cleared=True, suspected_spam=False)
         thread = thread.model_copy(update=update)
+        if thread.arrival and thread.in_inbox and thread.arrival.important_at is None:
+            thread = await self._mark_important(
+                uow,
+                thread,
+                await self._feedback(uow.email, principal),
+                task.session_id,
+                None,
+                None,
+                "owner_restore",
+            )
         await save_value(uow.email, principal, "thread", str(thread.id), thread, self.clock.now())
         return thread
 
@@ -2836,12 +3036,15 @@ class EmailExperienceService:
         known: set[UUID] = set()
         malformed = False
         junk_started = {
-            e.payload.get("fingerprint") for e in events if e.event_type == "email.junk.started"
+            e.payload.get("fingerprint")
+            for e in events
+            if e.event_type in {"email.junk.started", "email.triage.positive.started"}
         }
         junk_known = {
             e.payload.get("fingerprint")
             for e in events
-            if e.event_type == "email.junk.completed" and e.payload.get("usage_known") is True
+            if e.event_type in {"email.junk.completed", "email.triage.positive.completed"}
+            and e.payload.get("usage_known") is True
         }
         if junk_started != junk_known or None in junk_started:
             malformed = True
@@ -3237,6 +3440,10 @@ class EmailExperienceService:
         *,
         run: Run | None = None,
         lease: WorkerLease | None = None,
+        observed_at: datetime | None = None,
+        budget_held: bool = False,
+        learn_history: bool = True,
+        reply_partners: set[str] | None = None,
     ) -> EmailThread:
         """Persist one fully identified provider observation; never synthesize evidence time."""
         if account_id not in self.account_servers or normalized.get("source_changed"):
@@ -3355,16 +3562,6 @@ class EmailExperienceService:
                     ]
                 )
             ):
-                if (
-                    previous.messages == messages
-                    and previous.in_inbox == in_inbox
-                    and previous.in_spam == in_spam
-                    and previous.archive_operation == archive_operation
-                ):
-                    await self._learn_history(
-                        uow.email, principal, previous, automatic=run is not None
-                    )
-                    return previous
                 # Keep legacy label-bearing fingerprints stable: assessments and
                 # semantic evidence are keyed to that existing content identity.
                 updated = previous.model_copy(
@@ -3382,6 +3579,78 @@ class EmailExperienceService:
                         else previous.assessment_version,
                     }
                 )
+                known = updated.arrival
+                # Mail cached by a historical import has no arrival. Its first live
+                # observation starts one while its content still awaits assessment,
+                # under the rule that admits newly read mail below.
+                first_seen = (
+                    known is None
+                    and observed_at is not None
+                    and not updated.assessment_version
+                    and bool(messages)
+                    and messages[-1].direction == "received"
+                    and messages[-1].sent_at >= now - timedelta(days=7)
+                    and in_inbox
+                )
+                if observed_at is not None and (known is not None or first_seen):
+                    feedback = await self._feedback(uow.email, principal)
+                    expedited = self.triage_mode != EmailTriageMode.OFF and expedite_thread(
+                        updated, reply_partners or set(), feedback
+                    )
+                    arrival = known or EmailArrival(
+                        id=uuid5(updated.id, messages[-1].id),
+                        message_id=messages[-1].id,
+                        received_at=messages[-1].sent_at,
+                        discovered_at=observed_at,
+                        expedited=expedited,
+                    )
+                    arrival = arrival.model_copy(
+                        update={
+                            "expedited": expedited,
+                            "budget_held": budget_held and arrival.assessed_at is None,
+                        }
+                    )
+                    updated = updated.model_copy(update={"arrival": arrival})
+                    if known is None:
+                        # The receipt lives in this session, so an owner action
+                        # times itself here even if the import's session is gone.
+                        updated = updated.model_copy(
+                            update={
+                                "source_session_ids": [
+                                    *(
+                                        s
+                                        for s in updated.source_session_ids
+                                        if s != source_session_id
+                                    ),
+                                    source_session_id,
+                                ]
+                            }
+                        )
+                    if arrival.assessed_at is None:
+                        if expedited:
+                            updated = updated.model_copy(
+                                update={
+                                    "reason": TRIAGE_BUDGET_HELD_REASON
+                                    if budget_held
+                                    else TRIAGE_QUEUED_REASON
+                                }
+                            )
+                        elif updated.reason in {TRIAGE_BUDGET_HELD_REASON, TRIAGE_QUEUED_REASON}:
+                            # The nomination is gone; so is the wait only it explained.
+                            updated = updated.model_copy(
+                                update={"reason": EmailThread.model_fields["reason"].default}
+                            )
+                    if known is None:
+                        await self._discovered(uow, updated, arrival, source_session_id, run, lease)
+                    updated = await self._mark_important(
+                        uow, updated, feedback, source_session_id, run, lease, "mailbox_change"
+                    )
+                if previous == updated:
+                    if learn_history:
+                        await self._learn_history(
+                            uow.email, principal, previous, automatic=run is not None
+                        )
+                    return previous
                 await save_value(uow.email, principal, "thread", str(updated.id), updated, now)
                 return updated
             thread = EmailThread(
@@ -3421,6 +3690,129 @@ class EmailExperienceService:
                 if messages
                 else "Conversation removed from the account",
             )
+            if (
+                observed_at is not None
+                and messages
+                and messages[-1].direction == "received"
+                and messages[-1].sent_at >= now - timedelta(days=7)
+                and in_inbox
+            ):
+                feedback = await self._feedback(uow.email, principal)
+                latest = messages[-1]
+                previous_arrival = previous.arrival if previous is not None else None
+                # An older inbound message can become newest again after deletion.
+                # Bind its measurement to the retained local thread, including across retries.
+                arrival = EmailArrival(
+                    id=uuid5(thread.id, latest.id),
+                    message_id=latest.id,
+                    received_at=latest.sent_at,
+                    discovered_at=observed_at,
+                    expedited=self.triage_mode != EmailTriageMode.OFF
+                    and expedite_thread(thread, reply_partners or set(), feedback),
+                    budget_held=budget_held,
+                )
+                if previous_arrival and previous_arrival.message_id == latest.id:
+                    arrival = arrival.model_copy(
+                        update={
+                            "discovered_at": previous_arrival.discovered_at,
+                            "important_at": previous_arrival.important_at,
+                        }
+                    )
+                thread = thread.model_copy(
+                    update={
+                        "arrival": arrival,
+                        "reason": (
+                            TRIAGE_BUDGET_HELD_REASON if budget_held else TRIAGE_QUEUED_REASON
+                        )
+                        if arrival.expedited
+                        else thread.reason,
+                    }
+                )
+                # Older pages enrich the conversation. Preserve the rating while its
+                # newest evidence remains identical and accessible in the expanded page.
+                if (
+                    previous
+                    and previous_arrival
+                    and previous_arrival.id == arrival.id
+                    and normalized.get("newest_first")
+                    and previous.messages
+                    and previous.messages[-1].model_dump(exclude={"labels", "reader_html"})
+                    == latest.model_dump(exclude={"labels", "reader_html"})
+                    and previous_arrival.assessed_at
+                    and not thread.in_spam
+                ):
+                    prior = await uow.email.get(principal, "assessment", str(thread.id))
+                    quotes = prior.payload.get("supported_evidence") if prior else None
+                    if (
+                        prior
+                        and prior.payload.get("grounded")
+                        and isinstance(quotes, list)
+                        and quotes
+                        and all(
+                            isinstance(quote, str)
+                            and (quote in latest.body or quote in latest.subject)
+                            for quote in quotes
+                        )
+                    ):
+                        first_start = previous_arrival.assessment_started_at
+                        thread = thread.model_copy(
+                            update={
+                                **{
+                                    field: getattr(previous, field)
+                                    for field in (
+                                        "summary",
+                                        "reason",
+                                        "priority",
+                                        "topics",
+                                        "suspected_spam",
+                                        "attention_expires_at",
+                                        "profile_revision",
+                                        "assessment_version",
+                                        "reply_blocked_reason",
+                                    )
+                                },
+                                # The reply the kept assessment asked for, under the
+                                # rule that assessment applied: a reply needs the
+                                # whole thread, so the request returns with it.
+                                "needs_reply": prior.payload.get("needs_reply") is True
+                                and thread.complete,
+                                "dismissed_revision": thread.revision
+                                if previous.dismissed_revision == previous.revision
+                                else None,
+                                "arrival": arrival.model_copy(
+                                    update={
+                                        "assessed_at": previous_arrival.assessed_at,
+                                        "assessment_started_at": first_start,
+                                        "budget_held": False,
+                                    }
+                                ),
+                            }
+                        )
+                if previous_arrival is None or previous_arrival.id != arrival.id:
+                    await self._discovered(uow, thread, arrival, source_session_id, run, lease)
+                thread = await self._mark_important(
+                    uow, thread, feedback, source_session_id, run, lease, "discovery"
+                )
+            elif (
+                observed_at is None
+                and previous is not None
+                and previous.arrival is not None
+                and messages
+                and messages[-1].id == previous.arrival.message_id
+            ):
+                # A historical import observes nothing new. While the arrival's
+                # message is still the newest, its measured wait goes on, as it
+                # does when an older message is removed.
+                waiting = previous.arrival.expedited and previous.arrival.assessed_at is None
+                thread = thread.model_copy(
+                    update={
+                        "arrival": previous.arrival,
+                        "reason": previous.reason
+                        if waiting
+                        and previous.reason in {TRIAGE_BUDGET_HELD_REASON, TRIAGE_QUEUED_REASON}
+                        else thread.reason,
+                    }
+                )
             if thread.draft_id is not None:
                 draft = await read_value(
                     uow.email, principal, "draft", str(thread.draft_id), EmailDraft
@@ -3468,8 +3860,38 @@ class EmailExperienceService:
                     ),
                 },
             )
-            await self._learn_history(uow.email, principal, thread, automatic=run is not None)
+            if learn_history:
+                await self._learn_history(uow.email, principal, thread, automatic=run is not None)
             return thread
+
+    async def _discovered(
+        self,
+        uow: RepositoryUnitOfWork,
+        thread: EmailThread,
+        arrival: EmailArrival,
+        session_id: UUID,
+        run: Run | None,
+        lease: WorkerLease | None,
+    ) -> None:
+        """Record the receipt that starts an arrival's measured wait."""
+        await uow.events.append(
+            NewEvent(
+                session_id=session_id,
+                run_id=run.id if run else None,
+                event_type="email.triage.discovered",
+                actor_type="application",
+                payload={
+                    "arrival_id": str(arrival.id),
+                    "account_id": thread.account_id,
+                    "mode": self.triage_mode,
+                    "received_at": arrival.received_at.isoformat(),
+                    "discovered_at": arrival.discovered_at.isoformat(),
+                    "expedited": arrival.expedited,
+                    "budget_held": arrival.budget_held,
+                },
+            ),
+            lease=lease,
+        )
 
     async def _learn_history(
         self,
@@ -3480,6 +3902,9 @@ class EmailExperienceService:
         automatic: bool = False,
     ) -> None:
         """Learn eligible owner-authored Sent evidence without duplicating source contributions."""
+        if not any(message.direction == "sent" and message.complete for message in thread.messages):
+            # Nothing here can teach style or correspondence; skip the draft scans.
+            return
         state = await self._learning_state(store, principal)
         if state.paused:
             return
@@ -3596,6 +4021,67 @@ class EmailExperienceService:
             else:
                 kept += 1
                 recipient_counts[recipient] = recipient_counts.get(recipient, 0) + 1
+
+    async def _mark_important(
+        self,
+        uow: RepositoryUnitOfWork,
+        thread: EmailThread,
+        feedback: list[EmailFeedback],
+        session_id: UUID,
+        run: Run | None,
+        lease: WorkerLease | None,
+        cause: str,
+    ) -> EmailThread:
+        """Record the first server-visible Important membership for this inbound message."""
+        arrival = thread.arrival
+        now = self.clock.now()
+        if (
+            arrival is None
+            or arrival.important_at is not None
+            or not apply_feedback(thread, feedback, now=now).in_important()
+        ):
+            return thread
+        # A run's own session exists. An owner action names the thread's source
+        # sessions, which the owner may since have deleted: the placement then
+        # stands on the arrival record, and the timing event goes to the newest
+        # source session that survives, or nowhere when none does.
+        sessions = (
+            [session_id]
+            if run is not None
+            else list(dict.fromkeys([session_id, *reversed(thread.source_session_ids)]))
+        )
+        for candidate in sessions:
+            try:
+                await uow.events.append(
+                    NewEvent(
+                        session_id=candidate,
+                        run_id=run.id if run else None,
+                        event_type="email.triage.important",
+                        actor_type="application",
+                        payload={
+                            "account_id": thread.account_id,
+                            "cause": cause,
+                            "arrival_id": str(arrival.id),
+                            "mode": self.triage_mode,
+                            "received_at": arrival.received_at.isoformat(),
+                            "discovered_at": arrival.discovered_at.isoformat(),
+                            "assessment_started_at": arrival.assessment_started_at.isoformat()
+                            if arrival.assessment_started_at
+                            else None,
+                            "important_at": now.isoformat(),
+                            "elapsed_ms": int((now - arrival.received_at).total_seconds() * 1000),
+                        },
+                    ),
+                    lease=lease,
+                )
+            except NotFoundError:
+                if run is not None:
+                    raise
+                continue
+            break
+        return thread.model_copy(
+            update={"arrival": arrival.model_copy(update={"important_at": now})}
+        )
 
     async def save_assessment(
         self,
@@ -3730,15 +4216,60 @@ class EmailExperienceService:
                     "suspected_spam": suspected_spam,
                 }
             )
+            feedback = await self._feedback(uow.email, principal)
+            if thread.arrival:
+                if run and assessment.get("started_at"):
+                    await uow.events.append(
+                        NewEvent(
+                            session_id=run.session_id,
+                            run_id=run.id,
+                            event_type="email.triage.assessed",
+                            actor_type="application",
+                            payload={
+                                "arrival_id": str(thread.arrival.id),
+                                "account_id": thread.account_id,
+                                "started_at": str(assessment["started_at"]),
+                                "grounded": bool(assessment.get("grounded")),
+                                "cost": assessment.get("assessment_cost"),
+                                "mode": self.triage_mode,
+                            },
+                            derivation_key=f"email-assessed:{run.id}:{thread.arrival.id}:{assessment['started_at']}",
+                        ),
+                        lease=lease,
+                    )
+                thread = thread.model_copy(
+                    update={
+                        "arrival": thread.arrival.model_copy(
+                            update={
+                                "assessed_at": thread.arrival.assessed_at or self.clock.now(),
+                                "budget_held": False,
+                                "assessment_started_at": thread.arrival.assessment_started_at
+                                or (
+                                    datetime.fromisoformat(str(assessment["started_at"]))
+                                    if assessment.get("started_at")
+                                    else None
+                                ),
+                            }
+                        )
+                    }
+                )
+                if run or thread.source_session_ids:
+                    thread = await self._mark_important(
+                        uow,
+                        thread,
+                        feedback,
+                        run.session_id if run else thread.source_session_ids[-1],
+                        run,
+                        lease,
+                        "assessment",
+                    )
             if assessment.get("junk_bypassed") and junk_pilot is not None:
                 await admit_pilot(uow.email, principal, thread, junk_pilot, self.clock.now())
             await save_value(
                 uow.email, principal, "thread", str(thread.id), thread, self.clock.now()
             )
             await self._put_data(uow.email, principal, "assessment", str(thread.id), assessment)
-            return apply_feedback(
-                thread, await self._feedback(uow.email, principal), now=self.clock.now()
-            )
+            return apply_feedback(thread, feedback, now=self.clock.now())
 
     async def _reply_envelope(
         self, store: EmailStore, principal: Principal, thread: EmailThread
@@ -4184,6 +4715,16 @@ class EmailExperienceService:
             if thread.dismissed_revision == dismissed_revision:
                 return thread_summary(thread)
             thread = thread.model_copy(update={"dismissed_revision": dismissed_revision})
+            if thread.arrival and thread.arrival.important_at is None and thread.source_session_ids:
+                thread = await self._mark_important(
+                    uow,
+                    thread,
+                    await self._feedback(uow.email, principal),
+                    thread.source_session_ids[-1],
+                    None,
+                    None,
+                    "owner_restore",
+                )
             await save_value(
                 uow.email, principal, "thread", str(thread.id), thread, self.clock.now()
             )
@@ -4382,7 +4923,11 @@ class EmailExperienceService:
             await self.subscriptions.forget_thread_in(
                 uow.email, principal, account_id, provider_id, message_ids
             )
-            for kind, key in (("thread", str(thread_id)), ("thread_source", source_key)):
+            for kind, key in (
+                ("thread", str(thread_id)),
+                ("positive_screen", str(thread_id)),
+                ("thread_source", source_key),
+            ):
                 current_record = await uow.email.get(principal, kind, key)
                 if current_record is not None:
                     await uow.email.delete(

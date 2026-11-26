@@ -21,7 +21,7 @@ from agent_core.domain.errors import (
     ExportStateError,
     NotFoundError,
 )
-from agent_core.domain.events import conversation_items
+from agent_core.domain.events import history_items
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.domain.security import SECRET_RULES
@@ -308,7 +308,9 @@ class TrajectoryExportService:
         seen_tool_calls: set[str] = set()
         seen_tool_results: set[str] = set()
         for event in events:
-            for item in conversation_items(event):
+            # The model's conversation: a script's own calls are no part of it
+            # (ADR-0342 decision 5).
+            for item in history_items(event):
                 kind = item.kind
                 call_id = getattr(item, "call_id", None)
                 if kind == "provider_reasoning":

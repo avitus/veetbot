@@ -13,8 +13,8 @@
   12 repairs. On 2026-11-24 two production runs failed after an approved
   script; decision 5 now states the rule that repairs them. The same day the
   owner decided that a schedule's scripts are approved once at setup
-  (decision 13), which is built behind its own default-off setting and not
-  delivered.
+  (decision 13). Pull request 267 delivered it behind its own default-off
+  setting that day, and the owner turned it on in production.
 - Date: 2026-11-21
 - Amends: ADR-0015 (names the tool of decision 1, defines the
   "orchestration-only turn" of decision 3, counts bridged calls against the
@@ -253,6 +253,21 @@ The owner prefers no new external dependency unless one is necessary.
     - It is composed only while `AGENT_CODE_MODE_ENABLED` is on, and
       `schedule.create` records it only while
       `AGENT_SCHEDULE_SCRIPTS_ENABLED` is on as well.
+    - The app gives it in two more places, and shows it to the owner before
+      it is saved in both. The plain-words form's draft carries it only for
+      a client that sends `offer_script_approval`, under the conditions of
+      the card and when the owner holds the scope; the form names it before
+      Create, and Create is the approval. The schedule detail has a switch
+      that gives and withdraws it through the full-definition update. It
+      gives the approval only to the revision on the owner's screen: if the
+      schedule has changed since, nothing is given and the app shows the
+      current version to decide from. Withdrawing applies to whatever is
+      current, and the app says that a run already queued keeps the
+      approval of the revision it was queued on. A schedule the API returns says `scripts_available` where the switch may
+      be shown: both settings are on, the schedule runs a model, the owner
+      holds the scope, and the pinned agent has the script tool. The switch
+      also shows on any schedule that holds the approval, so it can always
+      be withdrawn.
 
 ## Implementation status
 
@@ -348,18 +363,36 @@ The work is cut into four slices.
      inside one claim. The chat's history was rebuilt under
      `session-history@3` and held no bridged result, and the request was
      assembled without the compaction the earlier one needed.
-   - **Not done.** The trajectory export and the skill review transcript
-     still list bridged results; the export is off in production.
+   - **The other two records, 2026-11-24.** The trajectory export and the
+     skill review transcript are the model's conversation too, and now read
+     events through the same rule, so neither lists a bridged result. On
+     `dev`, not delivered. The export is off in production.
 5. **A schedule's script approval (decision 13).** Implemented offline on
    2026-11-24 behind the default-off `AGENT_SCHEDULE_SCRIPTS_ENABLED`: the
    revision field and its validation, the standing authorizer, and the
-   `schedule.create` card. On `dev`, not delivered.
-   - **Not done.** Production needs three steps the owner decides: the
-     release, `sandbox.execute` in the schedule role's scopes, and the
-     setting. Recording the approval on the nine re-pinned schedules is a
-     full-definition update of each after that. The app's plain-words
-     schedule form does not offer the approval, and no client shows whether a
-     schedule holds it.
+   `schedule.create` card. Pull request 267 delivered it the same day, with
+   the check that binds the approval to the stored card.
+   - **Activated in production, 2026-11-24.** The owner added
+     `sandbox.execute` to the schedule role's scopes and restarted the
+     schedule service, then turned the setting on and restarted the API and
+     the three workers. The running schedule service and async worker were
+     read back and hold the new values. The nine model-run schedules then
+     each took one full-definition update that added the scope and the
+     approval; each kept its agent version and its next firing time. The four
+     job schedules were left alone and fired on time after the restart.
+   - **First approved run observed, 2026-11-25.** The weekday briefing fired
+     on time and completed in under two minutes with five scripts. The first
+     ran before the run had read outside content and needed no card; the
+     other four were authorized with kind `schedule_script_approval` against
+     the schedule's revision. No run waited for an approval and none recorded
+     `schedule.scope_revoked`. The other eight approved schedules have not
+     fired since the approval.
+   - **In the app, 2026-11-24.** The plain-words form offers the approval
+     and the schedule detail shows it, gives it and withdraws it, as the last
+     item of decision 13 states. Built with the draft field, the
+     `scripts_available` read and the native switch. On `dev`, not delivered:
+     the app change reaches the owner through a release and a TestFlight
+     build.
 
 ## Consequences
 

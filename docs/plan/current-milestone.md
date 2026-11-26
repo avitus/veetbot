@@ -12,9 +12,11 @@ title: Current Milestone
   default off behind `AGENT_CODE_MODE_ENABLED`. Pull requests 263 and 264
   delivered it on 2026-11-23, and the owner turned it on in production for app
   chats that day, and had the nine model-run schedules re-pinned to it on
-  2026-11-24; a scheduled run is still offered no script tool until its
-  schedule is approved for scripts (decision 13, built on `dev` behind
-  `AGENT_SCHEDULE_SCRIPTS_ENABLED`, not delivered). On
+  2026-11-24; a scheduled run is offered no script tool until its
+  schedule is approved for scripts (decision 13, behind
+  `AGENT_SCHEDULE_SCRIPTS_ENABLED`). Pull request 267 delivered that approval
+  on 2026-11-24, and the owner turned it on in production and had it recorded
+  on the nine schedules that day; none has run under it yet. On
   2026-11-24 two production runs failed after an approved script, and the
   repair keeps a script's own calls out of session history. No milestone or
   gate moves.
@@ -85,13 +87,17 @@ title: Current Milestone
   setting, or scope. Pull request 232 delivered it on 2026-11-04; no real-mailbox
   trial is recorded. No milestone or gate moves.
 
+- On 2026-11-25 the owner approved [two-stage email triage](../adr/0355-discover-and-triage-new-mail-before-full-assessment.md) and selected time from receipt to Important as its figure of merit within existing cost limits. Work-only Jev positive promotion is evidence-gated.
+
 - **Server email checks — ADR-0286:** On 2026-11-01 the owner accepted
   [the decision](../adr/0286-server-checks-for-new-mail.md) and authorized its
   implementation on `email-checks`. A default-off maintenance pass checks for new
   mail every five minutes while Email is closed. It handles only new or changed
-  mail, within 50% of the daily and 90% of the rolling allowance. Pull request 222
-  delivered it on 2026-11-02 with a thirty-third Milestone 26 gate, which is
-  bound. Activation needs one measured production week.
+  mail. Pull request 222 delivered the original check on 2026-11-02 with a
+  thirty-third Milestone 26 gate. Activation needs one measured production week.
+  On 2026-11-25 the owner approved USD 25 per
+  UTC day (subject to any lower daily limit) and the full rolling allowance for
+  these checks.
 
 - **Veetbot's code power — ADR-0281:** On 2026-11-01 the owner asked for
   first-class coding and debugging power after Veetbot could not explain a

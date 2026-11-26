@@ -405,7 +405,10 @@ from agent_core.application.recall_questions import PublicRecallQuestionService
 from agent_core.application.reconsolidation import PublicReconsolidationService
 from agent_core.application.records import RecordsService
 from agent_core.application.run_service import RunService
-from agent_core.application.schedule_script_approvals import ScheduleScriptAuthorizer
+from agent_core.application.schedule_script_approvals import (
+    ScheduleScriptAuthorizer,
+    ScheduleScriptOffers,
+)
 from agent_core.application.schedule_service import ScheduleService
 from agent_core.application.script_request_grants import (
     ScriptRequestGrantAuthorizer,
@@ -1029,6 +1032,9 @@ class ApplicationServices:
     browser_task_grants: PublicBrowserTaskGrantServiceContract | None = None
     # ADR-0225 part B: absent when drafts are off or titles use no routed model.
     schedule_drafts: ScheduleDrafter | None = None
+    # ADR-0342 decision 13: says on a schedule read whether the app may offer
+    # the script approval.
+    schedule_script_offers: ScheduleScriptOffers | None = None
     # ADR-0225 part C: Run now materializes on the API's own unit of work.
     schedule_runs: ScheduleMaterializer | None = None
     # Milestone 35: present only when AGENT_COCKPIT_ENABLED is set.
@@ -3868,9 +3874,9 @@ async def _compose(
         registry.register(ShadowBrowserActTool(browser_provider, presenter=act_presenter))
     if settings.delegation_enabled:
         registry.register(DelegateRunTool())
+    # ADR-0342 decision 13: creating a schedule approves its scripts.
+    schedule_scripts = settings.code_mode_enabled and settings.schedule_scripts_enabled
     if settings.schedule_api_enabled and settings.schedule_worker_enabled:
-        # ADR-0342 decision 13: creating a schedule approves its scripts.
-        schedule_scripts = settings.code_mode_enabled and settings.schedule_scripts_enabled
         registry.register(
             SingleCallScheduleCreateTool(
                 schedule_service,
@@ -5484,7 +5490,10 @@ async def _compose(
                             if session.metadata.get(SESSION_EMAIL_OPERATIONAL_METADATA_KEY) is True
                             else None
                         )
-                        if record is not None and record.payload.get("empty_check") is True:
+                        if record is not None and (
+                            record.payload.get("empty_check") is True
+                            or record.payload.get("scope") in {"discovery", "expedited"}
+                        ):
                             completed = None
                         else:
                             await uow.events.append(
@@ -6351,10 +6360,14 @@ async def _compose(
                         ids=ids,
                         model_policy=title_profiles.generation.model_policy,
                     ),
+                    approve_scripts=schedule_scripts,
                 )
                 if settings.schedule_drafts_enabled
                 and title_profiles.generation.model_policy not in NON_ROUTED_MODEL_POLICIES
                 else None
+            ),
+            schedule_script_offers=ScheduleScriptOffers(
+                uow_factory=uow_factory, enabled=schedule_scripts
             ),
             schedule_runs=ScheduleMaterializer(
                 uow_factory=uow_factory,
@@ -6425,6 +6438,7 @@ async def _compose(
                 ),
                 agent=agent,
                 budget_limits=email_budget_limits,
+                triage_mode=settings.email_triage_mode,
                 dispatch=dispatcher.dispatch,
                 seed_checkpoint=checkpoint_seeder,
                 catalogs=skill_catalogs,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from decimal import Decimal
 from email.utils import getaddresses
@@ -25,9 +26,8 @@ EMAIL_SLICE_RESERVATION = Decimal("1")
 EMAIL_QUEUE_ALLOWANCE_SECONDS = 300
 # Background learning stops here; new mail keeps the rest of each ceiling (ADR-0256).
 EMAIL_LEARNING_SHARE = Decimal("0.75")
-# A server check stops here, leaving the rest for when the owner is in Email (ADR-0286).
-EMAIL_ARRIVAL_DAILY_SHARE = Decimal("0.5")
-EMAIL_ARRIVAL_MONTHLY_SHARE = Decimal("0.9")
+# Server arrival checks share the rolling allowance and stop at USD 25 per UTC day (ADR-0286).
+EMAIL_ARRIVAL_DAILY_CAP = Decimal("25")
 EMAIL_ARRIVAL_DAYS = 7
 EMAIL_ARRIVAL_MAX_WAIT_SECONDS = 3600
 EMAIL_ARRIVAL_MAX_FAILURES_COUNTED = 5
@@ -68,6 +68,7 @@ class EmailRecord(EmailValue):
 
 
 class EmailAccount(EmailValue):
+    triage_budget_held: bool | None = None
     id: str
     label: str
     email_address: str | None = None
@@ -253,7 +254,33 @@ def archive_result_matches(consent: EmailArchiveConsent, result: dict[str, Any] 
     )
 
 
+class EmailTriageMode(StrEnum):
+    OFF = "off"
+    LOCAL = "local"
+    SHADOW = "shadow"
+
+
+class EmailArrival(EmailValue):
+    """Timing of the newest inbound message, anchored to Gmail internalDate."""
+
+    id: UUID
+    message_id: str
+    received_at: AwareDatetime
+    discovered_at: AwareDatetime
+    expedited: bool
+    budget_held: bool = False
+    assessment_started_at: AwareDatetime | None = None
+    assessed_at: AwareDatetime | None = None
+    important_at: AwareDatetime | None = None
+
+
 class EmailThread(EmailValue):
+    arrival: EmailArrival | None = None
+
+    def in_important(self) -> bool:
+        """Membership after applying owner feedback and expiry."""
+        return self.in_inbox and self.priority >= 0.7 and self.dismissed_revision != self.revision
+
     id: UUID
     account_id: str
     provider_thread_id: str
@@ -407,11 +434,30 @@ class EmailTask(EmailValue):
     budget_charge_reason: Literal["incomplete_usage", "missing_run"] | None = None
     # A refresh admitted above the learning share reads only new mail (ADR-0256);
     # a server check handles only arrivals (ADR-0286).
-    scope: Literal["full", "new_mail", "arrivals"] = "full"
+    triage_mode: EmailTriageMode = EmailTriageMode.OFF
+    discovery_complete: bool = False
+    budget_held: bool = False
+    scope: Literal["full", "new_mail", "arrivals", "discovery", "expedited"] = "full"
+    # Whether the server's own check for new mail asked for this refresh. Unset on
+    # tasks written before the origin was kept; `server_check` reads those.
+    arrival_check: bool | None = None
     # A server check that found nothing to do; removed after a retention window.
     empty_check: bool = False
     stage: str = "queued"
     state: dict[str, object] = Field(default_factory=dict)
+
+    @property
+    def server_check(self) -> bool:
+        """Whether the server's own check asked for this refresh.
+
+        Scope cannot say: the budget can hold a foreground refresh to discovery
+        or to expedited arrivals too. A task written before the origin was kept
+        is a server check only in the `arrivals` scope, the one scope those
+        tasks reserved for it.
+        """
+        if self.arrival_check is not None:
+            return self.arrival_check
+        return self.scope == "arrivals"
 
 
 class EmailDraftEdit(EmailValue):
@@ -564,6 +610,88 @@ def feedback_matches(feedback: EmailFeedback, thread: EmailThread) -> bool:
             except ValueError:
                 continue
     return bool(set(feedback.target_values) & set(candidates))
+
+
+# The waits an import stores for an expedited arrival that has no assessment yet.
+TRIAGE_QUEUED_REASON = "Full assessment queued."
+TRIAGE_BUDGET_HELD_REASON = "Full assessment is waiting for budget."
+
+
+def pending_review_status(thread: EmailThread, account: EmailAccount | None) -> EmailThread:
+    """Explain the current wait even when this poll did not reread the conversation."""
+    arrival = thread.arrival
+    if not account or not arrival or not arrival.expedited or arrival.assessed_at:
+        return thread
+    held = arrival.budget_held if account.triage_budget_held is None else account.triage_budget_held
+    if account.status == "unavailable":
+        reason = (
+            "Full assessment is waiting for Gmail and budget."
+            if held
+            else "Full assessment is waiting for Gmail."
+        )
+    else:
+        reason = TRIAGE_BUDGET_HELD_REASON if held else TRIAGE_QUEUED_REASON
+    return thread if thread.reason == reason else thread.model_copy(update={"reason": reason})
+
+
+def expedite_thread(thread: EmailThread, partners: set[str], feedback: list[EmailFeedback]) -> bool:
+    """Local nomination. Only current inbound Inbox evidence can expedite an assessment."""
+    if not thread.messages or not thread.in_inbox or thread.in_spam:
+        return False
+    latest = thread.messages[-1]
+    if (
+        latest.direction != "received"
+        or "INBOX" not in latest.labels
+        or {"SPAM", "TRASH", "SENT"}.intersection(latest.labels)
+    ):
+        return False
+    return triage_nomination(
+        thread,
+        partners if latest.sender_check != "fail" else set(),
+        feedback,
+        "IMPORTANT" in latest.labels,
+        # Gmail's verdict belongs to one message: a sender it failed there lends
+        # no partner evidence to a later message from someone else.
+        partner_senders=[
+            message.sender
+            for message in thread.messages
+            if message.direction == "received" and message.sender_check != "fail"
+        ],
+    )
+
+
+def triage_nomination(
+    thread: EmailThread,
+    partners: set[str],
+    feedback: list[EmailFeedback],
+    important_label: bool,
+    *,
+    partner_senders: Sequence[str] | None = None,
+) -> bool:
+    """Fold owner feedback and relationship signals without loading message bodies.
+
+    A message-free summary offers only `thread.senders`; a caller holding the
+    messages names the senders whose own sender check did not fail.
+    """
+    matches = sorted(
+        (f for f in feedback if feedback_matches(f, thread)),
+        key=lambda f: (f.created_at, str(f.id)),
+        reverse=True,
+    )
+    explicit = next((f for f in matches if f.judgment in {"important", "less_important"}), None)
+    if explicit:
+        return explicit.judgment == "important"
+    reply = next((f for f in matches if f.judgment in {"needs_reply", "no_reply_needed"}), None)
+    if important_label or (reply is not None and reply.judgment == "needs_reply"):
+        return True
+    senders = thread.senders if partner_senders is None else partner_senders
+    for sender in senders if partners else ():
+        try:
+            if partners.intersection(addresses([sender])):
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def apply_feedback(

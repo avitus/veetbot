@@ -324,6 +324,44 @@ public final class ScheduleViewModel: ObservableObject {
         }
     }
 
+    // MARK: Scripts (ADR-0342 decision 13)
+
+    /// "Run scripts without asking": the owner approves a schedule's scripts
+    /// once, because nobody is there to answer a card while it runs.
+    public func setRunsScriptsWithoutAsking(
+        _ scheduleID: UUID, _ approved: Bool, reviewedRevision: Int
+    ) async {
+        guard lifecycleChangingIDs.insert(scheduleID).inserted else { return }
+        defer { lifecycleChangingIDs.remove(scheduleID) }
+        lifecycleErrors[scheduleID] = nil
+        guard let api = await makeAPIClient() else {
+            lifecycleErrors[scheduleID] = "Connect to a Veetbot server to change this schedule."
+            return
+        }
+        do {
+            // `reviewedRevision` is the revision the switch was drawn from. The
+            // record held here can be refreshed while this call is suspended,
+            // so it is never read to decide what the owner approved.
+            detailRecords[scheduleID] = try await api.setScheduleScripts(
+                scheduleID, approved: approved, reviewedRevision: reviewedRevision
+            )
+            // A run keeps the revision it was queued on, so a withdrawal does
+            // not reach a run that is already waiting to start.
+            toasts.show(
+                approved
+                    ? "Saved. Applies from the next run."
+                    : "Saved. A run already queued may still run scripts."
+            )
+        } catch let changed as ScheduleChangedSinceReview {
+            // Show what the schedule now is; the owner decides again from that.
+            detailRecords[scheduleID] = changed.current
+            lifecycleErrors[scheduleID] =
+                "This schedule changed since you opened it. Check it, then turn this on again."
+        } catch {
+            lifecycleErrors[scheduleID] = displayMessage(for: error)
+        }
+    }
+
     // MARK: Recent runs (ADR-0225 part A)
 
     /// The newest occurrences and, for each that started a run, its status.

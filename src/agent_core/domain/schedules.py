@@ -592,6 +592,9 @@ class ScheduleRecord(BaseModel):
     schedule: Schedule
     revision: ScheduleRevision
     replayed: bool = False
+    # ADR-0342 decision 13: whether the app may offer this schedule the script
+    # approval. The API sets it on what it returns; nothing stores it.
+    scripts_available: bool = Field(default=False, exclude_if=lambda available: not available)
 
 
 class ScheduleOccurrence(BaseModel):

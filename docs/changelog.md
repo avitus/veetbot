@@ -4,10 +4,23 @@ title: Changelog
 
 # Changelog
 
+## 2026-11-24 — The app shows and gives a schedule's script approval (ADR-0342)
+
+- Built and not delivered: it is on `dev` and needs a release and a new app
+  build.
+- When you add a schedule in plain words, the form says "Its runs may run
+  scripts without asking" under the timing, before you press Create.
+- A schedule's page has a switch, "Run scripts without asking". It shows
+  which schedules hold the approval, and you can turn it on or off there.
+- The run export and the skill review no longer list the tool calls a script
+  made for itself. The export is off in production.
+
 ## 2026-11-24 — A schedule's scripts can be approved once, at setup (ADR-0342)
 
-- Built and not delivered: it is on `dev` behind a setting that is off.
-- When you set up a schedule in chat, its card will say "its runs may run
+- Delivered and turned on in production on 2026-11-24. Your nine schedules
+  that run a model hold the approval. None has run under it yet; the first is
+  the weekday briefing on 2026-11-25.
+- When you set up a schedule in chat, its card says "its runs may run
   scripts without asking". Approving the card approves that schedule's
   scripts for good. Its runs then start a script without a card, even after
   reading the web. Each tool call a script makes is still judged as before,
@@ -17,8 +30,6 @@ title: Changelog
   sandbox permission. Moving your nine schedules to the newer agent version
   gave them newer instructions and no scripts, so their runs do not wait for
   a script approval. A schedule gets scripts only through this approval.
-- Not built: the app's plain-words schedule form does not offer the approval,
-  and the app does not show which schedules hold it.
 
 ## 2026-11-24 — A chat no longer fails after you approve a script (ADR-0342)
 

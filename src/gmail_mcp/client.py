@@ -626,8 +626,11 @@ class GmailClient:
         thread_id: str,
         max_messages: int = 10,
         page_token: str | None = None,
+        newest_first: bool = False,
     ) -> dict[str, Any]:
-        return await GmailSync(self).get_thread_page(thread_id, max_messages, page_token)
+        return await GmailSync(self).get_thread_page(
+            thread_id, max_messages, page_token, newest_first
+        )
 
     async def get_message_body(
         self,

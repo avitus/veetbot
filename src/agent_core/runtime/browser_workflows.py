@@ -16,7 +16,11 @@ from agent_core.domain.browser import (
     BrowserProfileStatus,
     browser_origin,
 )
-from agent_core.domain.browser_evidence import browser_condition_status
+from agent_core.domain.browser_evidence import (
+    BrowserRowEvidence,
+    browser_condition_status,
+    evidence_status,
+)
 from agent_core.domain.browser_workflows import BrowserWorkflowCatalog, BrowserWorkflowRecipe
 from agent_core.domain.errors import (
     ConflictError,
@@ -53,6 +57,7 @@ def _definition(recipe: BrowserWorkflowRecipe) -> str:
         "minimum_rows": 0,
         "require_complete": False,
         "recheck_destination": False,
+        "expected_row": None,
     }
     excluded = {
         "steps": {
@@ -719,6 +724,29 @@ class BrowserWorkflowRunner:
                     ):
                         await self._stop(context, state, "insufficient_evidence")
                         return None
+                    if step.expected_row is not None:
+                        assert step.collection_kind is not None
+                        expected_row = BrowserRowEvidence(
+                            kind="row",
+                            collection_kind=step.collection_kind,
+                            index=step.index,
+                            fields=step.expected_row,
+                            row_limit=step.row_limit,
+                        )
+                        # Evaluate only this extraction's capture. The tool boundary
+                        # already checked its scope against the pinned request.
+                        if (
+                            evidence_status(
+                                observed,
+                                expected_row,
+                                row_scope="main_document_and_open_shadow"
+                                if extracted.scope == "main_document_and_open_shadow"
+                                else "main_document",
+                            )
+                            != "satisfied"
+                        ):
+                            await self._stop(context, state, "insufficient_evidence")
+                            return None
                 state["completed_steps"] += 1
                 if "next_step" in state:
                     state["next_step"] = step_index + 1

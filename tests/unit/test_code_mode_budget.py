@@ -16,6 +16,8 @@ import pytest
 
 from agent_core.adapters.determinism import SystemClock
 from agent_core.application.public_services import _run_view
+from agent_core.application.skill_review import review_transcript_messages
+from agent_core.application.trajectory_service import TrajectoryExportService
 from agent_core.bootstrap import build
 from agent_core.context.history import validate_tool_pairs
 from agent_core.domain.approvals import ApprovalResolutionType
@@ -623,3 +625,38 @@ async def test_a_script_s_own_calls_stay_out_of_the_conversation_history(tmp_pat
     results = [item.call_id for item in history.items if isinstance(item, ToolResultItem)]
     assert results == ["script"]
     validate_tool_pairs(history.items)
+
+
+async def test_a_script_s_own_calls_stay_out_of_the_run_export_and_the_skill_review(
+    tmp_path: Path,
+) -> None:
+    ordinary = _Probe(_spec("demo.ordinary"))
+    script = _Script(_RUN_CODE, [["demo.ordinary"] * 2])
+    model = FakeModelScript(
+        turns=[
+            _turn((SANDBOX_RUN_CODE_TOOL_NAME, "script")),
+            ScriptedTurn(text="Done.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    async with build(
+        settings=_settings(tmp_path),
+        script=model,
+        enabled_tools=[SANDBOX_RUN_CODE_TOOL_NAME, "demo.ordinary"],
+    ) as built:
+        registry = cast(StaticToolRegistry, built.tool_pipeline._registry)
+        registry.register(script)
+        registry.register(ordinary)
+        run = await built.runs.get(await built.runs.submit("Run this script."))
+        async with built.uow_factory() as uow:
+            events = await uow.events.list_after(run.session_id, 0, built.principal)
+    assert run.status is RunStatus.COMPLETED, run.failure
+    assert ordinary.executions == 2
+
+    # Both records are the model's conversation: one call, one answer. A result
+    # the script was given has no call beside it (ADR-0342 decision 5).
+    for messages in (
+        TrajectoryExportService._messages(events),
+        review_transcript_messages(events, run.id),
+    ):
+        results = [message["call_id"] for message in messages if message["kind"] == "tool_result"]
+        assert results == ["script"]

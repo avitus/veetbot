@@ -261,6 +261,12 @@ approval; no old target or condition result can substitute. The existing default
 restriction, four-window bound and uncertain-effect handling remain. Typed-row
 conditions and broader live-site acceptance remain outside this slice.
 
+The W3/W6 continuation in [ADR-0354](adr/0354-verify-expected-browser-extraction-rows.md)
+adds reviewed expected-row values to extraction steps. A unique typed match in
+the returned capture is required before later work; missing or duplicate matches
+stop without retry or approval. Existing count/completeness requirements remain
+independent. This does not extend destination checks across separate captures.
+
 ### Production diagnosis — 2026-10-18
 
 A read-only inspection of retained October 11–18 production records found 12
