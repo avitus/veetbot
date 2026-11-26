@@ -3,7 +3,7 @@
 import json
 from datetime import timedelta
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pytest
 
@@ -408,7 +408,7 @@ def _mail(name: str, sender: str, check: str, minutes: int) -> Any:
         sender=sender,
         sent_at=NOW - timedelta(minutes=minutes),
         labels=["INBOX"],
-        sender_check=check,
+        sender_check=cast(Literal["pass", "fail", "none"], check),
     )
 
 
@@ -687,7 +687,7 @@ async def test_person_feedback_places_every_matching_arrival_from_one_batch_read
                 single_reads.append(key)
             return await original(self, principal, kind, key)
 
-        store_type.get = counted  # type: ignore[method-assign]
+        store_type.get = counted
         try:
             await service.feedback(
                 app.principal,
@@ -697,7 +697,7 @@ async def test_person_feedback_places_every_matching_arrival_from_one_batch_read
                 target_value="colleague@example.test",
             )
         finally:
-            store_type.get = original  # type: ignore[method-assign]
+            store_type.get = original
 
         # The gesture's own conversation is read once to authorize it; the three
         # placements come from one batch.
