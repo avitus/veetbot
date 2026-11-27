@@ -6,6 +6,7 @@ import SwiftUI
 /// holds every file or image it produced, previewed in place. The transcript
 /// keeps one line per run of calls, which reveals its group here.
 struct ChatInspectorPanel: View {
+    @Environment(\.openWindow) private var openWindow
     @ObservedObject var model: ChatViewModel
     @ObservedObject var inspector: InspectorModel
     @ObservedObject private var state: RunStateReducer
@@ -148,6 +149,13 @@ struct ChatInspectorPanel: View {
                     }
                 }
                 if let artifact = selected(in: artifacts) {
+                    if let request = GeneratedPageRequest(model: model, artifactID: artifact.id,
+                                                          name: artifact.name, mediaType: artifact.mediaType) {
+                        Button { openWindow(value: request) } label: {
+                            Label("Open Page", systemImage: "macwindow")
+                        }
+                        .buttonStyle(SecondaryCapsuleButtonStyle())
+                    }
                     ArtifactViewerView(model: model, artifactID: artifact.id, presentation: .embedded)
                         .id(artifact.id)
                         .padding(.top, VeetSpace.s2)

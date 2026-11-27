@@ -705,7 +705,21 @@ Close and Download controls; loading a file does not rebuild navigation columns.
 Cancelling the save picker keeps the viewer open, and saving preserves the
 original bytes, including SVG files whose preview cannot be decoded. Markdown
 artifacts use the same bounded native reading renderer as Chat, including
-headings and tables; other text remains literal, and HTML is never executed.
+headings and tables. Other text remains literal in the artifact inspector.
+
+### Generated webpages on the Mac
+
+Click an HTML file attached to a chat reply to read it in a resizable window
+beside the conversation. From the Artifacts inspector, choose **Open Page** to
+open the same window. Use Download in the inspector to save the original file.
+Ask Veetbot to attach a self-contained HTML file and to keep its filename when
+revising it. An open preview follows new attachments with that filename in the
+same chat. Opening an older attachment initially shows the version you clicked.
+
+WebKit renders the downloaded bytes locally. Inline styles, MathML, SVG and
+native HTML controls such as expandable sections work without JavaScript.
+The preview disables page scripts and external resources. See
+[the page preview decision](adr/0357-generated-page-window.md).
 The macOS UI regression loads an SVG from a reply, cancels a download, then saves it and
 compares the exported bytes.
 

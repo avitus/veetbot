@@ -188,6 +188,7 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2CallResultDisclosesTranscriptAndStagesANewCall \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2CallConcernStagesEditableChat \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2MarkdownArtifactRendersAReadableDocument \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testChatHTMLAttachmentOpensRenderedWindow \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2WideMemoryKeepsCollectionsBesideRecords \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2SchedulesKeepListBesideSelectedSchedule \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2EmailHasMailboxBesideTheInbox \

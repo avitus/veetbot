@@ -178,6 +178,37 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [staged], timeout: 5), .completed, app.debugDescription)
     }
 
+    #if os(macOS)
+    func testChatHTMLAttachmentOpensRenderedWindow() {
+        app.launchArguments += ["--ui-testing-artifact", "--ui-testing-html-artifact"]
+        app.launch()
+        let row = app.descendants(matching: .any)["sidebar.session.00000000-0000-0000-0000-000000000123"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).click()
+        let file = app.buttons["riemann.html"]
+        XCTAssertTrue(file.waitForExistence(timeout: 10))
+        activate(file)
+        let page = app.windows["riemann.html"]
+        XCTAssertTrue(page.waitForExistence(timeout: 8), "An HTML reply should open its own page window")
+        let web = page.webViews.firstMatch
+        XCTAssertTrue(web.waitForExistence(timeout: 8))
+        let disclosure = web.descendants(matching: .any).matching(
+            NSPredicate(format: "label == %@ OR title == %@", "Show equation", "Show equation")
+        ).firstMatch
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 5), web.debugDescription)
+        activate(disclosure)
+        XCTAssertTrue(web.staticTexts["Real part equals one half"].waitForExistence(timeout: 5))
+        let composer = app.descendants(matching: .any)["chat.composer"]
+        composer.click()
+        composer.typeText("Revise the diagram in riemann.html")
+        app.buttons["Send"].click()
+        XCTAssertTrue(page.webViews.staticTexts["Revised critical line diagram"].waitForExistence(timeout: 12))
+        XCTAssertEqual(app.windows.matching(identifier: "riemann.html").count, 1)
+        page.buttons[XCUIIdentifierCloseWindow].click()
+        XCTAssertTrue(file.firstMatch.waitForExistence(timeout: 5))
+    }
+    #endif
+
     func testA2MarkdownArtifactRendersAReadableDocument() {
         app.launchArguments += ["--ui-testing-artifact", "--ui-testing-markdown-artifact"]
         app.launch()

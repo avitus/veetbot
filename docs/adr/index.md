@@ -29,6 +29,7 @@ title: Architecture Decisions
 - [ADR-0354: Verify expected browser extraction rows (Accepted)](0354-verify-expected-browser-extraction-rows.md)
 - [ADR-0355: Discover and triage new mail before full assessment (Accepted)](0355-discover-and-triage-new-mail-before-full-assessment.md)
 - [ADR-0356: Write to a folder selected on a Mac (Proposed)](0356-mac-folder-access.md)
+- [ADR-0357: Open generated HTML pages beside a Mac chat (Proposed)](0357-generated-page-window.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the

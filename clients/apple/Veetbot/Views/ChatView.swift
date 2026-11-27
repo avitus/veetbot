@@ -120,6 +120,9 @@ public struct ChatView: View {
     @Environment(\.chatListOverlayPresented) private var chatListOverlayPresented
     /// On the Mac the right panel holds the working notes, the full ledger
     /// and every artifact (ADR-0237); elsewhere they stay in the transcript.
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
     @Environment(\.inspectorReveal) private var inspectorReveal
     @ObservedObject var model: ChatViewModel
     @ObservedObject private var state: RunStateReducer
@@ -532,6 +535,13 @@ public struct ChatView: View {
 
     /// A file chip opens the panel's preview on the Mac, and the viewer sheet elsewhere.
     private func openArtifact(_ artifactID: UUID) {
+        #if os(macOS)
+        if let file = ConversationArtifacts.collect(from: state.activityTimeline).first(where: { $0.id == artifactID }),
+           let request = GeneratedPageRequest(model: model, artifactID: file.id, name: file.name, mediaType: file.mediaType) {
+            openWindow(value: request)
+            return
+        }
+        #endif
         if let inspectorReveal {
             inspectorReveal.artifact(artifactID)
         } else {
