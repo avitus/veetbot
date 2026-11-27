@@ -533,7 +533,7 @@ class DeviceRegistrationRequest(BaseModel):
             token_present=self.push_token is not None,
             environment=environment,
             app_bundle_id_present=self.app_bundle_id is not None,
-        ) or device_capability_issue(kind=kind, capabilities=capabilities)
+        ) or device_capability_issue(kind=kind, capabilities=capabilities, platform=self.platform)
         if issue is not None:
             raise DeviceValidationError(issue.reason_code, issue.message)
         return DeviceRegistration(
@@ -1849,7 +1849,9 @@ def create_app(
             body.terminal_status(),
         )
 
-    @device_channel_router.post(
+    sms_router = APIRouter()
+
+    @sms_router.post(
         "/v1/devices/{device_id}/messages",
         status_code=202,
         openapi_extra={"required_scope": "device.write"},
@@ -1871,6 +1873,8 @@ def create_app(
 
     if settings.device_channel_enabled:
         app.include_router(device_channel_router)
+        if settings.device_sms_enabled:
+            app.include_router(sms_router)
 
     memory_router = APIRouter()
 

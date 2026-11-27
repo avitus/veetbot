@@ -21,9 +21,10 @@ from agent_core.domain.devices import (
     DeviceStatus,
     PushEnvironment,
     PushProvider,
+    is_folder_capability,
     push_token_fingerprint,
 )
-from agent_core.domain.errors import ConflictError, NotFoundError
+from agent_core.domain.errors import ConflictError, DeviceValidationError, NotFoundError
 from agent_core.domain.events import ProcessEvent
 from agent_core.domain.notifications import (
     NOTIFICATION_TITLES,
@@ -58,6 +59,7 @@ class DeviceManagementService:
         ids: IdFactory,
         notification_expiry_seconds: float,
         invocation_timeout_seconds: int,
+        folder_enabled: bool = False,
     ) -> None:
         if notification_expiry_seconds <= 0:
             raise ValueError("test notification expiry must be positive")
@@ -68,6 +70,7 @@ class DeviceManagementService:
         self._ids = ids
         self._notification_expiry = notification_expiry_seconds
         self._invocation_timeout_seconds = invocation_timeout_seconds
+        self._folder_enabled = folder_enabled
 
     async def register(
         self,
@@ -76,6 +79,12 @@ class DeviceManagementService:
         idempotency_key: str | None = None,
     ) -> DeviceRegistrationResult:
         require_scope(principal, "device.write")
+        if not self._folder_enabled and any(
+            is_folder_capability(name) for name in registration.capabilities
+        ):
+            raise DeviceValidationError(
+                "device.folder_disabled", "Mac folder access is disabled on this server."
+            )
         key = _optional_idempotency_key(idempotency_key)
         request_hash = None if key is None else _registration_hash(registration)
         now = self._clock.now()
@@ -254,7 +263,7 @@ class DeviceManagementService:
         require_scope(principal, "device.read")
         now = self._clock.now()
         async with self._uow_factory() as uow:
-            await self._present_device(uow, principal, device_id)
+            device = await self._present_device(uow, principal, device_id)
             await uow.device_invocations.expire_overdue(
                 now=now,
                 timeout_seconds=self._invocation_timeout_seconds,
@@ -270,6 +279,8 @@ class DeviceManagementService:
                 + timedelta(seconds=self._invocation_timeout_seconds),
             )
             for invocation in pending
+            if not is_folder_capability(invocation.tool_name)
+            or (self._folder_enabled and invocation.tool_name in device.capabilities)
         ]
 
     async def record_invocation_result(

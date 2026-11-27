@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import BrowserAction, BrowserActionKind, BrowserCondition
+from agent_core.domain.devices import FOLDER_WRITE_NAME, is_folder_capability
 from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TOOL_NAME
 from agent_core.domain.policies import (
     POLICY_DECISION_RANK,
@@ -160,7 +161,15 @@ def evaluate_deterministic(
     # A tool-name-keyed entry decides for exactly the tool it names; every other
     # tool in the side-effect class keeps the class's decision. The trust
     # overlay below still applies to whatever the entry decided.
-    tool_rules = tuple(rule for rule in ruleset.tool_rules if rule.tool_name == action.name)
+    rule_name = None if action.name == FOLDER_WRITE_NAME else action.name
+    if (
+        is_folder_capability(action.name)
+        and action.target.kind == "device"
+        and action.target.device_id
+        and action.side_effect is SideEffectClass.EXTERNAL_WRITE
+    ):
+        rule_name = FOLDER_WRITE_NAME
+    tool_rules = tuple(rule for rule in ruleset.tool_rules if rule.tool_name == rule_name)
     matching = tuple(rule for rule in ruleset.rules if rule.side_effect is action.side_effect)
     if len(tool_rules) > 1 or len(matching) != 1:
         return PolicyDecision(
@@ -239,7 +248,7 @@ def evaluate_deterministic(
     if escalated:
         decision = PolicyDecisionType.REQUIRE_APPROVAL
     reason = (
-        f"policy.tool.{action.name}" if tool_rules else f"policy.matrix.{action.side_effect.value}"
+        f"policy.tool.{rule_name}" if tool_rules else f"policy.matrix.{action.side_effect.value}"
     )
     return PolicyDecision(
         decision=decision,

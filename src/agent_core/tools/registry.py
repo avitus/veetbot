@@ -10,6 +10,7 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approval_copy import generic_action_summary
 from agent_core.domain.approvals import ApprovalPresentation
 from agent_core.domain.browser_task_grants import TaskGrantNotCovered
+from agent_core.domain.devices import FOLDER_WRITE_NAME, is_folder_capability
 from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TARGET_KIND, UNSUBSCRIBE_TOOL_NAME
 from agent_core.domain.errors import ConflictError, NotFoundError, ToolValidationError
 from agent_core.domain.policies import (
@@ -375,6 +376,8 @@ class StaticToolRegistry:
                     principal_id=principal.principal_id,
                 ).spec
             except NotFoundError:
+                continue
+            if is_folder_capability(spec.name) and FOLDER_WRITE_NAME not in agent.enabled_tools:
                 continue
             if spec.deprecated or not spec.required_scopes.issubset(principal.scopes):
                 continue

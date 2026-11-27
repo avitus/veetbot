@@ -404,8 +404,45 @@ public final class ChatViewModel: ObservableObject {
     private var pendingNotificationPayload: NotificationPushPayload?
     private var smsInvocations = SmsInvocationQueue()
     private var smsInvocationDeviceID: UUID?
-    /// Held rather than rebuilt per call: the service remembers the results it
-    /// still owes the server, and a fresh instance would forget them.
+    #if os(macOS)
+    @Published private(set) var writableFolder: WritableFolder?
+    @Published private(set) var registeredFolderCapability: String?
+    private var folderAccount: String?
+    private var folderRegistrationTask: Task<Void, Never>?
+    private var folderRegistrationRequest: UUID?
+
+    func chooseWritableFolder(_ url: URL) {
+        guard let folderAccount, isConfigured else { return }
+        do {
+            writableFolder = try WritableFolder.select(url, account: folderAccount)
+            requestDeviceCapabilityRegistration()
+        } catch { present(error) }
+    }
+
+    func removeWritableFolder() {
+        WritableFolder.remove()
+        writableFolder = nil
+        requestDeviceCapabilityRegistration()
+    }
+
+    func receiveFolderWrites() async {
+        guard isConfigured, !isReconfiguring, let grant = writableFolder,
+              let api, let deviceID = registeredDeviceID else { return }
+        let generation = connectionGeneration
+        guard let pending = try? await api.pendingInvocations(deviceID: deviceID) else { return }
+        let receipts = URL.applicationSupportDirectory
+            .appending(path: "Veetbot/FolderWrites/receipts.json")
+        for call in pending.invocations where call.toolName == grant.capability {
+            guard !Task.isCancelled, generation == connectionGeneration, isConfigured,
+                  !isReconfiguring, writableFolder?.capability == grant.capability,
+                  registeredDeviceID == deviceID else { return }
+            let result = (try? grant.apply(call, receipts: receipts)) ?? .failed
+            _ = try? await api.postInvocationResult(deviceID: deviceID, invocationID: call.id, result: result)
+        }
+    }
+    #endif
+
+    /// Reuse the service while it has unacknowledged SMS results.
     private var smsService: DeviceInvocationService?
     private var smsServiceBaseURL: URL?
 
@@ -453,6 +490,11 @@ public final class ChatViewModel: ObservableObject {
                 await cleanup.value
             }
             if credentialsChanged || previousConfiguration?.baseURL != configuration.baseURL {
+                #if os(macOS)
+                WritableFolder.remove()
+                writableFolder = nil
+                folderAccount = nil
+                #endif
                 await abandonWebsiteAuthenticationCeremony()
             }
             if !trimmedToken.isEmpty {
@@ -492,6 +534,11 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func forgetCredentials() async {
+        #if os(macOS)
+        WritableFolder.remove()
+        writableFolder = nil
+        folderAccount = nil
+        #endif
         dismissCallResult()
         resetFolderState()
         isConfigured = false
@@ -543,16 +590,42 @@ public final class ChatViewModel: ObservableObject {
         deviceToken: Data,
         descriptor: AppleDeviceDescriptor
     ) async {
+        #if os(macOS)
+        // Send successive grants in order. A delayed registration for the old
+        // folder must not arrive at the server after its replacement.
+        let previous = folderRegistrationTask
+        let request = UUID()
+        let generation = connectionGeneration
+        let task = Task { @MainActor in
+            await previous?.value
+            guard generation == connectionGeneration else { return }
+            await performDeviceRegistration(deviceToken: deviceToken, descriptor: descriptor)
+        }
+        folderRegistrationTask = task
+        folderRegistrationRequest = request
+        await task.value
+        if folderRegistrationRequest == request { folderRegistrationTask = nil }
+        #else
+        await performDeviceRegistration(deviceToken: deviceToken, descriptor: descriptor)
+        #endif
+    }
+
+    private func performDeviceRegistration(deviceToken: Data, descriptor: AppleDeviceDescriptor) async {
         guard let api else { return }
+        let generation = connectionGeneration
         do {
             let outcome = try await deviceRegistrationCoordinator.register(
                 deviceToken: deviceToken,
                 descriptor: descriptor,
                 using: api
             )
+            guard generation == connectionGeneration else { return }
             notificationFeatureAvailable = outcome != .unsupported
             if case .registered(let deviceID) = outcome {
                 registeredDeviceID = deviceID
+                #if os(macOS)
+                registeredFolderCapability = descriptor.capabilities.first { $0.hasPrefix("device.folder.write_") }
+                #endif
             }
         } catch {
             present(error)
@@ -724,6 +797,12 @@ public final class ChatViewModel: ObservableObject {
             pendingNotificationPayload = payload
             return
         }
+        #if os(macOS)
+        if deviceID == registeredDeviceID, writableFolder != nil {
+            await receiveFolderWrites()
+            return
+        }
+        #endif
         await loadSmsInvocations(deviceID: deviceID, reportingFailures: true)
     }
 
@@ -788,6 +867,9 @@ public final class ChatViewModel: ObservableObject {
         smsService = nil
         smsServiceBaseURL = nil
         registeredDeviceID = nil
+        #if os(macOS)
+        registeredFolderCapability = nil
+        #endif
         pendingSmsInvocation = nil
     }
 
@@ -3362,6 +3444,12 @@ public final class ChatViewModel: ObservableObject {
             tokenStore: tokenStore,
             session: urlSession
         )
+        #if os(macOS)
+        if let token = try await tokenStore.readToken() {
+            folderAccount = WritableFolder.accountKey(server: configuration.baseURL, token: token)
+            writableFolder = folderAccount.flatMap { WritableFolder.load(for: $0) }
+        }
+        #endif
         api = VeetbotAPIClient(transport: transport)
         eventStream = ReconnectingEventStream(reader: SSEReader(transport: transport))
         baseURL = configuration.baseURL

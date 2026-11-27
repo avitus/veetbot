@@ -2490,6 +2490,38 @@ final class ConversationNavigationUITests: XCTestCase {
         #endif
     }
 
+    #if os(macOS)
+    func testSelectAndRemoveWritableFolderInSettings() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        app.launch()
+        let settings = app.buttons["sidebar.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.click()
+        openSettingsGroup("folderAccess")
+        let choose = app.buttons["Choose folder…"]
+        XCTAssertTrue(choose.waitForExistence(timeout: 5))
+        choose.click()
+        let allow = app.sheets.buttons["OKButton"]
+        XCTAssertTrue(allow.waitForExistence(timeout: 5))
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        let destination = app.textFields["PathTextField"].firstMatch
+        XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        destination.typeKey("a", modifierFlags: .command)
+        destination.typeText(directory.path)
+        destination.typeKey(.return, modifierFlags: [])
+        allow.click()
+
+        let selected = app.staticTexts.containing(NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", directory.lastPathComponent, directory.lastPathComponent)).firstMatch
+        XCTAssertTrue(selected.waitForExistence(timeout: 5))
+        app.buttons["Remove access"].click()
+        XCTAssertTrue(choose.waitForExistence(timeout: 5))
+        XCTAssertFalse(selected.exists)
+    }
+    #endif
+
     func testTaskApprovalWebsitesCanBeAddedAndRemovedInSettings() {
         app.launch()
         #if os(macOS)

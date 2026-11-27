@@ -198,6 +198,7 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2InlineUnsubscribeKeepsTheConfirmation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMainWindowSizePersistsAcrossApplicationRestart \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testTaskApprovalWebsitesCanBeAddedAndRemovedInSettings \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSelectAndRemoveWritableFolderInSettings \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testChatApprovalCollapsesAfterApproval \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testChatApprovalLoadedApprovedStartsCollapsed \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testBrowserChatApprovalCollapsesAfterTaskApproval \

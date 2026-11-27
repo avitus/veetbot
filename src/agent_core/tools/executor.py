@@ -51,6 +51,7 @@ from agent_core.domain.captures import (
     reader_call,
 )
 from agent_core.domain.delegations import Delegation, DelegationRequest
+from agent_core.domain.devices import FOLDER_WRITE_NAME, is_folder_capability
 from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TARGET_KIND
 from agent_core.domain.errors import (
     ApprovalRequiredError,
@@ -345,6 +346,17 @@ def _writer_origin(tool: Tool, arguments: dict[str, Any]) -> ArtifactOrigin:
     return ArtifactOrigin.TOOL_OUTPUT
 
 
+def _enabled_names(spec: ToolSpec, agent: AgentSpec, checkpoint: RunCheckpoint) -> frozenset[str]:
+    folder_granted = (
+        spec.source is ToolSource.DEVICE
+        and is_folder_capability(spec.name)
+        and FOLDER_WRITE_NAME in agent.enabled_tools
+    )
+    if (spec.source is ToolSource.MCP or folder_granted) and checkpoint.pinned_tool_names:
+        return frozenset(checkpoint.pinned_tool_names)
+    return frozenset(agent.enabled_tools)
+
+
 def _action_kind(tool: Tool) -> ActionKind:
     if tool.spec.name in {"memory.remember", "memory.learn"}:
         return ActionKind.MEMORY_WRITE
@@ -539,6 +551,15 @@ def _argument_trust(
         tool_name == SANDBOX_RUN_CODE_TOOL_NAME
         and _active_turn_facts(checkpoint).newest_user_trust is TrustLevel.USER
         and _turn_origin_trust(checkpoint) in {TrustLevel.USER, TrustLevel.MEMORY}
+    ):
+        return dict.fromkeys(arguments, TrustLevel.INTERNAL_TOOL)
+    # A selected Mac folder grants the agent authorship of a file on a trusted
+    # owner turn. Content from another origin still takes the usual trust path.
+    if (
+        tool_name
+        and is_folder_capability(tool_name)
+        and _active_turn_facts(checkpoint).newest_user_trust is TrustLevel.USER
+        and _turn_origin_trust(checkpoint) is TrustLevel.USER
     ):
         return dict.fromkeys(arguments, TrustLevel.INTERNAL_TOOL)
     trust = dict.fromkeys(arguments, TrustLevel.EXTERNAL_UNTRUSTED)
@@ -1048,11 +1069,7 @@ class ToolPipeline:
                 lease,
             )
         progress.append(1)
-        enabled_names = (
-            frozenset(checkpoint.pinned_tool_names)
-            if tool.spec.source is ToolSource.MCP and checkpoint.pinned_tool_names
-            else frozenset(agent.enabled_tools)
-        )
+        enabled_names = _enabled_names(tool.spec, agent, checkpoint)
         if call.name not in enabled_names:
             return await self._refusal(
                 run,
@@ -2583,11 +2600,7 @@ class ToolPipeline:
                 tool = self._resolve_pinned_tool(checkpoint, call.name, principal)
             except NotFoundError:
                 return False
-            enabled_names = (
-                frozenset(checkpoint.pinned_tool_names)
-                if tool.spec.source is ToolSource.MCP and checkpoint.pinned_tool_names
-                else frozenset(agent.enabled_tools)
-            )
+            enabled_names = _enabled_names(tool.spec, agent, checkpoint)
             if (
                 call.name not in enabled_names
                 or not tool.spec.required_scopes.issubset(principal.scopes)

@@ -131,6 +131,13 @@ public actor DeviceRegistrationCoordinator {
         let digest = SHA256.hash(data: try encoder.encode(body))
             .map { String(format: "%02x", $0) }
             .joined()
+        // Removing a grant can recreate a previous registration body. Give each local
+        // selection change a distinct key so a historical replay cannot restore the old state.
+        #if os(macOS)
+        if body.platform == "macos", let revision = WritableFolder.registrationRevision {
+            return "\(body.clientDeviceID):\(digest):\(revision)"
+        }
+        #endif
         return "\(body.clientDeviceID):\(digest)"
     }
 

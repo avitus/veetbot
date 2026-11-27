@@ -5170,3 +5170,10 @@ The owner authorized implementation on 2026-11-09.
 [Calendar integration](calendar-integration.md) defines one selected-calendar,
 read-only MCP server, separate OAuth consent and explicit scheduled access.
 It adds no milestone and moves no verified gate ceiling.
+
+### Mac folder access (ADR-0356)
+
+The owner extended the channel on 2026-11-27 to allow creating and replacing
+files in one folder selected in Settings on each Mac. The selection authorizes
+future writes to that folder. Section 29.4 governs device-scoped execution.
+[ADR-0356](../adr/0356-mac-folder-access.md) specifies the grant and revocation.

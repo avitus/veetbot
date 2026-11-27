@@ -12,7 +12,7 @@ from agent_core.adapters.device_channel import PushWakeDeviceChannel
 from agent_core.adapters.persistence.sqlalchemy_models import DeviceIngestReceiptRow
 from agent_core.adapters.persistence.unit_of_work import PostgresUnitOfWork
 from agent_core.bootstrap import build
-from agent_core.domain.devices import DeviceCapability, DeviceTriageMapping
+from agent_core.domain.devices import Device, DeviceCapability, DeviceTriageMapping
 from agent_core.domain.errors import DeviceChannelUnavailable, NotFoundError
 from tests.contract import test_device_ingest_store_contract as ingest_contract
 from tests.contract import test_device_invocation_store_contract as invocation_contract
@@ -199,6 +199,19 @@ async def test_postgres_device_row_round_trips_declared_capabilities() -> None:
                     text("SELECT set_config('agent_core.tenant_id', 'tenant-a', true)")
                 )
                 await assert_declared_capabilities_survive_the_round_trip(uow.devices)
+                raise _RollbackContractError
+
+
+async def test_postgres_round_trips_a_mac_folder_grant() -> None:
+    grant = "device.folder.write_0123456789abcdef0123456789abcdef"
+    mac = Device.model_validate(
+        device().model_dump() | {"kind": "desktop", "platform": "macos", "capabilities": [grant]}
+    )
+    async with build(settings=database_settings(), storage="postgres") as composition:
+        with pytest.raises(_RollbackContractError):
+            async with composition.uow_factory() as uow:
+                registered = await uow.devices.upsert(mac, principal())
+                assert (await uow.devices.get(registered.id, principal())).capabilities == {grant}
                 raise _RollbackContractError
 
 

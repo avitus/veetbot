@@ -18,6 +18,7 @@
 		100000000000000000000009 /* SSEReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* SSEReader.swift */; };
 		1000000000000000000F0001 /* BoundedFrameStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000F0001 /* BoundedFrameStream.swift */; };
 		10000000000000000000000A /* ArtifactCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000A /* ArtifactCache.swift */; };
+		E85600000000000000000001 /* WritableFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E85600000000000000000002 /* WritableFolder.swift */; };
 		1000000000000000000000E1 /* AttachmentStaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000E1 /* AttachmentStaging.swift */; };
 		10000000000000000000000C /* KeychainTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* KeychainTokenStore.swift */; };
 		10000000000000000000000D /* SessionHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* SessionHistoryStore.swift */; };
@@ -147,6 +148,7 @@
 		200000000000000000000009 /* SSEReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEReader.swift; sourceTree = "<group>"; };
 		2000000000000000000F0001 /* BoundedFrameStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundedFrameStream.swift; sourceTree = "<group>"; };
 		20000000000000000000000A /* ArtifactCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactCache.swift; sourceTree = "<group>"; };
+		E85600000000000000000002 /* WritableFolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WritableFolder.swift; sourceTree = "<group>"; };
 		2000000000000000000000E1 /* AttachmentStaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentStaging.swift; sourceTree = "<group>"; };
 		20000000000000000000000C /* KeychainTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainTokenStore.swift; sourceTree = "<group>"; };
 		20000000000000000000000D /* SessionHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionHistoryStore.swift; sourceTree = "<group>"; };
@@ -364,6 +366,7 @@
 			isa = PBXGroup;
 			children = (
 				20000000000000000000000A /* ArtifactCache.swift */,
+				E85600000000000000000002 /* WritableFolder.swift */,
 				2000000000000000000000E1 /* AttachmentStaging.swift */,
 				20000000000000000000000C /* KeychainTokenStore.swift */,
 				20000000000000000000000D /* SessionHistoryStore.swift */,
@@ -636,6 +639,7 @@
 				100000000000000000000009 /* SSEReader.swift in Sources */,
 				1000000000000000000F0001 /* BoundedFrameStream.swift in Sources */,
 				10000000000000000000000A /* ArtifactCache.swift in Sources */,
+				E85600000000000000000001 /* WritableFolder.swift in Sources */,
 				1000000000000000000000E1 /* AttachmentStaging.swift in Sources */,
 				10000000000000000000000C /* KeychainTokenStore.swift in Sources */,
 				10000000000000000000000D /* SessionHistoryStore.swift in Sources */,

@@ -7,7 +7,7 @@ import Testing
     func testSmsIntegrationIsOfferedOnlyWhereTheDeviceCanSendTexts() {
         #if os(iOS)
         #expect(ConnectionSettingsSection.visibleCases.contains(.smsIntegration))
-        #expect(ConnectionSettingsSection.visibleCases == ConnectionSettingsSection.allCases)
+        #expect(ConnectionSettingsSection.visibleCases == ConnectionSettingsSection.allCases.filter { $0 != .folderAccess })
         #else
         #expect(!ConnectionSettingsSection.visibleCases.contains(.smsIntegration))
         #expect(
@@ -19,6 +19,7 @@ import Testing
                 .integrationKeys,
                 .notifications,
                 .appearance,
+                .folderAccess,
                 .dataAndPrivacy,
             ]
         )

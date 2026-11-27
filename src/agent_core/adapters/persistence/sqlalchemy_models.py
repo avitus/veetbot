@@ -1674,8 +1674,12 @@ class DeviceRow(Base):
             name="device_muted_kinds_closed",
         ),
         CheckConstraint(
-            "jsonb_typeof(capabilities) = 'array' AND capabilities <@ "
-            "'[\"device.sms.send\"]'::jsonb",
+            "jsonb_typeof(capabilities) = 'array' AND ("
+            "capabilities <@ '[\"device.sms.send\"]'::jsonb OR ("
+            "kind IN ('desktop','laptop') AND platform = 'macos' "
+            "AND jsonb_array_length(capabilities) = 1 "
+            "AND jsonb_typeof(capabilities->0) = 'string' "
+            "AND (capabilities->>0) ~ '^device[.]folder[.]write_[a-f0-9]{32}$'))",
             name="device_capabilities_closed",
         ),
         CheckConstraint(

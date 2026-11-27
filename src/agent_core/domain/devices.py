@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -57,6 +58,14 @@ class DeviceCapability(StrEnum):
 KNOWN_DEVICE_CAPABILITIES: frozenset[str] = frozenset(
     capability.value for capability in DeviceCapability
 )
+
+
+FOLDER_WRITE_NAME = "device.folder.write"
+_FOLDER_CAPABILITY = re.compile(r"device\.folder\.write_[a-f0-9]{32}")
+
+
+def is_folder_capability(name: str) -> bool:
+    return _FOLDER_CAPABILITY.fullmatch(name) is not None
 
 
 class DeviceInvocationStatus(StrEnum):
@@ -135,9 +144,14 @@ def device_capability_issue(
     *,
     kind: DeviceKind,
     capabilities: frozenset[str],
+    platform: str = "",
 ) -> DeviceRoutingIssue | None:
     """Validate declared capabilities consistently for API input and durable rows."""
 
+    if len(capabilities) == 1 and is_folder_capability(next(iter(capabilities))):
+        if kind in {DeviceKind.DESKTOP, DeviceKind.LAPTOP} and platform == "macos":
+            return None
+        return DeviceRoutingIssue("device.folder_requires_mac", "folder access requires a Mac")
     if not capabilities <= KNOWN_DEVICE_CAPABILITIES:
         return DeviceRoutingIssue(
             "device.capability_unknown",
@@ -169,7 +183,9 @@ class DeviceRegistration(BaseModel):
 
     @model_validator(mode="after")
     def capabilities_are_declarable(self) -> DeviceRegistration:
-        issue = device_capability_issue(kind=self.kind, capabilities=self.capabilities)
+        issue = device_capability_issue(
+            kind=self.kind, capabilities=self.capabilities, platform=self.platform
+        )
         if issue is not None:
             raise ValueError(issue.message)
         return self
@@ -253,6 +269,7 @@ class Device(BaseModel):
             raise ValueError(issue.message)
         capability_issue = device_capability_issue(
             kind=self.kind,
+            platform=self.platform,
             capabilities=self.capabilities,
         )
         if capability_issue is not None:

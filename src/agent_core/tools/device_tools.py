@@ -22,6 +22,7 @@ from agent_core.domain.devices import (
     DeviceCursor,
     DeviceInvocationStatus,
     DeviceStatus,
+    is_folder_capability,
 )
 from agent_core.domain.errors import DeviceChannelUnavailable, NotFoundError
 from agent_core.domain.events import ProcessEvent
@@ -228,6 +229,90 @@ class DeviceSmsSendTool:
         return _offline()
 
 
+class DeviceFolderWriteTool:
+    """Install one file on the particular Mac that advertised this folder grant."""
+
+    def __init__(
+        self, channel: DeviceChannel, device: Device, capability: str, timeout_seconds: int
+    ) -> None:
+        self._channel = channel
+        self._device_id = device.id
+        self.spec = ToolSpec(
+            name=capability,
+            version="1.0.0",
+            description=(
+                f"Create or replace a file in the selected folder on {device.name}. "
+                "Supply a filename and content. Encoding defaults to utf8; use base64 for bytes."
+            ),
+            input_schema={
+                "type": "object",
+                "required": ["filename", "content"],
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255,
+                        "pattern": r"^[^./\\:\x00-\x1f\x7f][^/\\:\x00-\x1f\x7f]*$",
+                    },
+                    "content": {"type": "string", "maxLength": 65536},
+                    "encoding": {"type": "string", "enum": ["utf8", "base64"]},
+                },
+                "additionalProperties": False,
+            },
+            output_schema=None,
+            side_effect=SideEffectClass.EXTERNAL_WRITE,
+            risk=RiskLevel.HIGH,
+            idempotency=IdempotencyClass.CONDITIONALLY_IDEMPOTENT,
+            required_scopes={"device.write"},
+            timeout_seconds=timeout_seconds + DEVICE_TOOL_TIMEOUT_MARGIN_SECONDS,
+            maximum_output_bytes=1024,
+            allow_parallel=False,
+            target_kind="device",
+            output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
+            source=ToolSource.DEVICE,
+            device_id=str(device.id),
+        )
+
+    async def approval_view(
+        self, arguments: dict[str, Any], *, tenant_id: str
+    ) -> tuple[str, dict[str, Any]]:
+        return "Create or replace a file in the selected Mac folder.", {
+            "filename": arguments["filename"],
+            "device_id": str(self._device_id),
+        }
+
+    async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        try:
+            invocation = await self._channel.invoke(
+                device_id=self._device_id,
+                run_id=context.run_id,
+                invocation_id=context.invocation_id,
+                tool_name=self.spec.name,
+                arguments=arguments,
+                principal=context.principal,
+            )
+        except (DeviceChannelUnavailable, NotFoundError):
+            return _offline()
+        if invocation.status is DeviceInvocationStatus.SENT:
+            return ToolResult(
+                ok=True,
+                content=[TextPart(text="The Mac saved the file.")],
+                output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
+            )
+        if invocation.status is DeviceInvocationStatus.EXPIRED:
+            return _offline()
+        return ToolResult(
+            ok=False,
+            content=[],
+            failure=ToolFailure(
+                kind=ToolFailureKind.UPSTREAM_ERROR,
+                reason_code="tool.device_write_failed",
+                detail="The Mac did not confirm saving the file in the selected folder.",
+                retryable=False,
+            ),
+        )
+
+
 class DeviceToolRuntime:
     """Register device tools from the capabilities live devices declare."""
 
@@ -241,6 +326,8 @@ class DeviceToolRuntime:
         *,
         invocation_timeout_seconds: int,
         page_size: int = DEVICE_PAGE_SIZE,
+        sms_enabled: bool = True,
+        folder_enabled: bool = False,
     ) -> None:
         if page_size <= 0:
             raise ValueError("device page size must be positive")
@@ -250,6 +337,8 @@ class DeviceToolRuntime:
         self._clock = clock
         self._ids = ids
         self._invocation_timeout_seconds = invocation_timeout_seconds
+        self._sms_enabled = sms_enabled
+        self._folder_enabled = folder_enabled
         self._page_size = page_size
         self._session_registrations: dict[UUID, set[_RegistrationKey]] = {}
         self._registrations: dict[_RegistrationKey, _Registration] = {}
@@ -261,15 +350,35 @@ class DeviceToolRuntime:
         """Attach: reconcile this tenant's registrations against its live devices."""
 
         async with self._lock:
-            key = _registration_key(principal)
-            selected = await self._select(await self._declaring_devices(principal), principal)
-            existing = self._registrations.get(key)
-            if existing is not None and (selected is None or existing.device_id != selected.id):
-                # The capability moved or was withdrawn; the stale registration
-                # goes away for every session that held it, not only this one.
-                self._withdraw(key)
-            if selected is not None:
-                self._attach(session_id, key, principal.tenant_id, selected)
+            devices = await self._declaring_devices(principal)
+            sms_key = _registration_key(principal)
+            targets: dict[_RegistrationKey, Device] = {}
+            if self._sms_enabled:
+                phones = [
+                    device for device in devices if DEVICE_SMS_SEND_TOOL_NAME in device.capabilities
+                ]
+                selected = await self._select(phones, principal)
+                if selected is not None:
+                    targets[sms_key] = selected
+            if self._folder_enabled:
+                by_grant: dict[str, list[Device]] = {}
+                for device in devices:
+                    for name in device.capabilities:
+                        if is_folder_capability(name):
+                            by_grant.setdefault(name, []).append(device)
+                for name, owners in by_grant.items():
+                    if len(owners) == 1:
+                        targets[(principal.tenant_id, principal.principal_id, name, "1.0.0")] = (
+                            owners[0]
+                        )
+
+            for key, existing in list(self._registrations.items()):
+                if key[:2] == sms_key[:2] and (
+                    key not in targets or existing.device_id != targets[key].id
+                ):
+                    self._withdraw(key)
+            for key, device in targets.items():
+                self._attach(session_id, key, principal.tenant_id, device)
 
     async def close_session(self, session_id: UUID) -> None:
         """Detach: withdraw every registration this session owned."""
@@ -298,8 +407,7 @@ class DeviceToolRuntime:
                 declaring.extend(
                     candidate
                     for candidate in page
-                    if candidate.status is DeviceStatus.ACTIVE
-                    and DEVICE_SMS_SEND_TOOL_NAME in candidate.capabilities
+                    if candidate.status is DeviceStatus.ACTIVE and candidate.capabilities
                 )
                 if len(page) < self._page_size:
                     break
@@ -356,13 +464,20 @@ class DeviceToolRuntime:
     ) -> None:
         registration = self._registrations.get(key)
         if registration is None:
-            self._registry.register_dynamic(
-                DeviceSmsSendTool(
+            tool = (
+                DeviceFolderWriteTool(
+                    self._channel, device, key[2], self._invocation_timeout_seconds
+                )
+                if is_folder_capability(key[2])
+                else DeviceSmsSendTool(
                     self._channel,
                     device.id,
                     self._ids,
                     invocation_timeout_seconds=self._invocation_timeout_seconds,
-                ),
+                )
+            )
+            self._registry.register_dynamic(
+                tool,
                 tenant_id=tenant_id,
                 principal_id=device.principal_id,
             )

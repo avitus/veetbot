@@ -550,7 +550,14 @@ from agent_core.domain.code import (
 )
 from agent_core.domain.credentials import CredentialRef
 from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
-from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
+from agent_core.domain.devices import (
+    FOLDER_WRITE_NAME,
+    Device,
+    DeviceKind,
+    DeviceStatus,
+    PushProvider,
+    is_folder_capability,
+)
 from agent_core.domain.email import EmailBudgetLimits, EmailRecord
 from agent_core.domain.email_memory import EmailMergeReport, EmailRerateReport
 from agent_core.domain.email_subscriptions import SUBSCRIPTIONS_TOOL_NAME, UNSUBSCRIBE_TOOL_NAME
@@ -1409,7 +1416,8 @@ def _session_tool_filter(
             kept = [
                 tool
                 for tool in kept
-                if tool.name
+                if not is_folder_capability(tool.name)
+                and tool.name
                 not in {COCKPIT_WIDGET_WRITE_TOOL, *INSTALL_TOOL_NAMES, *CODE_WRITE_TOOL_NAMES}
             ]
         return kept
@@ -5023,7 +5031,9 @@ async def _compose(
         )
         # Both flags, exactly as the schedule tool pairs its two. Without the
         # notification producer there is no wake, so the channel stays dark.
-        device_flags_enabled = settings.device_channel_enabled and settings.device_sms_enabled
+        device_flags_enabled = settings.device_channel_enabled and (
+            settings.device_sms_enabled or settings.device_folder_enabled
+        )
         device_channel_ready = device_flags_enabled and (
             device_channel is not None or notification_producer is not None
         )
@@ -5044,6 +5054,8 @@ async def _compose(
                 effective_device_channel,
                 clock,
                 ids,
+                sms_enabled=settings.device_sms_enabled,
+                folder_enabled=settings.device_folder_enabled,
                 invocation_timeout_seconds=device_invocation_timeout_seconds,
             )
 
@@ -6099,6 +6111,7 @@ async def _compose(
             ids=ids,
             notification_expiry_seconds=notification_expiry_seconds,
             invocation_timeout_seconds=device_invocation_timeout_seconds,
+            folder_enabled=settings.device_folder_enabled,
         )
         notification_inbox = NotificationInboxService(uow_factory=uow_factory, clock=clock)
         surface_management = SurfaceManagementService(
@@ -7519,6 +7532,7 @@ async def build(
             if effective_settings.records_enabled
             else []
         ),
+        *([FOLDER_WRITE_NAME] if effective_settings.device_folder_enabled else []),
         *(
             [DEVICE_SMS_SEND_TOOL_NAME]
             if effective_settings.device_channel_enabled

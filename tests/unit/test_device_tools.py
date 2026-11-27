@@ -20,7 +20,12 @@ from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.bootstrap import Composition, build
 from agent_core.config import Settings
 from agent_core.domain.agents import Principal
-from agent_core.domain.devices import DeviceCapability, DeviceInvocation, DeviceInvocationStatus
+from agent_core.domain.devices import (
+    Device,
+    DeviceCapability,
+    DeviceInvocation,
+    DeviceInvocationStatus,
+)
 from agent_core.domain.errors import (
     DeviceChannelUnavailable,
     NotFoundError,
@@ -715,3 +720,63 @@ async def test_a_non_authorizing_origin_still_requires_approval_for_the_device_s
     )
 
     assert decision.decision is PolicyDecisionType.REQUIRE_APPROVAL
+
+
+async def test_owner_chat_writes_only_to_the_named_mac_grant_without_sms() -> None:
+    grants = {
+        DEVICE_ID: "device.folder.write_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        SECOND_DEVICE_ID: "device.folder.write_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    }
+    name = grants[SECOND_DEVICE_ID]
+    channel = FakeDeviceChannel(
+        clock=_clock(),
+        capabilities={key: frozenset({value}) for key, value in grants.items()},
+        owners=dict.fromkeys(grants, PRINCIPAL),
+    )
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name=name,
+                        arguments={"filename": "note.txt", "content": "Hello."},
+                        call_id="save-file",
+                    )
+                ]
+            ),
+            ScriptedTurn(text="Saved."),
+        ]
+    )
+    async with build(
+        settings=replace(_device_settings(), device_sms_enabled=False, device_folder_enabled=True),
+        script=script,
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        device_channel_override=channel,
+    ) as composition:
+        async with composition.uow_factory() as uow:
+            for key, grant in grants.items():
+                mac = device(device_id=key, client_device_id=str(key)).model_dump()
+                mac.update(
+                    tenant_id=composition.principal.tenant_id,
+                    principal_id=composition.principal.principal_id,
+                    kind="desktop",
+                    platform="macos",
+                    name=f"Mac {key}",
+                    capabilities=[grant],
+                )
+                await uow.devices.upsert(Device.model_validate(mac), composition.principal)
+        run_id = await composition.runs.submit("Write a greeting on my second Mac.")
+        completed = await composition.runs.wait_terminal(run_id)
+        action = _device_action(
+            body="report", origin_trust=TrustLevel.EXTERNAL_UNTRUSTED
+        ).model_copy(update={"name": name, "side_effect": SideEffectClass.EXTERNAL_WRITE})
+        decision = await composition.tool_pipeline._policy.evaluate(
+            action, composition.principal, completed
+        )
+        assert decision.decision is PolicyDecisionType.REQUIRE_APPROVAL
+        assert completed.final_message == "Saved.", completed.failure
+        assert not await composition.approvals.list_pending(run_id=run_id)
+        assert [(call.device_id, call.tool_name) for call in channel.invocations] == [
+            (SECOND_DEVICE_ID, name)
+        ]
