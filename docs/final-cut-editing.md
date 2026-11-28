@@ -17,7 +17,8 @@ Review and approve the replacement version before delivery. Once satisfied, say,
 project in Final Cut.” Veetbot returns the local movie and editable XML links.
 The movie uses the approved preview's exact bytes.
 There is no Final Cut Share click. The version's new library links to
-the originals. Keep the originals available in their selected location.
+the originals by file path. Keep the originals in place and unchanged through
+import and reconciliation. Final Cut resolves links when it opens the project.
 
 To confirm the import, select the project in Final Cut, choose **File >
 Export XML**, and save it. Tell Veetbot “Verify this version against my
@@ -69,7 +70,10 @@ ssh -NT -o ExitOnForwardFailure=yes \
 
 Set `AGENT_FINAL_CUT_SOCKET=/run/veetbot-editor/editor.sock` for those
 two services. Restart them and open a new chat to pin the tool catalog.
-Both socket endpoints must be available to their respective processes.
+Access to either socket grants the caller the authority of this paired owner.
+Limit the hosted socket and its parent directory to the Veetbot service account.
+When changing Macs, revoke the old folder grant and disconnect its tunnel
+before restarting both services with the replacement socket.
 No raw media travels through this connection. The Mac worker reclaims its
 own stale socket on restart. If the SSH tunnel leaves a stale socket at
 the remote end, confirm it has no listener before removing it and reconnecting.

@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import stat
+import subprocess
 import tempfile
 import time
 import uuid
@@ -405,42 +406,36 @@ class Editor:
     def deliver(self, grant: str, version: str) -> dict[str, Any]:
         shots = self.plan(grant, version)
         dest = self.state / grant / version
-        with self.directory(grant) as (fd, _):
-            clips = self.clips(grant)
-            validate(shots, clips)
-            for s in shots:
-                with media.source(fd, clips[s.clip].name, clips[s.clip].fingerprint):
-                    pass
         preview = dest / "preview.mp4"
         if not preview_verified(dest):
             raise ValueError(
                 "The approved preview changed. Render the same edit and approve its new preview."
             )
-        with self.grant_lock(grant):
-            return self._handoff(grant, version, dest, preview)
-
-    def _handoff(self, grant: str, version: str, dest: Path, preview: Path) -> dict[str, Any]:
         movie = dest / "movie.mp4"
-        # The approved preview is already the full resolution, decoded-and-verified render.
-        if not movie.exists():
-            os.link(preview, movie)
-        if not movie.samefile(preview):
-            raise ValueError("The delivered file changed on disk. Check the existing movie.")
-        receipt = dest / "import-requested"
-        if not receipt.exists():
-            if (dest / "Reel.fcpbundle").exists():
-                raise ValueError("A library already exists for this version. Reconcile its export.")
-            with receipt.open("x") as claim:
-                claim.write(version)
-                claim.flush()
-                os.fsync(claim.fileno())
-            # LaunchServices sends Open Document; delivery of that event is not import proof.
+        with self.grant_lock(grant):
+            with self.directory(grant) as (fd, _):
+                clips = self.clips(grant)
+                validate(shots, clips)
+                for s in shots:
+                    with media.source(fd, clips[s.clip].name, clips[s.clip].fingerprint):
+                        pass
+            # The approved preview is already the full resolution, decoded-and-verified render.
+            if not movie.exists():
+                os.link(preview, movie)
+            if not movie.samefile(preview):
+                raise ValueError("The delivered file changed on disk. Check the existing movie.")
+            launch = self._start_import(dest, version)
+
+        # Revocation can proceed once the Open Document request has been handed to the OS.
+        if launch is not None:
             try:
-                media.run(
-                    ["/usr/bin/open", "-b", "com.apple.FinalCut", str(dest / "timeline.fcpxml")]
-                )
-            except ValueError:
+                if launch.wait(timeout=10) != 0:
+                    (dest / "launch-failed").touch()
+            except subprocess.TimeoutExpired:
+                launch.kill()
+                launch.wait()
                 (dest / "launch-failed").touch()
+        self.active(grant)
         status = "Unconfirmed. Export this project as XML from Final Cut, then reconcile."
         if (dest / "confirmed").exists():
             status = "confirmed"
@@ -457,6 +452,29 @@ class Editor:
             "timeline_written": True,
             "import": status,
         }
+
+    @staticmethod
+    def _start_import(dest: Path, version: str) -> subprocess.Popen[bytes] | None:
+        receipt = dest / "import-requested"
+        if receipt.exists():
+            return None
+        if (dest / "Reel.fcpbundle").exists():
+            raise ValueError("A library already exists for this version. Reconcile its export.")
+        with receipt.open("x") as claim:
+            claim.write(version)
+            claim.flush()
+            os.fsync(claim.fileno())
+        try:
+            return subprocess.Popen(
+                ["/usr/bin/open", "-b", "com.apple.FinalCut", str(dest / "timeline.fcpxml")],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=media.environment(),
+            )
+        except OSError:
+            (dest / "launch-failed").touch()
+            return None
 
     def reconcile(self, grant: str, version: str) -> dict[str, Any]:
         self.active(grant)

@@ -134,12 +134,9 @@ def test_round_trip_compares_the_source_link_and_every_rational_frame(tmp_path: 
         compare_export(export, shots, clips, tmp_path, version, library)
 
 
-def test_delivery_replay_after_lost_ack_does_not_reopen_final_cut(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.fixture
+def prepared_delivery(tmp_path: Path) -> tuple[Editor, str, str, Path, Path]:
     import hashlib
-
-    from final_cut import media
 
     editor = Editor(tmp_path / "state", 59381)
     folder = tmp_path / "raw"
@@ -168,13 +165,23 @@ def test_delivery_replay_after_lost_ack_does_not_reopen_final_cut(
     write_json(
         work / "verified.json", hashlib.sha256((work / "preview.mp4").read_bytes()).hexdigest()
     )
+    return editor, grant, version, work, original
+
+
+def test_delivery_replay_after_lost_ack_does_not_reopen_final_cut(
+    prepared_delivery: tuple[Editor, str, str, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    editor, grant, version, work, original = prepared_delivery
     calls = []
 
-    def lost(args: list[str]) -> bytes:
+    def lost(args: list[str], **_kwargs: object) -> None:
         calls.append(args)
-        raise ValueError("Lost acknowledgement")
+        raise OSError("Launch unavailable")
 
-    monkeypatch.setattr(media, "run", lost)
+    monkeypatch.setattr(subprocess, "Popen", lost)
     delivered = editor.deliver(grant, version)
     assert delivered["timeline"].endswith(f"/{version}/timeline.fcpxml")
     assert "unconfirmed" in delivered["import"].lower()
@@ -415,3 +422,27 @@ def test_playback_withdraws_active_stream_and_never_serves_notes(tmp_path: Path)
                 finally:
                     client.close()
                     thread.join(5)
+
+
+def test_final_cut_launch_wait_releases_the_grant_lock(
+    prepared_delivery: tuple[Editor, str, str, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fcntl
+    import subprocess
+    from unittest.mock import MagicMock
+
+    editor, grant, version, _, _ = prepared_delivery
+    child = MagicMock()
+    child.__enter__.return_value = child
+
+    def check_unlocked(*_args: object, **_kwargs: object) -> int:
+        with (editor.state / "grant.lock").open("a+b") as fd:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return 0
+
+    child.wait.side_effect = check_unlocked
+    child.communicate.side_effect = check_unlocked
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: child)
+    assert editor.deliver(grant, version)["movie_verified"]
+    child.wait.assert_called_once()
