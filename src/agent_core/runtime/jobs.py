@@ -36,7 +36,9 @@ async def execute_job(
             revision_id=task.revision_id,
             grant_id=task.grant_id,
             run_id=context.run.id,
-            lease_epoch=0 if context.lease is None else context.lease.lease_epoch,
+            lease_epoch=context.run.lease_epoch
+            if context.lease is None
+            else context.lease.lease_epoch,
             model=model.complete,
         )
         context.token.raise_if_cancelled()

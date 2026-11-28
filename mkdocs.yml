@@ -496,4 +496,5 @@ nav:
       - "ADR-0355 — Discover and triage new mail before full assessment": adr/0355-discover-and-triage-new-mail-before-full-assessment.md
       - "ADR-0356 — Write to a folder selected on a Mac": adr/0356-mac-folder-access.md
       - "ADR-0357 — Open generated HTML pages beside a Mac chat": adr/0357-generated-page-window.md
+      - "ADR-0358 — One approval for a MagicPath design request": adr/0358-magicpath-design-request-approval.md
   - Changelog: changelog.md

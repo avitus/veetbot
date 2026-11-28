@@ -1765,3 +1765,13 @@ trials require execution authority even when publication would otherwise be
 allowed; an exact owned grant may satisfy that requirement. Existing approved
 schedules retain their original code/grant pins. Public jobs branch writes are
 restricted to the screened publishing App, without a human bypass.
+
+## MagicPath design request approvals
+
+For MagicPath, the `script_request_grant_offer` field and its
+`request_grant.tool_name` echo can authorize project
+discovery, canvas reads and shape creation on one project, and sandbox
+scripts for the owner's current request. The server records a distinct
+`magicpath.request_grant.created` event and audits each use against that
+approval. [ADR-0358](../adr/0358-magicpath-design-request-approval.md) defines
+the eligible methods, project binding and sign-in checks.

@@ -30,6 +30,7 @@ from agent_core.domain.folders import (
     ThreadFolder,
 )
 from agent_core.domain.job_request_grants import JobRequestGrantOffer
+from agent_core.domain.magicpath_request_grants import MagicPathRequestGrantOffer
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
@@ -261,8 +262,9 @@ class ApprovalView(BaseModel):
     request_grant_offer: BrowserRequestGrantOffer | None = None
     # ADR-0344: the request-approval offer on a job card. Additive.
     job_request_grant_offer: JobRequestGrantOffer | None = None
-    # ADR-0342 decision 11: the request-approval offer on a script card. Additive.
-    script_request_grant_offer: ScriptRequestGrantOffer | None = None
+    # The Apple card echoes tool_name from this wire field for both script
+    # (ADR-0342) and MagicPath (ADR-0358) request offers.
+    script_request_grant_offer: ScriptRequestGrantOffer | MagicPathRequestGrantOffer | None = None
 
 
 class DeviceView(BaseModel):

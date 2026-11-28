@@ -577,8 +577,14 @@ class InMemoryRunRepository:
             if run_id in self._people_erased_runs:
                 final_message = None
                 typed_failure = None
+            # Inline dispatch has no queue claim. Give each attempt its own
+            # sandbox lifetime, including the attempt after an approval pause.
+            epoch = current.lease_epoch
+            if expected_status is RunStatus.QUEUED and new_status is RunStatus.RUNNING:
+                epoch += 1
             updated = current.model_copy(
                 update={
+                    "lease_epoch": epoch,
                     "status": new_status,
                     "failure": typed_failure,
                     "final_message": final_message,

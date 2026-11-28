@@ -66,7 +66,7 @@ def script_card_is_covered(tool_name: str, decision: PolicyDecision) -> bool:
     )
 
 
-async def _owner_request(
+async def owner_request(
     uow: RepositoryUnitOfWork, run: Run, principal: Principal, turn: AuthorizationTurn | None
 ) -> bool:
     """A top-level interactive run of the owner's own chat, in a turn whose
@@ -95,7 +95,7 @@ async def script_request_grant_offer(
 
     if not script_card_is_covered(tool_name, decision):
         return None
-    if not await _owner_request(uow, run, principal, turn):
+    if not await owner_request(uow, run, principal, turn):
         return None
     return ScriptRequestGrantOffer(summary=SCRIPT_REQUEST_GRANT_SUMMARY)
 
@@ -142,7 +142,7 @@ async def script_request_approval_for_run(
     if (
         approval is None
         or approval.tool_name != SANDBOX_RUN_CODE_TOOL_NAME
-        or approval.script_request_grant_offer is None
+        or not isinstance(approval.script_request_grant_offer, ScriptRequestGrantOffer)
     ):
         return None
     return approval
@@ -179,7 +179,7 @@ class ScriptRequestGrantAuthorizer:
             if approval is None:
                 return StandingAuthorization(allowed=False, reason_code=NO_SCRIPT_REQUEST_GRANT)
             assert approval.resolved_at is not None
-            if not await _owner_request(uow, run, principal, turn):
+            if not await owner_request(uow, run, principal, turn):
                 return _not_covered(approval, "run_not_eligible")
         if now >= approval.resolved_at + SCRIPT_REQUEST_GRANT_DURATION:
             return _not_covered(approval, "expired")

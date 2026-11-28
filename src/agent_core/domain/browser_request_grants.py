@@ -27,6 +27,7 @@ from agent_core.domain.browser_act_views import (
     request_grant_view_coverage,
     session_is_task_grant_eligible,
 )
+from agent_core.domain.magicpath_request_grants import MagicPathToolName
 from agent_core.domain.policies import AuthorizationTurn
 from agent_core.domain.runs import Run
 from agent_core.domain.sessions import SESSION_BROWSER_PROFILE_METADATA_KEY
@@ -104,19 +105,18 @@ class BrowserRequestGrantOffer(BaseModel):
 
 class RequestGrantEcho(BaseModel):
     """What the card offered, repeated in an ``approve_for_request`` body: the
-    website login's profile (ADR-0302), the job's slug (ADR-0344) or the script
-    tool's name (ADR-0342), exactly one of the three."""
+    website login's profile (ADR-0302), a job slug (ADR-0344), or the displayed
+    tool name (ADR-0342 and ADR-0358)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     profile_id: UUID | None = None
     job_slug: str | None = Field(default=None, min_length=1, max_length=64)
-    tool_name: Literal["sandbox.run_code"] | None = None
+    tool_name: Literal["sandbox.run_code"] | MagicPathToolName | None = None
 
     @model_validator(mode="after")
     def names_exactly_one_offer(self) -> RequestGrantEcho:
-        """A body names the website login, the job or the script tool, and only
-        one of them."""
+        """Exactly one echoed field identifies the offer being accepted."""
 
         named = [
             value for value in (self.profile_id, self.job_slug, self.tool_name) if value is not None

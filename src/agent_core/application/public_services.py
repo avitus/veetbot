@@ -45,6 +45,7 @@ from agent_core.application.job_request_grants import (
     JobRequestGrantResolution,
     run_allows_job_request_grant,
 )
+from agent_core.application.magicpath_request_grants import magicpath_login
 from agent_core.application.memory_evidence import memory_evidence
 from agent_core.application.script_request_grants import ScriptRequestGrantResolution
 from agent_core.application.session_service import bootstrap_session
@@ -120,6 +121,10 @@ from agent_core.domain.job_request_grants import (
     JOB_REQUEST_GRANT_CREATED_EVENT,
     JOB_REQUEST_GRANT_DURATION,
     JOB_REQUEST_GRANT_TOOLS,
+)
+from agent_core.domain.magicpath_request_grants import (
+    MAGICPATH_GRANT_CREATED,
+    MagicPathRequestGrantOffer,
 )
 from agent_core.domain.memory import (
     LIVE_MEMORY_STATUSES,
@@ -2077,6 +2082,7 @@ class PublicApprovalService:
         request_grants: RequestGrantResolution | None = None,
         job_request_grants: JobRequestGrantResolution | None = None,
         script_request_grants: ScriptRequestGrantResolution | None = None,
+        magicpath_request_grants: Clock | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._dispatcher = dispatcher
@@ -2087,6 +2093,7 @@ class PublicApprovalService:
         self._request_grants = request_grants
         self._job_request_grants = job_request_grants
         self._script_request_grants = script_request_grants
+        self._magicpath_request_grants = magicpath_request_grants
 
     async def list(
         self,
@@ -2140,13 +2147,14 @@ class PublicApprovalService:
             and request_grant is not None
             and request_grant.tool_name is not None
         ):
-            # ADR-0342 decision 11: allowing a request's scripts grants nothing
-            # a script card does not already grant one at a time, so it needs
-            # no scope beyond approval.resolve.
-            if self._script_request_grants is None:
+            if request_grant.tool_name == "sandbox.run_code":
+                clock = self._script_request_grants.clock if self._script_request_grants else None
+            else:
+                clock = self._magicpath_request_grants
+            if clock is None:
                 raise _request_grant_unavailable(approval_id)
-            return await self._resolve_for_script_request(
-                principal, approval_id, reason, self._script_request_grants
+            return await self._resolve_for_tool_request(
+                principal, approval_id, reason, request_grant.tool_name, clock
             )
         if (
             decision is ApprovalResolutionType.APPROVE_FOR_REQUEST
@@ -2518,25 +2526,29 @@ class PublicApprovalService:
             await self._dispatcher.resume(dispatch_run)
         return _approval_view(outcome.approval)
 
-    async def _resolve_for_script_request(
+    async def _resolve_for_tool_request(
         self,
         principal: Principal,
         approval_id: UUID,
         reason: str | None,
-        resolution: ScriptRequestGrantResolution,
+        tool_name: str,
+        clock: Clock,
     ) -> ApprovalView:
-        """ADR-0342 decision 11: approve the script once and record the request
-        grant in one unit of work; any refusal leaves the approval pending."""
+        """Resolve the displayed tool-name offer and create its grant atomically."""
 
         dispatch_run: UUID | None = None
         async with self._uow_factory() as uow:
             visible = await uow.approvals.get(approval_id, principal)
             self._require_owner_may_allow(visible, principal)
             offer = visible.script_request_grant_offer
-            if offer is None or visible.tool_name != offer.tool_name:
+            if (
+                offer is None
+                or visible.tool_name != offer.tool_name
+                or tool_name != offer.tool_name
+            ):
                 raise _request_grant_unavailable(approval_id)
             if visible.status is not ApprovalStatus.PENDING:
-                return self._already_resolved_for_script_request(visible)
+                return self._already_resolved_for_tool_request(visible)
             owner = Principal(tenant_id=visible.tenant_id, principal_id=visible.principal_id)
             run = await uow.runs.get(visible.run_id, owner)
             try:
@@ -2549,7 +2561,12 @@ class PublicApprovalService:
                 or not run_allows_job_request_grant(run, session, principal)
             ):
                 raise _request_grant_unavailable(approval_id)
-            now = resolution.clock.now()
+            created_event = SCRIPT_REQUEST_GRANT_CREATED_EVENT
+            if isinstance(offer, MagicPathRequestGrantOffer):
+                if await magicpath_login(uow, principal) != offer.signed_in_at:
+                    raise _request_grant_unavailable(approval_id)
+                created_event = MAGICPATH_GRANT_CREATED
+            now = clock.now()
             outcome = await uow.approvals.resolve(
                 approval_id,
                 principal,
@@ -2557,14 +2574,14 @@ class PublicApprovalService:
                 reason,
             )
             if outcome.state is not ApprovalResolutionState.APPLIED:
-                return self._already_resolved_for_script_request(outcome.approval)
+                return self._already_resolved_for_tool_request(outcome.approval)
             resolved_at = outcome.approval.resolved_at or now
             dispatch_run = await self._record_request_grant(
                 uow,
                 principal,
                 run,
                 approval_id,
-                SCRIPT_REQUEST_GRANT_CREATED_EVENT,
+                created_event,
                 {
                     "approval_id": str(approval_id),
                     "tool_name": offer.tool_name,
@@ -2626,7 +2643,7 @@ class PublicApprovalService:
         return run.id
 
     @staticmethod
-    def _already_resolved_for_script_request(approval: ApprovalRequest) -> ApprovalView:
+    def _already_resolved_for_tool_request(approval: ApprovalRequest) -> ApprovalView:
         """A retry of the same allow returns the stored view; anything else
         conflicts, naming why."""
 

@@ -378,6 +378,7 @@ from agent_core.application.job_request_grants import (
     JobRequestGrantResolution,
 )
 from agent_core.application.jobs import JobPublication
+from agent_core.application.magicpath_request_grants import MagicPathRequestGrants
 from agent_core.application.mcp_servers import MCPServerSettingsService
 from agent_core.application.media_inputs import StoredMediaInputResolver
 from agent_core.application.model_settings import PublicModelSettingsService
@@ -5244,6 +5245,12 @@ async def _compose(
                 )
         # ADR-0172: specific owner consent, then ADR-0129 standing/task grants.
         standing_authorizers: list[StandingAuthorizer] = []
+        magicpath_grants = None
+        if settings.mcp_servers_enabled:
+            magicpath_grants = MagicPathRequestGrants(
+                uow_factory, clock.now, mcp_runtime.magicpath_catalog
+            )
+            standing_authorizers.append(magicpath_grants)
         if settings.jobs_enabled:
             standing_authorizers.append(JobGrantAuthorizer(uow_factory))
             standing_authorizers.append(WidgetInstallationAuthorizer(uow_factory))
@@ -5417,6 +5424,7 @@ async def _compose(
             maximum_skill_body_tokens=int(skill_bodies_config["max_tokens"]),
             approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
             standing_authorizer=standing_authorizer,
+            magicpath_request_offer=magicpath_grants.offer if magicpath_grants else None,
             script_request_offer=(
                 ScriptRequestOffers(uow_factory).offer if settings.code_mode_enabled else None
             ),
@@ -6288,6 +6296,7 @@ async def _compose(
             job_request_grants=(
                 JobRequestGrantResolution(clock=clock) if settings.jobs_enabled else None
             ),
+            magicpath_request_grants=clock if magicpath_grants else None,
             script_request_grants=(
                 ScriptRequestGrantResolution(clock=clock) if settings.code_mode_enabled else None
             ),
