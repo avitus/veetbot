@@ -78,12 +78,11 @@ class SandboxRunCodeTool:
         name=SANDBOX_RUN_CODE_TOOL_NAME,
         version="1.0.0",
         description=(
-            "Run a Python script in the isolated sandbox to make many tool calls in one step. "
-            "`tools.<name>(**arguments)` or `tools.call(name, arguments)` calls any tool you "
-            "have, checked like a direct call, and returns its text (parsed when it is a JSON "
-            "object or array); a refusal raises ToolCallError(status, reason_code). Loop, page "
-            "and join in the script and print only the answer: printed output is all you get "
-            "back. At most 64 tool calls per script; network is off."
+            "Run Python in the isolated sandbox for loops, paging and joins. For public "
+            "research use web.search and web.fetch directly. Call tools.<name>(**arguments) "
+            "or tools.call(name, arguments) for checked tool results (text or parsed JSON). "
+            "Refusals raise ToolCallError(status, reason_code). Print what you need: only "
+            "printed output comes back. At most 64 tool calls per script; network is off."
         ),
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,

@@ -1385,15 +1385,13 @@ DEFAULT_AGENT_INSTRUCTIONS = (
 # ADR-0342: appended only while the agent has the script tool, so an agent
 # without it keeps exactly the instructions above.
 CODE_MODE_AGENT_INSTRUCTIONS = (
-    " When one answer needs many tool calls, such as a loop over items, paging through "
-    "results or comparing two lists, write one sandbox.run_code script instead of calling "
-    "the tools one at a time; a script of tool calls needs no question first. In the "
-    "script call each tool as tools.<name>(...) with keyword arguments, do the looping, "
-    "filtering and joining in Python, and print only what the answer needs: the tools' "
-    "raw results never reach you. Call a single tool directly, and make sends, deletes "
-    "and other changes as direct calls, never inside a script. The script tool stands in "
-    "for sandbox.run_command wherever these instructions name it: run a command with "
-    "subprocess inside the script."
+    " For questions you can answer with read-only tools, call them directly. For public "
+    "research and product comparisons, use web.search and web.fetch directly when available. "
+    "Batch independent reads in one turn and follow up with direct reads as needed. "
+    "Use sandbox.run_code when the answer needs computation, such as paging through records "
+    "in a loop and joining two lists. Call tools.<name>(...) with keyword arguments and "
+    "print only the needed results. Make sends, deletes and other changes as direct calls. "
+    "Where sandbox.run_command is needed, use subprocess inside the script."
 )
 _BROWSER_TOOL_NAMES = frozenset(
     {"browser.navigate", "browser.observe", "browser.act", "browser.upload"}

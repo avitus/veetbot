@@ -2973,12 +2973,14 @@ schedules pin their agent version, so an existing chat keeps what it has.
   spare entries, one under ADR-0267's ten.
 - **Instructions.** The agent's instructions gain one paragraph,
   `CODE_MODE_AGENT_INSTRUCTIONS`, only when its tools include
-  `sandbox.run_code`. It tells Chat to write one script when an answer needs
-  a loop, paging or a comparison of two lists; to call a single tool
-  directly; to make sends, deletes and other changes as direct calls; and to
-  run a command from the script where the base instructions name
-  `sandbox.run_command`. An approval inside a script holds the sandbox and
-  re-runs the script on resume, which is why changes stay direct.
+  `sandbox.run_code`. Questions that the available read tools can answer use
+  those tools directly. For example, a product comparison can batch independent
+  `web.search` calls, then issue direct `web.fetch` calls for the sources.
+  The script tool's description gives the same guidance. Chat uses a script
+  when computation is needed, such as paging through records to join two lists.
+  Sends, deletes and other changes stay direct. Chat can run a command from
+  the script where the base instructions name `sandbox.run_command`. A change
+  that needs approval holds the sandbox and reruns the script on resume.
 
 Evaluation case 36 runs a real script through the pipeline
 ([evaluation-harness.md](evaluation-harness.md)).

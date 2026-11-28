@@ -436,6 +436,54 @@ async def test_default_agent_routes_routine_public_facts_away_from_sandbox() -> 
     }
 
 
+async def test_code_mode_routes_multi_source_comparisons_through_direct_web_reads() -> None:
+    web = FakeWebProvider()
+    pages = ["https://example.org/product-a", "https://example.org/product-b"]
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[ScriptedToolCall(name="web.search", arguments={"query": "A vs B"})],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(name="web.fetch", arguments={"url": url}) for url in pages
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="I compared the two pages.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    settings = load_settings(
+        {**base_environment(), "SANDBOX_MECHANISM": "fake", "AGENT_CODE_MODE_ENABLED": "1"}
+    )
+    async with build(
+        settings=settings,
+        script=script,
+        web_search_provider_override=web,
+        web_fetch_provider_override=web,
+    ) as app:
+        run_id = await app.runs.submit("Compare these two products using public sources.")
+        run = await app.runs.wait_terminal(run_id)
+        model = app.executor._model_provider
+        assert isinstance(model, FakeModelProvider)
+        after_search = model.requests[1]
+        events = await app.runs.events(run_id)
+
+    assert run.final_message == "I compared the two pages."
+    assert sorted(web.fetches) == pages
+    assert all(event.event_type != "approval.requested" for event in events)
+    script_spec = next(tool for tool in after_search.tools if tool.name == "sandbox.run_code")
+    assert "web.search and web.fetch directly" in script_spec.description
+    assert any(
+        "web.search and web.fetch directly" in part.text and "independent reads" in part.text
+        for item in after_search.conversation
+        if isinstance(item, SystemMessage) and item.trust is TrustLevel.TRUSTED_CONFIGURATION
+        for part in item.content
+        if isinstance(part, TextPart)
+    )
+
+
 async def test_web_research_plan_omits_unusable_skill_loader() -> None:
     provider = FakeWebProvider()
     script = FakeModelScript(
