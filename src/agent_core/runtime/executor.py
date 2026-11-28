@@ -618,7 +618,7 @@ class RunExecutor:
             try:
                 await self._execute_running(run, lease=None)
             finally:
-                await self._complete_run(run.id, None)
+                await self._complete_run(run.id, run.lease_epoch)
 
     async def execute_claimed(
         self,

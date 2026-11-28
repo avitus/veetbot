@@ -139,7 +139,12 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
     /// This device as the next registration will describe it, including the
     /// capabilities the owner has switched on.
     func registrationDescriptor() -> AppleDeviceDescriptor {
-        AppleDeviceDescriptor.current(capabilities: smsPreferences?.declaredCapabilities ?? [])
+        #if os(macOS)
+        if let grant = model?.writableFolder {
+            return AppleDeviceDescriptor.current(capabilities: [grant.capability])
+        }
+        #endif
+        return AppleDeviceDescriptor.current(capabilities: smsPreferences?.declaredCapabilities ?? [])
     }
 
     func received(deviceToken: Data) {
@@ -188,6 +193,14 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         let payload = NotificationPushPayload(userInfo: notification.request.content.userInfo)
+        #if os(macOS)
+        if let model, let payload, payload.kind == .deviceInvocation,
+           payload.deviceID == model.registeredDeviceID, model.writableFolder != nil {
+            completionHandler([])
+            Task { await model.receiveFolderWrites() }
+            return
+        }
+        #endif
         let suppress = NotificationPresentation.suppress(payload, visibleSessionID: model?.visibleNotificationSessionID)
         completionHandler(suppress ? [] : [.banner, .list, .sound])
         if let model { Task { await model.synchronizeNotifications() } }

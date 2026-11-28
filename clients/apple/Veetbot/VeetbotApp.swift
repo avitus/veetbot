@@ -49,5 +49,16 @@ struct VeetbotApp: App {
                 notificationDelegate.attach(to: model, smsPreferences: smsIntegration)
             }
         }
+        #if os(macOS)
+        WindowGroup("Webpage", for: GeneratedPageRequest.self) { $request in
+            if let request {
+                GeneratedPageWindow(model: model, state: model.runState, request: request)
+            }
+        }
+        .defaultSize(width: 860, height: 680)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+        .commandsRemoved()
+        #endif
     }
 }

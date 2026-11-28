@@ -9,12 +9,24 @@ enum ConversationNavigationUITestFixture {
     static let callResultID = "00000000-0000-0000-0000-000000000D01"
     static let callResultLaunchArgument = "--ui-testing-call-result"
     static let artifactID = "00000000-0000-0000-0000-000000000A01"
+    static let revisedPageID = "00000000-0000-0000-0000-000000000A02"
+    static let revisedPage = "<!doctype html><p>Revised critical line diagram</p>"
     static let artifactSVG = #"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="green"/></svg>"#
     static var isMarkdownArtifact: Bool { ProcessInfo.processInfo.arguments.contains("--ui-testing-markdown-artifact") }
-    static var artifactName: String { isMarkdownArtifact ? "appointment.md" : "garden.svg" }
-    static var artifactMediaType: String { isMarkdownArtifact ? "text/markdown" : "image/svg+xml" }
+    static var isHTMLArtifact: Bool { ProcessInfo.processInfo.arguments.contains("--ui-testing-html-artifact") }
+    static var artifactName: String {
+        if isHTMLArtifact { return "riemann.html" }
+        return isMarkdownArtifact ? "appointment.md" : "garden.svg"
+    }
+    static var artifactMediaType: String {
+        if isHTMLArtifact { return "text/html; charset=utf-8" }
+        return isMarkdownArtifact ? "text/markdown" : "image/svg+xml"
+    }
     static var artifactContent: String {
-        isMarkdownArtifact ? "# Appointment notes\n\nThe office offered **Tuesday at 2:30 pm**.\n\n- Confirm availability\n- Reply to the office" : artifactSVG
+        if isHTMLArtifact {
+            return "<!doctype html><title>Zeta</title><h1>Critical line</h1><details><summary>Show equation</summary><p>Real part equals one half</p></details><script>document.body.textContent='script executed'</script>"
+        }
+        return isMarkdownArtifact ? "# Appointment notes\n\nThe office offered **Tuesday at 2:30 pm**.\n\n- Confirm availability\n- Reply to the office" : artifactSVG
     }
     static let firstSessionID = "00000000-0000-0000-0000-000000000123"
     static let secondSessionID = "00000000-0000-0000-0000-000000000456"
@@ -531,14 +543,21 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
             let wording = Self.memoryLock.withLock { Self.memoryCorrection }
             statusCode = wording == nil ? 404 : 200
             body = wording.map(Self.correctedMemoryJSON) ?? #"{"error":{"code":"not_found","message":"memory not found","details":{},"request_id":"fixture"}}"#
-        case ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.artifactID)"):
+        case ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.artifactID)"),
+             ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.revisedPageID)"):
+            let artifactID = url.lastPathComponent
+            let content = artifactID == ConversationNavigationUITestFixture.revisedPageID
+                ? ConversationNavigationUITestFixture.revisedPage : ConversationNavigationUITestFixture.artifactContent
             statusCode = 200
             body = """
-                {"id":"\(ConversationNavigationUITestFixture.artifactID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","run_id":"\(Self.runID)","name":"\(ConversationNavigationUITestFixture.artifactName)","media_type":"\(ConversationNavigationUITestFixture.artifactMediaType)","sha256":"fixture","size_bytes":\(ConversationNavigationUITestFixture.artifactContent.utf8.count),"metadata":{},"created_at":"2026-09-27T00:00:00Z"}
+                {"id":"\(artifactID)","session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","run_id":"\(Self.runID)","name":"\(ConversationNavigationUITestFixture.artifactName)","media_type":"\(ConversationNavigationUITestFixture.artifactMediaType)","sha256":"fixture","size_bytes":\(content.utf8.count),"metadata":{},"created_at":"2026-09-27T00:00:00Z"}
                 """
         case ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.artifactID)/content"):
             statusCode = 200
             body = ConversationNavigationUITestFixture.artifactContent
+        case ("GET", "/v1/artifacts/\(ConversationNavigationUITestFixture.revisedPageID)/content"):
+            statusCode = 200
+            body = ConversationNavigationUITestFixture.revisedPage
         case ("GET", "/v1/people") where ProcessInfo.processInfo.arguments.contains(Self.peopleDirectoryArgument):
             statusCode = 200
             let secondPage = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
@@ -1027,6 +1046,19 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 statusCode = 202
                 body = "{\"run_id\":\"\(Self.runID)\",\"status\":\"QUEUED\"}"
             }
+        case ("GET", "/v1/runs/\(Self.runID)/events")
+        where ConversationNavigationUITestFixture.isHTMLArtifact:
+            statusCode = 200
+            body = """
+                id: 100
+                event: assistant.message.completed
+                data: {"message":{"kind":"assistant","content":[{"type":"file","artifact_id":"\(ConversationNavigationUITestFixture.revisedPageID)","filename":"riemann.html","media_type":"text/html"}]}}
+
+                id: 101
+                event: run.completed
+                data: {"run_id":"\(Self.runID)"}
+
+                """
         case ("GET", "/v1/runs/\(Self.runID)/events")
         where ProcessInfo.processInfo.arguments.contains("--ui-testing-streamed-answer"):
             statusCode = 200

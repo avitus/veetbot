@@ -1,5 +1,6 @@
 """Lock-screen presentation derived only from the closed notification payload."""
 
+from agent_core.domain.devices import is_folder_capability
 from agent_core.domain.notifications import NotificationKind, NotificationPayload
 from agent_core.domain.runs import RunStatus
 from agent_core.domain.schedules import OccurrenceDisposition
@@ -96,6 +97,8 @@ def apns_alert(payload: NotificationPayload) -> dict[str, str]:
                     "Open Veetbot on your iPhone to review the recipient and message, "
                     "then choose whether to send."
                 )
+            elif payload.tool_name and is_folder_capability(payload.tool_name):
+                body = "Veetbot has a file for the selected folder on this Mac."
             elif payload.tool_name:
                 body = f"Open Veetbot on the requested device to review {payload.tool_name}."
             else:

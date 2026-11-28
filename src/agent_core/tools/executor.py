@@ -51,6 +51,7 @@ from agent_core.domain.captures import (
     reader_call,
 )
 from agent_core.domain.delegations import Delegation, DelegationRequest
+from agent_core.domain.devices import FOLDER_WRITE_NAME, is_folder_capability
 from agent_core.domain.email_subscriptions import UNSUBSCRIBE_TARGET_KIND
 from agent_core.domain.errors import (
     ApprovalRequiredError,
@@ -79,6 +80,7 @@ from agent_core.domain.job_request_grants import (
     JOB_REQUEST_GRANT_AUTHORIZATION_KIND,
     JobRequestGrantOffer,
 )
+from agent_core.domain.magicpath_request_grants import MAGICPATH_TOOLS, MagicPathRequestGrantOffer
 from agent_core.domain.memory import (
     _RECALL_FUNCTION_WORDS,
     MINIMUM_LEXICAL_TERM_LENGTH,
@@ -345,6 +347,17 @@ def _writer_origin(tool: Tool, arguments: dict[str, Any]) -> ArtifactOrigin:
     return ArtifactOrigin.TOOL_OUTPUT
 
 
+def _enabled_names(spec: ToolSpec, agent: AgentSpec, checkpoint: RunCheckpoint) -> frozenset[str]:
+    folder_granted = (
+        spec.source is ToolSource.DEVICE
+        and is_folder_capability(spec.name)
+        and FOLDER_WRITE_NAME in agent.enabled_tools
+    )
+    if (spec.source is ToolSource.MCP or folder_granted) and checkpoint.pinned_tool_names:
+        return frozenset(checkpoint.pinned_tool_names)
+    return frozenset(agent.enabled_tools)
+
+
 def _action_kind(tool: Tool) -> ActionKind:
     if tool.spec.name in {"memory.remember", "memory.learn"}:
         return ActionKind.MEMORY_WRITE
@@ -539,6 +552,15 @@ def _argument_trust(
         tool_name == SANDBOX_RUN_CODE_TOOL_NAME
         and _active_turn_facts(checkpoint).newest_user_trust is TrustLevel.USER
         and _turn_origin_trust(checkpoint) in {TrustLevel.USER, TrustLevel.MEMORY}
+    ):
+        return dict.fromkeys(arguments, TrustLevel.INTERNAL_TOOL)
+    # A selected Mac folder grants the agent authorship of a file on a trusted
+    # owner turn. Content from another origin still takes the usual trust path.
+    if (
+        tool_name
+        and is_folder_capability(tool_name)
+        and _active_turn_facts(checkpoint).newest_user_trust is TrustLevel.USER
+        and _turn_origin_trust(checkpoint) is TrustLevel.USER
     ):
         return dict.fromkeys(arguments, TrustLevel.INTERNAL_TOOL)
     trust = dict.fromkeys(arguments, TrustLevel.EXTERNAL_UNTRUSTED)
@@ -849,6 +871,11 @@ class ToolPipeline:
             Awaitable[ScriptRequestGrantOffer | None],
         ]
         | None = None,
+        magicpath_request_offer: Callable[
+            [str, dict[str, Any], PolicyDecision, Run, Principal, AuthorizationTurn | None],
+            Awaitable[MagicPathRequestGrantOffer | None],
+        ]
+        | None = None,
         delegations: DelegationStarter | None = None,
         job_model_factory: Callable[[Run, AgentSpec, WorkerLease | None], Awaitable[object]]
         | None = None,
@@ -897,6 +924,7 @@ class ToolPipeline:
             }
         )
         self._standing_authorizer = standing_authorizer
+        self._make_magicpath_request_offer = magicpath_request_offer
         self._make_script_request_offer = script_request_offer
         self._delegations = delegations
         self._before_effect = before_effect
@@ -1048,11 +1076,7 @@ class ToolPipeline:
                 lease,
             )
         progress.append(1)
-        enabled_names = (
-            frozenset(checkpoint.pinned_tool_names)
-            if tool.spec.source is ToolSource.MCP and checkpoint.pinned_tool_names
-            else frozenset(agent.enabled_tools)
-        )
+        enabled_names = _enabled_names(tool.spec, agent, checkpoint)
         if call.name not in enabled_names:
             return await self._refusal(
                 run,
@@ -1727,7 +1751,7 @@ class ToolPipeline:
             principal=principal,
             step_number=step.step_number,
             attempt_number=1,
-            lease_epoch=0 if lease is None else lease.lease_epoch,
+            lease_epoch=run.lease_epoch if lease is None else lease.lease_epoch,
             idempotency_key=key,
             deadline_at=deadline,
             run_deadline_at=run.deadline_at,
@@ -1755,7 +1779,7 @@ class ToolPipeline:
                     not in {SideEffectClass.WORKSPACE_READ, SideEffectClass.WORKSPACE_WRITE}
                 )
                 else self._workspace_factory.for_run(
-                    run.tenant_id, run.id, 0 if lease is None else lease.lease_epoch
+                    run.tenant_id, run.id, run.lease_epoch if lease is None else lease.lease_epoch
                 )
             ),
             artifacts=(
@@ -2293,26 +2317,30 @@ class ToolPipeline:
             )
             raise
 
-    async def _script_request_offer(
+    async def _tool_request_offer(
         self,
         tool: Tool,
+        arguments: dict[str, Any],
         decision: PolicyDecision,
         run: Run,
         principal: Principal,
         turn: AuthorizationTurn | None,
-    ) -> ScriptRequestGrantOffer | None:
-        """ADR-0342 decision 11: the "Allow for this request" offer on a script
-        card. A source that fails makes no offer and the card is unchanged."""
+    ) -> ScriptRequestGrantOffer | MagicPathRequestGrantOffer | None:
+        """Build a tool-name offer for the card, falling back to ordinary approval."""
 
         make = self._make_script_request_offer
-        if make is None or tool.spec.name != SANDBOX_RUN_CODE_TOOL_NAME:
-            return None
         try:
+            if tool.spec.name in MAGICPATH_TOOLS and self._make_magicpath_request_offer is not None:
+                return await self._make_magicpath_request_offer(
+                    tool.spec.name, arguments, decision, run, principal, turn
+                )
+            if make is None or tool.spec.name != SANDBOX_RUN_CODE_TOOL_NAME:
+                return None
             return await make(tool.spec.name, decision, run, principal, turn)
         except (RunCancelledError, BudgetExceededError, DatabaseCapacityError):
             raise
         except Exception:
-            logger.exception("script_request_offer_failed", extra={"tool_name": tool.spec.name})
+            logger.exception("tool_request_offer_failed", extra={"tool_name": tool.spec.name})
             return None
 
     async def _request_approval(
@@ -2377,8 +2405,8 @@ class ToolPipeline:
             offer = None
             request_offer = None
             job_request_offer = None
-        script_request_offer = await self._script_request_offer(
-            tool, decision, run, principal, turn
+        script_request_offer = await self._tool_request_offer(
+            tool, invocation.normalized_arguments, decision, run, principal, turn
         )
         token.raise_if_cancelled()
         now = self._clock.now()
@@ -2583,11 +2611,7 @@ class ToolPipeline:
                 tool = self._resolve_pinned_tool(checkpoint, call.name, principal)
             except NotFoundError:
                 return False
-            enabled_names = (
-                frozenset(checkpoint.pinned_tool_names)
-                if tool.spec.source is ToolSource.MCP and checkpoint.pinned_tool_names
-                else frozenset(agent.enabled_tools)
-            )
+            enabled_names = _enabled_names(tool.spec, agent, checkpoint)
             if (
                 call.name not in enabled_names
                 or not tool.spec.required_scopes.issubset(principal.scopes)

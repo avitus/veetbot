@@ -173,6 +173,17 @@ public struct RootView: View {
                 do { try await Task.sleep(nanoseconds: 10_000_000_000) } catch { return }
             }
         }
+        #if os(macOS)
+        .task(id: model.writableFolder?.capability) {
+            guard model.writableFolder != nil else { return }
+            while !Task.isCancelled {
+                await model.receiveFolderWrites()
+                // A foreground push fetches immediately. Recover missed wakes
+                // while the Mac app is open, including when its window is inactive.
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            }
+        }
+        #endif
         #if !os(macOS)
         .sheet(isPresented: $showingSettings) {
             // The iPad gives the group sidebar and its page a full page.

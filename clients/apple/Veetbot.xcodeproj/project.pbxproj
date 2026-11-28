@@ -18,6 +18,7 @@
 		100000000000000000000009 /* SSEReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* SSEReader.swift */; };
 		1000000000000000000F0001 /* BoundedFrameStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000F0001 /* BoundedFrameStream.swift */; };
 		10000000000000000000000A /* ArtifactCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000A /* ArtifactCache.swift */; };
+		E85600000000000000000001 /* WritableFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E85600000000000000000002 /* WritableFolder.swift */; };
 		1000000000000000000000E1 /* AttachmentStaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000E1 /* AttachmentStaging.swift */; };
 		10000000000000000000000C /* KeychainTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* KeychainTokenStore.swift */; };
 		10000000000000000000000D /* SessionHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* SessionHistoryStore.swift */; };
@@ -32,6 +33,7 @@
 		1000000000000000000000F9 /* ConnectOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F9 /* ConnectOnboardingView.swift */; };
 		1000000000000000000000F8 /* NotificationDevicesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2000000000000000000000F8 /* NotificationDevicesSection.swift */; };
 		100000000000000000000012 /* ArtifactViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* ArtifactViewerView.swift */; };
+		10000000000000000000F357 /* GeneratedPageWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000F357 /* GeneratedPageWindow.swift */; };
 		100000000000000000000013 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000013 /* ChatView.swift */; };
 		100000000000000000000014 /* ConnectionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000014 /* ConnectionSettingsView.swift */; };
 		100000000000000000000015 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000015 /* RootView.swift */; };
@@ -147,6 +149,7 @@
 		200000000000000000000009 /* SSEReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEReader.swift; sourceTree = "<group>"; };
 		2000000000000000000F0001 /* BoundedFrameStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundedFrameStream.swift; sourceTree = "<group>"; };
 		20000000000000000000000A /* ArtifactCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactCache.swift; sourceTree = "<group>"; };
+		E85600000000000000000002 /* WritableFolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WritableFolder.swift; sourceTree = "<group>"; };
 		2000000000000000000000E1 /* AttachmentStaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentStaging.swift; sourceTree = "<group>"; };
 		20000000000000000000000C /* KeychainTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainTokenStore.swift; sourceTree = "<group>"; };
 		20000000000000000000000D /* SessionHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionHistoryStore.swift; sourceTree = "<group>"; };
@@ -161,6 +164,7 @@
 		2000000000000000000000F9 /* ConnectOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectOnboardingView.swift; sourceTree = "<group>"; };
 		2000000000000000000000F8 /* NotificationDevicesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationDevicesSection.swift; sourceTree = "<group>"; };
 		200000000000000000000012 /* ArtifactViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactViewerView.swift; sourceTree = "<group>"; };
+		20000000000000000000F357 /* GeneratedPageWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneratedPageWindow.swift; sourceTree = "<group>"; };
 		200000000000000000000013 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		200000000000000000000014 /* ConnectionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionSettingsView.swift; sourceTree = "<group>"; };
 		200000000000000000000015 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -364,6 +368,7 @@
 			isa = PBXGroup;
 			children = (
 				20000000000000000000000A /* ArtifactCache.swift */,
+				E85600000000000000000002 /* WritableFolder.swift */,
 				2000000000000000000000E1 /* AttachmentStaging.swift */,
 				20000000000000000000000C /* KeychainTokenStore.swift */,
 				20000000000000000000000D /* SessionHistoryStore.swift */,
@@ -425,6 +430,7 @@
 				2000000000000000000000F9 /* ConnectOnboardingView.swift */,
 				2000000000000000000000F8 /* NotificationDevicesSection.swift */,
 				200000000000000000000012 /* ArtifactViewerView.swift */,
+				20000000000000000000F357 /* GeneratedPageWindow.swift */,
 				200000000000000000000013 /* ChatView.swift */,
 				200000000000000000000019 /* ComposerTextEditor.swift */,
 				2000000000000000000000E2 /* AttachmentChipsView.swift */,
@@ -636,6 +642,7 @@
 				100000000000000000000009 /* SSEReader.swift in Sources */,
 				1000000000000000000F0001 /* BoundedFrameStream.swift in Sources */,
 				10000000000000000000000A /* ArtifactCache.swift in Sources */,
+				E85600000000000000000001 /* WritableFolder.swift in Sources */,
 				1000000000000000000000E1 /* AttachmentStaging.swift in Sources */,
 				10000000000000000000000C /* KeychainTokenStore.swift in Sources */,
 				10000000000000000000000D /* SessionHistoryStore.swift in Sources */,
@@ -660,6 +667,7 @@
 				1000000000000000000000F9 /* ConnectOnboardingView.swift in Sources */,
 				1000000000000000000000F8 /* NotificationDevicesSection.swift in Sources */,
 				100000000000000000000012 /* ArtifactViewerView.swift in Sources */,
+				10000000000000000000F357 /* GeneratedPageWindow.swift in Sources */,
 				100000000000000000000013 /* ChatView.swift in Sources */,
 				10000000000000000000001A /* AppTheme.swift in Sources */,
 				100000000000000000000019 /* ComposerTextEditor.swift in Sources */,

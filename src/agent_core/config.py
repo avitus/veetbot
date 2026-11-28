@@ -179,6 +179,7 @@ class Settings:
     jobs_github_key_file: Path | None = None
     cockpit_enabled: bool = False
     device_channel_enabled: bool = False
+    device_folder_enabled: bool = False
     device_sms_enabled: bool = False
     surface_api_enabled: bool = False
     surface_worker_enabled: bool = False
@@ -1406,6 +1407,10 @@ def load_config_document(settings: Settings, relative: str) -> dict[str, Any]:
     if relative not in SHIPPED_CONFIGS:
         raise ConfigurationError(f"unknown shipped configuration document: {relative}")
     shipped = _read_yaml(PACKAGE_ROOT / relative)
+    if relative == "policy/default.yaml" and settings.device_folder_enabled:
+        # The additional rule changes the policy identity only in deployments
+        # that enable Mac folder writes. Operator overlays still apply below.
+        shipped["tool_rules"]["device.folder.write"] = {"decision": "allow"}
     merged = shipped
     if settings.config_dir is not None and relative != FROZEN_CONFIG:
         overlay = settings.config_dir / relative
@@ -1590,9 +1595,11 @@ def validate_settings(
         raise ConfigurationError(
             "notification API and dispatch flags must be enabled or disabled together"
         )
-    if settings.device_channel_enabled != settings.device_sms_enabled:
+    if settings.device_channel_enabled != (
+        settings.device_sms_enabled or settings.device_folder_enabled
+    ):
         raise ConfigurationError(
-            "device channel and SMS flags must be enabled or disabled together"
+            "device channel and SMS or Mac folder flags must be enabled together"
         )
     if settings.surface_api_enabled != settings.surface_worker_enabled:
         raise ConfigurationError(
@@ -2411,6 +2418,7 @@ def _load_settings(
         cockpit_enabled=cockpit_enabled,
         device_channel_enabled=device_channel_enabled,
         device_sms_enabled=device_sms_enabled,
+        device_folder_enabled=_parse_flag(values, "AGENT_DEVICE_FOLDER_ENABLED"),
         surface_api_enabled=surface_api_enabled,
         surface_worker_enabled=surface_worker_enabled,
         surface_whatsapp_enabled=surface_whatsapp_enabled,

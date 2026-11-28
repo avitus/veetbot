@@ -1,0 +1,43 @@
+"""Admit one scoped folder grant on a registered Mac."""
+
+import sqlalchemy as sa
+from alembic import op
+
+revision = "b4e8c1a7d924"
+down_revision = "b4e8c1a7d923"
+branch_labels = None
+depends_on = None
+
+_NAME = "ck_devices_device_capabilities_closed"
+
+
+def upgrade() -> None:
+    op.drop_constraint(op.f(_NAME), "devices", type_="check")
+    op.create_check_constraint(
+        op.f(_NAME),
+        "devices",
+        "jsonb_typeof(capabilities) = 'array' AND ("
+        "capabilities <@ '[\"device.sms.send\"]'::jsonb OR ("
+        "kind IN ('desktop','laptop') AND platform = 'macos' "
+        "AND jsonb_array_length(capabilities) = 1 "
+        "AND jsonb_typeof(capabilities->0) = 'string' "
+        "AND (capabilities->>0) ~ '^device[.]folder[.]write_[a-f0-9]{32}$'))",
+    )
+
+
+def downgrade() -> None:
+    op.execute("SET LOCAL row_security = off")
+    op.execute("LOCK TABLE devices IN ACCESS EXCLUSIVE MODE")
+    if op.get_bind().scalar(
+        sa.text(
+            "SELECT EXISTS (SELECT 1 FROM devices WHERE capabilities->>0 LIKE 'device.folder.%')"
+        )
+    ):
+        raise RuntimeError("Remove registered Mac folder grants before downgrade.")
+
+    op.drop_constraint(op.f(_NAME), "devices", type_="check")
+    op.create_check_constraint(
+        op.f(_NAME),
+        "devices",
+        """jsonb_typeof(capabilities) = 'array' AND capabilities <@ '["device.sms.send"]'::jsonb""",
+    )

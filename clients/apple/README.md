@@ -84,7 +84,7 @@ Markdown symbols), and Select Text, which opens the message in a native text vie
 where any range can be selected.
 
 Settings shows one group at a time — Connection, Models, Website access, MCP
-servers, Integration keys, Notifications, Appearance, SMS integration (iOS) and
+servers, Integration keys, Notifications, Appearance, SMS integration (iOS), Folder access (Mac) and
 Data & privacy —
 from a sidebar on Mac and iPad and a list on iPhone. The Connect or Update Connection action sits in
 the Connection card, while device-local text-size and font-style controls save

@@ -26,6 +26,7 @@ from agent_core.domain.delegations import (
     DelegationStatus,
     derive_child_limits,
 )
+from agent_core.domain.devices import is_folder_capability
 from agent_core.domain.errors import (
     ConflictError,
     DelegationValidationError,
@@ -355,7 +356,10 @@ class DelegationMaterializer:
                 DelegationRejectionReason.FANOUT_EXCEEDED,
                 "the request exceeds the per-call brief cap",
             )
-        allowed_parent_tools = frozenset(pinned_tools) - FORBIDDEN_CHILD_TOOLS
+        allowed_parent_tools = (
+            frozenset(name for name in pinned_tools if not is_folder_capability(name))
+            - FORBIDDEN_CHILD_TOOLS
+        )
         for brief in request.briefs:
             requested_tools = set(brief.allowed_tools)
             if not requested_tools <= allowed_parent_tools:

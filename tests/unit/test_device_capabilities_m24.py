@@ -149,3 +149,12 @@ def test_device_view_exposes_declared_capabilities() -> None:
 
     assert view.capabilities == frozenset({SMS_SEND})
     assert view.model_dump(mode="json")["capabilities"] == [SMS_SEND]
+
+
+def test_mac_declares_folder_write_for_one_selection() -> None:
+    capability = "device.folder.write_0123456789abcdef0123456789abcdef"
+    assert request(
+        kind="desktop", platform="macos", capabilities=(capability,)
+    ).registration().capabilities == {capability}
+    with pytest.raises(DeviceValidationError):
+        request(capabilities=(capability,)).registration()

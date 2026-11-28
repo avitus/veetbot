@@ -415,3 +415,51 @@ async def test_an_unknown_foreign_or_revoked_device_can_neither_fetch_nor_answer
     assert stolen.status_code == 404
     assert answered_by_revoked.status_code == 409
     assert untouched.status is DeviceInvocationStatus.PENDING
+
+
+async def test_folder_only_registration_and_sms_route_separation() -> None:
+    grant = "device.folder.write_0123456789abcdef0123456789abcdef"
+    registration = {
+        "name": "Desk Mac",
+        "kind": "desktop",
+        "platform": "macos",
+        "client_device_id": "test-mac",
+        "capabilities": [grant],
+    }
+    for enabled in (False, True):
+        settings = replace(
+            _settings(),
+            device_folder_enabled=enabled,
+            device_sms_enabled=False,
+            device_channel_enabled=enabled,
+            notification_api_enabled=True,
+            notification_dispatch_enabled=True,
+        )
+        async with (
+            build(settings=settings, fixed_clock_at=NOW, sequential_ids=True) as composition,
+            _client(composition) as client,
+        ):
+            response = await client.post("/v1/devices", json=registration)
+            assert response.status_code == (201 if enabled else 422), response.text
+            if enabled:
+                device_id = response.json()["id"]
+                assert response.json()["capabilities"] == [grant]
+                pending = await client.get(f"/v1/devices/{device_id}/invocations")
+                assert pending.status_code == 200
+                # The owner changes folders while a write waits in the device queue.
+                async with composition.uow_factory() as uow:
+                    await uow.device_invocations.create(
+                        _pending(
+                            INVOCATION_ID,
+                            tenant_id=composition.principal.tenant_id,
+                            device_id=UUID(device_id),
+                        ).model_copy(update={"tool_name": grant})
+                    )
+                fetched = await client.get(f"/v1/devices/{device_id}/invocations")
+                assert [item["tool_name"] for item in fetched.json()["invocations"]] == [grant]
+                changed = await client.post("/v1/devices", json=registration | {"capabilities": []})
+                assert changed.is_success
+                revoked = await client.get(f"/v1/devices/{device_id}/invocations")
+                assert revoked.json()["invocations"] == []
+                sms = await client.post(f"/v1/devices/{device_id}/messages", json=_message())
+                assert sms.status_code == 404

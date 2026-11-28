@@ -26,6 +26,7 @@ from agent_core.domain.errors import (
     NotFoundError,
 )
 from agent_core.domain.events import NewEvent
+from agent_core.domain.magicpath_request_grants import MAGICPATH_ENDPOINT, MAGICPATH_TOOLS
 from agent_core.domain.mcp import (
     MCPAuthScheme,
     MCPCallResult,
@@ -358,6 +359,25 @@ class MCPRuntime:
             authorization is None or not authorization.signed_in
         ):
             return "tool.server_unauthorized"
+        return None
+
+    def magicpath_catalog(self, session_id: UUID, tool_name: str) -> str | None:
+        """Verify the exact remote method and endpoint pinned for this chat."""
+        connection = self._sessions.get(session_id, {}).get("magicpath")
+        if (
+            not self._owner_servers_enabled
+            or connection is None
+            or tool_name not in MAGICPATH_TOOLS
+            or not connection.config.owner_managed
+            or connection.config.endpoint != MAGICPATH_ENDPOINT
+            or connection.config.auth_scheme is not MCPAuthScheme.OAUTH2_AUTHORIZATION
+        ):
+            return None
+        if any(
+            mapped.spec.name == tool_name and tool_name == f"mcp.magicpath.{mapped.remote_name}"
+            for mapped in connection.report.accepted
+        ):
+            return connection.report.catalog_hash
         return None
 
     def owner_server_ids(self, session_id: UUID) -> frozenset[str]:

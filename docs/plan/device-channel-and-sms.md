@@ -175,14 +175,13 @@ device_triage_sessions
 
 ## Configuration and flags
 
-Two flags, default off, changing together at release validation:
-`AGENT_DEVICE_CHANNEL_ENABLED` (the port, the routes, the invocation
-push) and `AGENT_DEVICE_SMS_ENABLED` (the `device.sms.send` capability
-and the ingest route). With either unset, no route mounts, no
-capability-derived tool registers, and no push is sent. The two flags are
-paired at load: a deployment that sets exactly one is refused, because a
-channel without its capability and a capability without its channel are both
-half-built. Limits block: `invocation_timeout_seconds` (300),
+All three flags default off. Enable `AGENT_DEVICE_CHANNEL_ENABLED` together
+with at least one capability. `AGENT_DEVICE_SMS_ENABLED` enables SMS send and
+message ingest. `AGENT_DEVICE_FOLDER_ENABLED` enables Mac folder registration
+and writes. A folder-only deployment mounts the pending and result routes.
+Notification API and dispatch supply registration and invocation wakes.
+
+The limits are `invocation_timeout_seconds` (300),
 `ingest_daily_cap` (500), and `invocation_poll_seconds` (2), the interval the
 push-wake adapter waits between reads of the row it is blocked on.
 
@@ -235,9 +234,9 @@ the roadmap or in this document's open questions.
     treated as owner speech or retract owner memory. **M24.**
 11. **No body in logs.** Message bodies appear in no process log line and
     no event besides the designated content event. **M24.**
-12. **Default off.** With either flag unset, no device-channel route
-    mounts, no capability-derived tool registers, and no invocation push
-    is sent. **M24.**
+12. **Default off.** With folder access off, the original SMS flags remain
+    paired. With both capabilities off, no device-channel route mounts, no
+    capability-derived tool registers, and no invocation push is sent. **M24.**
 
 ## Open questions
 
@@ -248,3 +247,25 @@ the roadmap or in this document's open questions.
    backgrounded — same verification.
 3. Whether a waiting-on-device suspension kind should replace the bounded
    wait once real usage shows expiry rates; that is a later ADR.
+
+## Mac folder access
+
+In Settings, choose **Folder access** on each Mac and select a directory.
+The picker authorizes Veetbot to create and replace individual files directly
+in that directory. Keep the Mac app open and connected, with notifications
+enabled. Change folder rotates the grant. Remove access takes effect locally
+even when the server is unreachable.
+
+The Mac stores an app-scoped bookmark for the configured account and registers
+a random grant identifier. The server uses a separate device tool for each
+grant. Its description names the Mac. The tool accepts a single visible
+filename and up to 65,536 characters of UTF-8 text or base64 content. The
+device verifies the grant and deadline, persists an invocation receipt and
+atomically replaces the destination entry. A lost acknowledgement can be
+retried without replacing a subsequent owner edit. A crash between the write
+and the success receipt leaves the outcome unconfirmed.
+
+The rule for trusted owner writes enters the policy profile only when folder
+support is enabled. Existing hardline checks and untrusted-origin approvals
+apply. The signed-in app validates the current local grant again before writing.
+See [ADR-0356](../adr/0356-mac-folder-access.md).

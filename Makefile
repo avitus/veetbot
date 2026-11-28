@@ -188,6 +188,7 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2CallResultDisclosesTranscriptAndStagesANewCall \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2CallConcernStagesEditableChat \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2MarkdownArtifactRendersAReadableDocument \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testChatHTMLAttachmentOpensRenderedWindow \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2WideMemoryKeepsCollectionsBesideRecords \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2SchedulesKeepListBesideSelectedSchedule \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2EmailHasMailboxBesideTheInbox \
@@ -198,6 +199,7 @@ test-apple-ui-macos:
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testA2InlineUnsubscribeKeepsTheConfirmation \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMainWindowSizePersistsAcrossApplicationRestart \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testTaskApprovalWebsitesCanBeAddedAndRemovedInSettings \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testSelectAndRemoveWritableFolderInSettings \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testChatApprovalCollapsesAfterApproval \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testChatApprovalLoadedApprovedStartsCollapsed \
 		-only-testing:VeetbotUITests/ConversationNavigationUITests/testBrowserChatApprovalCollapsesAfterTaskApproval \

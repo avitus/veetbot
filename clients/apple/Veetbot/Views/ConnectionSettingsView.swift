@@ -9,6 +9,7 @@ enum ConnectionSettingsSection: String, CaseIterable, Identifiable {
     case notifications
     case appearance
     case smsIntegration
+    case folderAccess
     case dataAndPrivacy
 
     var id: String { rawValue }
@@ -21,20 +22,20 @@ enum ConnectionSettingsSection: String, CaseIterable, Identifiable {
     private static let titles: [ConnectionSettingsSection: String] = [
         .connection: "Connection", .models: "Models", .websiteAccess: "Website access",
         .integrationKeys: "Integration keys", .mcpServers: "MCP servers", .notifications: "Notifications", .appearance: "Appearance",
-        .smsIntegration: "SMS integration", .dataAndPrivacy: "Data & privacy",
+        .folderAccess: "Folder access", .smsIntegration: "SMS integration", .dataAndPrivacy: "Data & privacy",
     ]
 
     private static let systemImages: [ConnectionSettingsSection: String] = [
         .connection: "key", .models: "wand.and.stars", .websiteAccess: "globe",
         .integrationKeys: "key.fill", .mcpServers: "puzzlepiece.extension", .notifications: "bell", .appearance: "paintpalette",
-        .smsIntegration: "message", .dataAndPrivacy: "lock.shield",
+        .folderAccess: "folder", .smsIntegration: "message", .dataAndPrivacy: "lock.shield",
     ]
 
     /// The sections this platform offers. Sending a text rides the phone's own
     /// compose sheet, so the SMS integration exists only where that sheet does.
     static var visibleCases: [ConnectionSettingsSection] {
         #if os(iOS)
-        return allCases
+        return allCases.filter { $0 != .folderAccess }
         #else
         return allCases.filter { $0 != .smsIntegration }
         #endif
@@ -665,6 +666,50 @@ public struct ConnectionSettingsView: View {
 
         case .smsIntegration:
             smsIntegrationSection
+
+        case .folderAccess:
+            #if os(macOS)
+            SettingsCard(title: "Folder access",
+                         summary: "Let Veetbot create and replace files in one folder on this Mac without asking each time.",
+                         systemImage: "folder", tint: AppTheme.tealText) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(model.writableFolder?.path ?? "No folder selected")
+                        .textSelection(.enabled)
+                    HStack {
+                        Button(model.writableFolder == nil ? "Choose folder…" : "Change folder…") {
+                            let panel = NSOpenPanel()
+                            panel.canChooseDirectories = true
+                            panel.canChooseFiles = false
+                            panel.allowsMultipleSelection = false
+                            panel.prompt = "Allow access"
+                            guard let window = NSApp.keyWindow else { return }
+                            let connection = model.connectionGeneration
+                            panel.beginSheetModal(for: window) { response in
+                                guard response == .OK, let url = panel.url,
+                                      model.connectionGeneration == connection else { return }
+                                model.chooseWritableFolder(url)
+                            }
+                        }
+                        .disabled(!model.isConfigured)
+                        if model.writableFolder != nil {
+                            Button("Remove access", role: .destructive) { model.removeWritableFolder() }
+                        }
+                    }
+                    if let grant = model.writableFolder, grant.capability != model.registeredFolderCapability {
+                        Button("Retry device registration") { model.requestDeviceCapabilityRegistration() }
+                        Text("Waiting for this Mac to register folder access with Veetbot.").veetType(.meta)
+                    }
+                    if !model.isConfigured {
+                        Text("Connect this Mac to Veetbot to choose a folder.")
+                    } else {
+                        Text("Keep Veetbot open and allow notifications on this Mac to receive files.")
+                            .veetType(.meta)
+                    }
+                }
+            }
+            #else
+            EmptyView()
+            #endif
 
         case .mcpServers:
             SettingsCard(

@@ -153,6 +153,7 @@ TOOL_MESSAGES: dict[str, str] = {
     "policy.matrix.unknown_tool": "Not performed. The requested capability is unknown.",
     "policy.matrix.external_write": "Not performed. Approval is required.",
     "policy.matrix.workspace_read": "Not performed. The path is outside the workspace.",
+    "policy.tool.device.folder.write": "This file write requires approval.",
     "policy.tool.device.sms.send": "Not performed. Approval is required.",
     "policy.unclassifiable_action": "Not performed. The action could not be classified.",
     "policy.advisory.escalated": "Not performed. Approval is required.",

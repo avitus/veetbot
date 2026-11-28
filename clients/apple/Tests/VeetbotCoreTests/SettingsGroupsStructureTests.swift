@@ -15,12 +15,12 @@ import Testing
         #expect(
             ConnectionSettingsSection.allCases == [
                 .connection, .models, .websiteAccess, .mcpServers, .integrationKeys, .notifications, .appearance,
-                .smsIntegration, .dataAndPrivacy,
+                .smsIntegration, .folderAccess, .dataAndPrivacy,
             ]
         )
         #expect(ConnectionSettingsSection.allCases.map(\.title) == [
             "Connection", "Models", "Website access", "MCP servers", "Integration keys", "Notifications", "Appearance",
-            "SMS integration", "Data & privacy",
+            "SMS integration", "Folder access", "Data & privacy",
         ])
     }
 

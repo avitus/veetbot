@@ -1267,6 +1267,26 @@ completes it with a real provider, and run one generated-code task through
 `runsc`. Reboot once and confirm PostgreSQL, Nginx, the execution service, and
 all application units return.
 
+## Mac folder access
+
+Apply the database migration and deploy the Mac client. Enable
+`AGENT_DEVICE_FOLDER_ENABLED=1` and `AGENT_DEVICE_CHANNEL_ENABLED=1` in the
+API and worker environment with notification API and dispatch enabled. SMS is
+optional. Enabling folder support changes the compiled policy version. Verify
+any provider-backed memory evidence pinned to that version before activation.
+
+The owner chooses **Settings → Folder access** separately on each Mac. Verify
+delivery with a new file and a replacement in the selected folder. Removing
+access on one Mac revokes that Mac's grant immediately. The client keeps the
+folder path and security-scoped bookmark on that Mac. Before a manual database
+downgrade, remove folder access on each registered Mac and let it sync. The
+downgrade refuses to proceed while a device still advertises a folder grant.
+The previous binary requires the previous schema revision even when folder
+access was never enabled. Use the manual rollback procedure below.
+A Mac that reaches a server with folder access disabled or unsupported keeps
+its local selection and registers for ordinary push notifications. Use **Retry
+device registration** in Settings after the server enables folder access.
+
 ## The SMS capture ceremony
 
 Milestone 24 ([device-channel-and-sms.md](plan/device-channel-and-sms.md)) lets
