@@ -6,9 +6,10 @@ import argparse
 import json
 import socket
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 from mcp.server import MCPServer
+from mcp.types import CallToolResult, TextContent
 from pydantic import WithJsonSchema
 
 from final_cut.plan import Change, Handle, Shot
@@ -39,22 +40,43 @@ Changes = Annotated[
 ]
 
 
+def error(message: str, *, uncertain: bool = False) -> CallToolResult:
+    return CallToolResult(
+        content=[TextContent(type="text", text=message)],
+        structured_content={"effect_status": "unknown" if uncertain else "not_applied"},
+        is_error=True,
+    )
+
+
 def create_server(endpoint: Path) -> MCPServer:
     server = MCPServer("final_cut")
 
-    def call(request: Request) -> dict[str, Any]:
+    def call(request: Request) -> CallToolResult:
         with socket.socket(socket.AF_UNIX) as sock:
             sock.settimeout(300)
             try:
                 sock.connect(str(endpoint))
             except OSError:
-                return {"error": "Mac offline. Start its editor and reconnect the socket."}
+                return error("Mac offline. Start its editor and reconnect the socket.")
             try:
                 sock.sendall(request.model_dump_json().encode() + b"\n")
                 with sock.makefile("rb") as stream:
-                    return dict(json.loads(stream.readline(131072)))
+                    line = stream.readline(131072)
+                    result = json.loads(line)
+                    if not isinstance(result, dict) or not line.endswith(b"\n"):
+                        raise ValueError("Incomplete reply.")
             except (OSError, ValueError):
-                return {"error": "Mac acknowledgement lost. Reconcile the cut before retrying."}
+                message = (
+                    "Inventory reply lost. Reconnect the Mac and inspect a smaller folder."
+                    if isinstance(request, Inventory)
+                    else "Mac acknowledgement lost. Check the version before retrying any handoff."
+                )
+                return error(message, uncertain=True)
+        if "error" in result:
+            return error(str(result["error"]), uncertain=isinstance(request, Handoff))
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(result))], structured_content=result
+        )
 
     @server.prompt()
     def editing() -> str:
@@ -71,19 +93,19 @@ def create_server(endpoint: Path) -> MCPServer:
         )
 
     @server.tool()
-    def select_folder() -> dict[str, Any]:
+    def select_folder() -> CallToolResult:
         """Show a read-only folder picker and separate notes-sharing choice on the editing Mac."""
         return call(Select(operation="select"))
 
     @server.tool()
-    def inventory() -> dict[str, Any]:
+    def inventory() -> CallToolResult:
         """List the active Mac grant, stable clip IDs, frame rates, durations, and source starts."""
         return call(Inventory(operation="inventory"))
 
     @server.tool()
     def excerpt(
         grant: Handle, clip: Handle, first: int, end: int, analyze: bool = True
-    ) -> dict[str, Any]:
+    ) -> CallToolResult:
         """Inspect up to 15 seconds from source-relative first through exclusive end frames.
         Returns local range playback with sound, labeled contact sheet and approved local analysis.
         """
@@ -99,7 +121,7 @@ def create_server(endpoint: Path) -> MCPServer:
     @server.tool()
     def recommend(
         grant: Handle, evidence: list[Handle], seconds: int, brief: str = ""
-    ) -> dict[str, Any]:
+    ) -> CallToolResult:
         """Rank analyzed excerpts on the Mac for a highlight reel. Returns only chosen ranges.
         Pass the owner's editorial brief. If more frames are needed, analyze additional ranges.
         """
@@ -110,22 +132,22 @@ def create_server(endpoint: Path) -> MCPServer:
         )
 
     @server.tool()
-    def rough_cut(grant: Handle, shots: Shots) -> dict[str, Any]:
+    def rough_cut(grant: Handle, shots: Shots) -> CallToolResult:
         """Render a playable preview and editable timeline from an ordered integer-frame plan."""
         return call(Cut(operation="cut", grant=grant, shots=shots))
 
     @server.tool()
-    def revise(grant: Handle, version: Handle, changes: Changes) -> dict[str, Any]:
+    def revise(grant: Handle, version: Handle, changes: Changes) -> CallToolResult:
         """Revise only listed zero-based shots in order. Retain the named parent and other shots."""
         return call(Revision(operation="revise", grant=grant, version=version, changes=changes))
 
     @server.tool()
-    def deliver(grant: Handle, version: Handle) -> dict[str, Any]:
+    def deliver(grant: Handle, version: Handle) -> CallToolResult:
         """Deliver the approved movie and request Final Cut import once for this cut version."""
         return call(Handoff(operation="deliver", grant=grant, version=version))
 
     @server.tool()
-    def reconcile(grant: Handle, version: Handle) -> dict[str, Any]:
+    def reconcile(grant: Handle, version: Handle) -> CallToolResult:
         """Choose re-exported XML on the Mac to verify the project, online media and frame cuts."""
         return call(Handoff(operation="reconcile", grant=grant, version=version))
 

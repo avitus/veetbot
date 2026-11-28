@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import re
+import socket
 import socketserver
+import stat
 import subprocess
 import sys
 import threading
+from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -57,28 +62,35 @@ def dispatch(editor: Editor, request: Request) -> dict[str, Any]:
     return editor.reconcile(request.grant, request.version)
 
 
-def serve(editor: Editor, endpoint: Path) -> None:
-    class RPC(socketserver.StreamRequestHandler):
-        def handle(self) -> None:
-            self.connection.settimeout(300)
-            try:
-                line = self.rfile.readline(65537)
-                if len(line) > 65536:
-                    raise ValueError("Request is too large.")
-                request = REQUEST.validate_json(line)
-                result = dispatch(editor, request)
-            except FileNotFoundError:
-                result = {"error": "Missing source or Mac tool. Restore it and inspect again."}
-            except (ValueError, OSError, subprocess.SubprocessError) as exc:
-                # Input validation and system exceptions can contain paths or arguments.
-                message = (
-                    str(exc)
-                    if type(exc) is ValueError
-                    else "The Mac declined or could not complete this operation."
-                )
-                result = {"error": message}
-            self.wfile.write(json.dumps(result).encode() + b"\n")
+def clear_stale_socket(endpoint: Path) -> None:
+    try:
+        entry = endpoint.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISSOCK(entry.st_mode) or entry.st_uid != os.getuid():
+        raise ValueError("The editor socket path is occupied. Check the private state directory.")
+    with socket.socket(socket.AF_UNIX) as probe:
+        probe.settimeout(1)
+        try:
+            probe.connect(str(endpoint))
+        except ConnectionRefusedError:
+            endpoint.unlink()
+        else:
+            raise ValueError("An editing worker is already running.")
 
+
+@contextlib.contextmanager
+def worker_slot(endpoint: Path) -> Iterator[None]:
+    with endpoint.with_suffix(".lock").open("a+b") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ValueError("An editing worker is already running.") from exc
+        clear_stale_socket(endpoint)
+        yield
+
+
+def playback_handler(editor: Editor) -> type[BaseHTTPRequestHandler]:
     class Playback(BaseHTTPRequestHandler):
         def log_message(self, *_args: object) -> None:
             pass
@@ -89,7 +101,7 @@ def serve(editor: Editor, endpoint: Path) -> None:
         def do_GET(self) -> None:
             match = re.fullmatch(
                 r"/([a-f0-9]{32})/([a-f0-9]{32})/"
-                r"(preview\.mp4|movie\.mp4|excerpt\.mp4|sheet\.jpg|notes\.json|timeline\.fcpxml)",
+                r"(preview\.mp4|movie\.mp4|excerpt\.mp4|sheet\.jpg|timeline\.fcpxml)",
                 self.path,
             )
             if self.headers.get("Host") != f"127.0.0.1:{editor.port}" or not match:
@@ -120,7 +132,6 @@ def serve(editor: Editor, endpoint: Path) -> None:
                     {
                         ".mp4": "video/mp4",
                         ".jpg": "image/jpeg",
-                        ".json": "application/json",
                         ".fcpxml": "application/xml",
                     }[path.suffix],
                 )
@@ -137,15 +148,54 @@ def serve(editor: Editor, endpoint: Path) -> None:
                 self.end_headers()
                 file.seek(first)
                 remaining = end - first if self.command != "HEAD" else 0
+                self.connection.settimeout(2)
                 while remaining:
-                    chunk = file.read(min(remaining, 65536))
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
+                    try:
+                        with editor.grant_lock(match[1]):
+                            chunk = file.read(min(remaining, 65536))
+                            if not chunk:
+                                return
+                            self.wfile.write(chunk)
+                    except (ValueError, OSError):
+                        return
                     remaining -= len(chunk)
 
+    return Playback
+
+
+def serve(editor: Editor, endpoint: Path) -> None:
+    class RPC(socketserver.StreamRequestHandler):
+        def handle(self) -> None:
+            self.connection.settimeout(300)
+            try:
+                line = self.rfile.readline(65537)
+                if not line:
+                    return
+                if len(line) > 65536:
+                    raise ValueError("Request is too large.")
+                request = REQUEST.validate_json(line)
+                result = dispatch(editor, request)
+                grant = getattr(request, "grant", None) or result.get("grant")
+                if grant:
+                    with editor.grant_lock(grant):
+                        self.connection.settimeout(2)
+                        self.wfile.write(json.dumps(result).encode() + b"\n")
+                    return
+            except FileNotFoundError:
+                result = {"error": "Missing source or Mac tool. Restore it and inspect again."}
+            except (ValueError, OSError, subprocess.SubprocessError) as exc:
+                # Input validation and system exceptions can contain paths or arguments.
+                message = (
+                    str(exc)
+                    if type(exc) is ValueError
+                    else "The Mac declined or could not complete this operation."
+                )
+                result = {"error": message}
+            self.wfile.write(json.dumps(result).encode() + b"\n")
+
     with (
-        ThreadingHTTPServer(("127.0.0.1", editor.port), Playback) as http,
+        worker_slot(endpoint),
+        ThreadingHTTPServer(("127.0.0.1", editor.port), playback_handler(editor)) as http,
         socketserver.UnixStreamServer(str(endpoint), RPC) as rpc,
     ):
         os.chmod(endpoint, 0o600)
@@ -169,7 +219,7 @@ def main() -> None:
     os.umask(0o077)
     editor = Editor(args.state, args.port, args.model)
     if args.action == "revoke":
-        (editor.state / "active.json").unlink(missing_ok=True)
+        editor.revoke()
     elif args.action == "select":
         dispatch(editor, Select(operation="select"))
     else:

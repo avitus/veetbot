@@ -9,6 +9,7 @@ import json
 import os
 import stat
 import subprocess
+import time
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -25,17 +26,34 @@ def environment() -> dict[str, str]:
     }
 
 
-def run(argv: list[str], fds: tuple[int, ...] = (), timeout: int = 180) -> bytes:
+INVENTORY_TIMEOUT = "Inventory timed out. Select a smaller folder and inspect again."
+
+
+def inventory_time_left(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError(INVENTORY_TIMEOUT)
+    return remaining
+
+
+def run(
+    argv: list[str], fds: tuple[int, ...] = (), timeout: int = 180, *, deadline: float | None = None
+) -> bytes:
+    budget = timeout if deadline is None else min(timeout, inventory_time_left(deadline))
     try:
         return subprocess.run(
             argv,
             check=True,
             capture_output=True,
-            timeout=timeout,
+            timeout=budget,
             env=environment(),
             pass_fds=fds,
             stdin=subprocess.DEVNULL,
         ).stdout
+    except subprocess.TimeoutExpired as exc:
+        if deadline is not None:
+            raise TimeoutError(INVENTORY_TIMEOUT) from exc
+        raise ValueError(f"{Path(argv[0]).name} timed out on the Mac.") from exc
     except (OSError, subprocess.SubprocessError) as exc:
         raise ValueError(f"{Path(argv[0]).name} failed or timed out on the Mac.") from exc
 
@@ -70,16 +88,24 @@ def source(directory: int, name: str, expected: str | None = None) -> BinaryIO:
     return os.fdopen(fd, "rb")
 
 
-def probe(args: list[str], fds: tuple[int, ...] = ()) -> dict[str, Any]:
+def probe(
+    args: list[str], fds: tuple[int, ...] = (), *, deadline: float | None = None
+) -> dict[str, Any]:
     return dict(
-        json.loads(run(["ffprobe", "-v", "error", "-show_streams", "-of", "json", *args], fds))
+        json.loads(
+            run(
+                ["ffprobe", "-v", "error", "-show_streams", "-of", "json", *args],
+                fds,
+                deadline=deadline,
+            )
+        )
     )
 
 
-def inspect_clip(grant: str, directory: int, name: str) -> Clip:
+def inspect_clip(grant: str, directory: int, name: str, *, deadline: float | None = None) -> Clip:
     with source(directory, name) as file:
         fd = file.fileno()
-        streams = probe(source_args(fd), (fd,))["streams"]
+        streams = probe(source_args(fd), (fd,), deadline=deadline)["streams"]
         info = fingerprint(os.fstat(fd))
     video = [s for s in streams if s["codec_type"] == "video"]
     audio = [s for s in streams if s["codec_type"] == "audio"]
@@ -119,11 +145,17 @@ def inspect_clip(grant: str, directory: int, name: str) -> Clip:
                 *source_args(fd),
             ],
             (fd,),
+            deadline=deadline,
         )
     pts = sorted(int(line.split(b",")[0]) for line in raw.splitlines() if line.strip())
     tick = Fraction(v["time_base"])
-    if len(pts) != frames or any(abs(t * tick - i / fps) >= tick for i, t in enumerate(pts)):
+    # Compare in integer units to bound CPU time on million-frame sources.
+    unit = tick.numerator * fps.numerator
+    step = tick.denominator * fps.denominator
+    if len(pts) != frames or any(abs(t * unit - i * step) >= unit for i, t in enumerate(pts)):
         raise ValueError("Variable-rate or discontinuous video. Use a constant-rate original.")
+    if deadline is not None:
+        inventory_time_left(deadline)
     tc = v.get("tags", {}).get("timecode", "00:00:00:00")
     digest = hashlib.sha256(f"{grant}/{name}/{info}".encode()).hexdigest()[:32]
     return Clip(

@@ -12,7 +12,8 @@ the Mac. Review the ordinary Veetbot approval cards as they appear.
 
 Open the preview link in the Mac chat. Ask, “Hold the opening shot two
 seconds longer and cut the last interview answer.” Each revision returns
-a new preview. Once satisfied, say, “Deliver this version and open its
+a new preview. If a preview is damaged, ask to render the same edit again.
+Review and approve the replacement version before delivery. Once satisfied, say, “Deliver this version and open its
 project in Final Cut.” Veetbot returns the local movie and editable XML links.
 The movie uses the approved preview's exact bytes.
 There is no Final Cut Share click. The version's new library links to
@@ -69,9 +70,9 @@ ssh -NT -o ExitOnForwardFailure=yes \
 Set `AGENT_FINAL_CUT_SOCKET=/run/veetbot-editor/editor.sock` for those
 two services. Restart them and open a new chat to pin the tool catalog.
 Both socket endpoints must be available to their respective processes.
-No raw media travels through this connection. If a crash leaves a socket
-entry, stop the tunnel or worker, confirm the socket has no listener,
-remove the stale socket entry, and reconnect.
+No raw media travels through this connection. The Mac worker reclaims its
+own stale socket on restart. If the SSH tunnel leaves a stale socket at
+the remote end, confirm it has no listener before removing it and reconnecting.
 
 ## Supported footage and timing
 

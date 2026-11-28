@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import hashlib
 import json
 import os
 import stat
 import tempfile
+import time
 import uuid
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
@@ -33,6 +35,17 @@ def write_json(path: Path, value: Any) -> None:
     os.replace(output.name, path)
 
 
+def preview_verified(directory: Path) -> bool:
+    try:
+        expected = json.loads((directory / "verified.json").read_bytes())
+        if not isinstance(expected, str):
+            return False
+        with (directory / "preview.mp4").open("rb") as stream:
+            return hashlib.file_digest(stream, "sha256").hexdigest() == expected
+    except (FileNotFoundError, ValueError):
+        return False
+
+
 def choose_folder() -> Path:
     result = media.run(
         [
@@ -47,7 +60,13 @@ def choose_folder() -> Path:
 def compare_export(
     path: Path, shots: list[Shot], clips: dict[str, Clip], folder: Path, version: str, library: Path
 ) -> None:
-    root = ET.parse(path).getroot()
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW), "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("Select a regular Final Cut XML export.")
+        data = stream.read(8_000_001)
+    if len(data) > 8_000_000:
+        raise ValueError("Select a Final Cut XML export of at most 8 MB.")
+    root = ET.fromstring(data)
     projects = [
         p
         for lib in root.findall("library")
@@ -64,6 +83,10 @@ def compare_export(
         raise ValueError("Export contains no project sequence.")
     assets = {a.attrib["id"]: a for a in root.findall("./resources/asset")}
     fps = validate(shots, clips)
+    formats = {f.attrib["id"]: f for f in root.findall("./resources/format")}
+    fmt = formats.get(seq.get("format", ""))
+    if fmt is None or Fraction(fmt.get("frameDuration", "0s").removesuffix("s")) != 1 / fps:
+        raise ValueError("Round trip changed the sequence frame rate.")
     offset = 0
     nodes = seq.findall("./spine/*")
     if len(shots) != len(nodes):
@@ -108,6 +131,19 @@ class Editor:
         if state.is_symlink() or state.stat().st_uid != os.getuid() or state.stat().st_mode & 0o077:
             raise ValueError("Use a private state directory owned by this Mac account.")
 
+    @contextlib.contextmanager
+    def grant_lock(self, grant: str | None = None) -> Iterator[None]:
+        """Serialize grant rotation against short publication and handoff steps."""
+        with (self.state / "grant.lock").open("a+b") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX if grant is None else fcntl.LOCK_SH)
+            if grant is not None:
+                self.active(grant)
+            yield
+
+    def revoke(self) -> None:
+        with self.grant_lock():
+            (self.state / "active.json").unlink(missing_ok=True)
+
     def select(self, folder: Path, share_notes: bool = False) -> dict[str, Any]:
         folder = folder.resolve(strict=True)
         if self.state.resolve().is_relative_to(folder) or folder.is_relative_to(
@@ -129,7 +165,8 @@ class Editor:
                 "share_notes": share_notes,
             },
         )
-        write_json(self.state / "active.json", grant)
+        with self.grant_lock():
+            write_json(self.state / "active.json", grant)
         return {"grant": grant, "share_notes": share_notes}
 
     def active(self, grant: str | None = None) -> str:
@@ -160,26 +197,35 @@ class Editor:
     def inventory(self) -> dict[str, Any]:
         grant = self.active()
         clips: dict[str, Clip] = {}
+        deadline = time.monotonic() + 240
         skipped = 0
         with self.directory(grant) as (fd, _):
             for name in sorted(os.listdir(fd)):
+                if time.monotonic() >= deadline:
+                    raise ValueError(media.INVENTORY_TIMEOUT)
+                self.active(grant)
                 if name.startswith(".") or Path(name).suffix.lower() not in {
                     ".mov",
                     ".mp4",
                     ".m4v",
                 }:
                     continue
-                if not stat.S_ISREG(os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode):
-                    continue
-                if len(clips) >= 128:
-                    raise ValueError("Select a folder with at most 128 clips.")
                 try:
-                    c = media.inspect_clip(grant, fd, name)
+                    if not stat.S_ISREG(os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode):
+                        continue
+                    c = media.inspect_clip(grant, fd, name, deadline=deadline)
+                except TimeoutError as exc:
+                    raise ValueError(media.INVENTORY_TIMEOUT) from exc
                 except (ValueError, KeyError, OSError, ZeroDivisionError):
                     skipped += 1
                     continue
+                if len(clips) >= 128:
+                    raise ValueError("Select a folder with at most 128 clips.")
                 clips[c.id] = c
-        write_json(self.state / grant / "clips.json", {k: v.model_dump() for k, v in clips.items()})
+        with self.grant_lock(grant):
+            write_json(
+                self.state / grant / "clips.json", {k: v.model_dump() for k, v in clips.items()}
+            )
         return {
             "grant": grant,
             "unsupported": skipped,
@@ -229,8 +275,8 @@ class Editor:
                         notes = observations(work, self.model, shot.first, fps, bool(c.channels))
                         write_json(work / "notes.json", notes)
                         write_json(work / "range.json", shot.model_dump())
-                    self.active(grant)
-                    work.rename(dest)
+                    with self.grant_lock(grant):
+                        work.rename(dest)
         self.active(grant)
         result: dict[str, Any] = {
             "excerpt": self.url(grant, dest / "excerpt.mp4"),
@@ -238,7 +284,6 @@ class Editor:
         }
         if analyze:
             result["evidence_id"] = dest.name
-            result["local_notes"] = self.url(grant, dest / "notes.json")
             if json.loads((project / "grant.json").read_bytes())["share_notes"]:
                 result["observations"] = json.loads((dest / "notes.json").read_bytes())
             else:
@@ -268,13 +313,23 @@ class Editor:
         selected: list[dict[str, Any]] = []
         for index in order:
             s = ranges[index]
+            n = min(remaining, s.end - s.first)
+            end = s.first + n
             if any(
-                prior["clip"] == s.clip and prior["first"] < s.end and s.first < prior["end"]
+                prior["clip"] == s.clip and prior["first"] < end and s.first < prior["end"]
                 for prior in selected
             ):
                 continue
-            n = min(remaining, s.end - s.first)
-            selected.append(s.model_copy(update={"end": s.first + n}).model_dump())
+            fade_in = min(s.fade_in, n)
+            trimmed = Shot(
+                clip=s.clip,
+                first=s.first,
+                end=end,
+                gain_db=s.gain_db,
+                fade_in=fade_in,
+                fade_out=min(s.fade_out, n - fade_in),
+            )
+            selected.append(trimmed.model_dump())
             remaining -= n
             if not remaining:
                 break
@@ -292,8 +347,12 @@ class Editor:
             "fps": str(fps),
             "shots": [s.model_dump() for s in shots],
         }
-        version = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()[:32]
-        dest = project / version
+        while True:
+            version = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()[:32]
+            dest = project / version
+            if not dest.exists() or preview_verified(dest):
+                break
+            plan["replaces_damaged"] = version
         with self.directory(grant) as (fd, folder):
             for cid in {s.clip for s in shots}:
                 with media.source(fd, clips[cid].name, clips[cid].fingerprint):
@@ -321,8 +380,8 @@ class Editor:
                             work / "verified.json",
                             hashlib.file_digest(stream, "sha256").hexdigest(),
                         )
-                    self.active(grant)
-                    work.rename(dest)
+                    with self.grant_lock(grant):
+                        work.rename(dest)
         return {
             "version": version,
             "parent": parent,
@@ -353,14 +412,14 @@ class Editor:
                 with media.source(fd, clips[s.clip].name, clips[s.clip].fingerprint):
                     pass
         preview = dest / "preview.mp4"
-        with preview.open("rb") as stream:
-            if hashlib.file_digest(stream, "sha256").hexdigest() != json.loads(
-                (dest / "verified.json").read_bytes()
-            ):
-                raise ValueError(
-                    "The approved preview changed. Render a new version before delivery."
-                )
-        self.active(grant)
+        if not preview_verified(dest):
+            raise ValueError(
+                "The approved preview changed. Render the same edit and approve its new preview."
+            )
+        with self.grant_lock(grant):
+            return self._handoff(grant, version, dest, preview)
+
+    def _handoff(self, grant: str, version: str, dest: Path, preview: Path) -> dict[str, Any]:
         movie = dest / "movie.mp4"
         # The approved preview is already the full resolution, decoded-and-verified render.
         if not movie.exists():
@@ -376,19 +435,27 @@ class Editor:
                 claim.flush()
                 os.fsync(claim.fileno())
             # LaunchServices sends Open Document; delivery of that event is not import proof.
-            with contextlib.suppress(ValueError):
+            try:
                 media.run(
                     ["/usr/bin/open", "-b", "com.apple.FinalCut", str(dest / "timeline.fcpxml")]
                 )
+            except ValueError:
+                (dest / "launch-failed").touch()
+        status = "Unconfirmed. Export this project as XML from Final Cut, then reconcile."
+        if (dest / "confirmed").exists():
+            status = "confirmed"
+        elif (dest / "launch-failed").exists():
+            status = (
+                "Unconfirmed. Final Cut launch failed. Check the version's library first. "
+                "If the project is absent, manually open its timeline XML once."
+            )
         return {
             "movie": self.url(grant, movie),
             "timeline": self.url(grant, dest / "timeline.fcpxml"),
             "movie_verified": True,
             "version": version,
             "timeline_written": True,
-            "import": "confirmed"
-            if (dest / "confirmed").exists()
-            else "Unconfirmed. Export this project as XML from Final Cut, then reconcile.",
+            "import": status,
         }
 
     def reconcile(self, grant: str, version: str) -> dict[str, Any]:
@@ -410,7 +477,7 @@ class Editor:
         shots = self.plan(grant, version)
         if export.suffix == ".fcpxmld":
             export = export / "Info.fcpxml"
-        if export.suffix != ".fcpxml" or export.stat().st_size > 8_000_000:
+        if export.suffix != ".fcpxml":
             raise ValueError("Choose a Final Cut XML export of this project.")
         with self.directory(grant) as (_, folder):
             try:
@@ -424,8 +491,8 @@ class Editor:
                 )
             except (ET.ParseError, KeyError, ZeroDivisionError) as exc:
                 raise ValueError("Choose valid project XML re-exported by Final Cut.") from exc
-        self.active(grant)
-        (self.state / grant / version / "confirmed").touch()
+        with self.grant_lock(grant):
+            (self.state / grant / version / "confirmed").touch()
         return {
             "version": version,
             "import": "confirmed",

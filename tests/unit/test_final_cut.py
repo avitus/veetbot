@@ -119,6 +119,13 @@ def test_round_trip_compares_the_source_link_and_every_rational_frame(tmp_path: 
     ET.SubElement(exported_library, "event").append(project)
     tree.write(export)
     compare_export(export, shots, clips, tmp_path, version, library)
+    fmt = tree.find("./resources/format")
+    assert fmt is not None
+    fmt.set("frameDuration", "1001/60000s")
+    tree.write(export)
+    with pytest.raises(ValueError, match="frame rate"):
+        compare_export(export, shots, clips, tmp_path, version, library)
+    fmt.set("frameDuration", "2002/60000s")
     node = tree.find(".//spine/asset-clip")
     assert node is not None
     node.set("start", f"{(clip.origin + 11) / fps}s")
@@ -172,6 +179,8 @@ def test_delivery_replay_after_lost_ack_does_not_reopen_final_cut(
     assert delivered["timeline"].endswith(f"/{version}/timeline.fcpxml")
     assert "unconfirmed" in delivered["import"].lower()
     assert "unconfirmed" in editor.deliver(grant, version)["import"].lower()
+    assert "manually" in delivered["import"].lower()
+    assert editor.deliver(grant, version)["import"] == delivered["import"]
     assert len(calls) == 1
     assert (work / "movie.mp4").samefile(work / "preview.mp4")
     original.unlink()
@@ -226,3 +235,183 @@ def test_local_recommendations_return_only_reviewed_nonoverlapping_ranges(
     ]
     assert result["additional_frames_needed"] == 0
     assert set(result) == {"shots", "additional_frames_needed"}
+    shots = [
+        Shot(clip=ids[0], first=30, end=55),
+        Shot(clip=ids[0], first=0, end=50, fade_in=40, fade_out=10),
+    ]
+    for key, shot in zip(evidence[:2], shots, strict=True):
+        write_json(editor.state / grant / key / "range.json", shot.model_dump())
+    monkeypatch.setattr(observations, "rank", lambda *_args: [0, 1])
+    prefix = editor.recommend(grant, evidence[:2], 2)
+    checked = [Shot.model_validate(row) for row in prefix["shots"]]
+    assert [(s.first, s.end) for s in checked] == [(30, 55), (0, 25)]
+    assert prefix["additional_frames_needed"] == 0
+
+
+def test_inventory_skips_disappearing_clip_and_bounds_probing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    from final_cut import media
+
+    editor = Editor(tmp_path / "state", 59381)
+    folder = tmp_path / "raw"
+    folder.mkdir()
+    editor.select(folder)
+    monkeypatch.setattr(os, "listdir", lambda fd: ["gone.mov"])
+    assert editor.inventory()["unsupported"] == 1
+    (folder / "gone.mov").touch()
+
+    def expire(*args: object, **kwargs: object) -> Clip:
+        assert kwargs.get("deadline") is not None
+        raise TimeoutError
+
+    monkeypatch.setattr(media, "inspect_clip", expire)
+    with pytest.raises(ValueError, match="smaller folder"):
+        editor.inventory()
+
+
+@pytest.mark.asyncio
+async def test_mac_socket_failure_carries_effect_status(tmp_path: Path) -> None:
+    import socket
+    import threading
+
+    from mcp.types import CallToolResult
+
+    endpoint = tmp_path / "editor.sock"
+    server = create_server(endpoint)
+    args = {"grant": "a" * 32, "version": "b" * 32}
+    result = await server.call_tool("deliver", args)
+    assert isinstance(result, CallToolResult) and result.is_error
+    assert result.structured_content == {"effect_status": "not_applied"}
+    with socket.socket(socket.AF_UNIX) as listener:
+        listener.bind(str(endpoint))
+        listener.listen()
+
+        def drop() -> None:
+            connection, _ = listener.accept()
+            with connection:
+                connection.recv(65536)
+
+        thread = threading.Thread(target=drop)
+        thread.start()
+        result = await server.call_tool("deliver", args)
+        thread.join(5)
+    assert isinstance(result, CallToolResult) and result.is_error
+    assert result.structured_content == {"effect_status": "unknown"}
+
+
+def test_socket_restart_preserves_active_listeners_and_regular_files(tmp_path: Path) -> None:
+    import socket
+
+    from final_cut import worker
+
+    path = tmp_path / "editor.sock"
+    with socket.socket(socket.AF_UNIX) as listener:
+        listener.bind(str(path))
+        listener.listen()
+        with pytest.raises(ValueError, match="running"):
+            worker.clear_stale_socket(path)
+    worker.clear_stale_socket(path)
+    assert not path.exists()
+    path.touch()
+    with pytest.raises(ValueError, match="socket"):
+        worker.clear_stale_socket(path)
+    assert path.is_file()
+
+
+def test_damaged_preview_renders_a_new_immutable_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from final_cut import media
+
+    editor = Editor(tmp_path / "state", 59381)
+    folder = tmp_path / "raw"
+    folder.mkdir()
+    original = folder / "clip.mov"
+    original.touch()
+    grant = editor.select(folder)["grant"]
+    cid = "a" * 32
+    c = Clip(
+        id=cid,
+        name=original.name,
+        fingerprint=fingerprint(original.stat()),
+        fps="25",
+        frames=75,
+        origin=0,
+        width=640,
+        height=360,
+        channels=1,
+    )
+    write_json(editor.state / grant / "clips.json", {cid: c.model_dump()})
+    shots = [Shot(clip=cid, first=0, end=25)]
+    monkeypatch.setattr(media, "run", lambda *_args: b"")
+    monkeypatch.setattr(
+        media, "render", lambda fd, shots, clips, output: output.write_bytes(b"video")
+    )
+    first = editor.cut(grant, shots)["version"]
+    path = editor.state / grant / first / "preview.mp4"
+    path.write_bytes(b"damaged")
+    fresh = editor.cut(grant, shots)["version"]
+    assert fresh != first and editor.plan(grant, fresh) == shots
+    assert editor.cut(grant, shots)["version"] == fresh
+    assert path.read_bytes() == b"damaged"
+
+
+def test_export_input_size_policy(tmp_path: Path) -> None:
+    export = tmp_path / "oversize.fcpxml"
+    with export.open("wb") as f:
+        f.truncate(8_000_001)
+    with pytest.raises(ValueError, match="8 MB"):
+        compare_export(export, [], {}, tmp_path, "", tmp_path)
+
+
+def test_playback_withdraws_active_stream_and_never_serves_notes(tmp_path: Path) -> None:
+    import http.client
+    import socket
+    import threading
+    from http.server import HTTPServer
+
+    from final_cut.worker import playback_handler
+
+    editor = Editor(tmp_path / "state", 59381)
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    grant = editor.select(raw)["grant"]
+    key = "f" * 32
+    artifacts = editor.state / grant / key
+    artifacts.mkdir()
+    (artifacts / "notes.json").write_text("Local notes")
+    size = 16 * 1024 * 1024
+    with (artifacts / "movie.mp4").open("wb") as movie:
+        movie.truncate(size)
+    handler = playback_handler(editor)
+    address = ("127.0.0.1", editor.port)
+    with HTTPServer(address, handler, bind_and_activate=False) as server:
+
+        def handle(connection: socket.socket) -> None:
+            with connection:
+                handler(connection, address, server)
+
+        for name in ("notes.json", "movie.mp4"):
+            reader, writer = socket.socketpair()
+            with reader, writer:
+                reader.settimeout(10)
+
+                thread = threading.Thread(target=handle, args=(writer,))
+                thread.start()
+                client = http.client.HTTPConnection(*address)
+                client.sock = reader
+                try:
+                    client.request("GET", f"/{grant}/{key}/{name}")
+                    with client.getresponse() as response:
+                        if name == "notes.json":
+                            assert response.status == 404
+                        else:
+                            assert response.status == 200
+                            editor.revoke()
+                            assert len(response.read(size)) < size
+                finally:
+                    client.close()
+                    thread.join(5)
