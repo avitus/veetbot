@@ -2545,7 +2545,10 @@ final class ConversationNavigationUITests: XCTestCase {
         destination.typeKey(.return, modifierFlags: [])
         allow.click()
 
-        let selected = app.staticTexts.containing(NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", directory.lastPathComponent, directory.lastPathComponent)).firstMatch
+        let selected = app.staticTexts.matching(NSPredicate(
+            format: "value CONTAINS %@ OR label CONTAINS %@",
+            directory.lastPathComponent, directory.lastPathComponent
+        )).firstMatch
         XCTAssertTrue(selected.waitForExistence(timeout: 5))
         app.buttons["Remove access"].click()
         XCTAssertTrue(choose.waitForExistence(timeout: 5))

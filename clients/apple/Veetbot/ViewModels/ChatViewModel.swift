@@ -621,10 +621,10 @@ public final class ChatViewModel: ObservableObject {
             )
             guard generation == connectionGeneration else { return }
             notificationFeatureAvailable = outcome != .unsupported
-            if case .registered(let deviceID) = outcome {
+            if case .registered(let deviceID, let folderCapability) = outcome {
                 registeredDeviceID = deviceID
                 #if os(macOS)
-                registeredFolderCapability = descriptor.capabilities.first { $0.hasPrefix("device.folder.write_") }
+                registeredFolderCapability = folderCapability
                 #endif
             }
         } catch {

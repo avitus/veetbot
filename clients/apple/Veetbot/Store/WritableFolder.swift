@@ -11,8 +11,8 @@ struct WritableFolder: Codable {
     let account: String
     private static let key = "veetbot.mac.writableFolder"
 
-    static var registrationRevision: String? {
-        UserDefaults.standard.string(forKey: key + ".revision")
+    static func registrationRevision(defaults: UserDefaults) -> String? {
+        defaults.string(forKey: key + ".revision")
     }
 
     static func accountKey(server: URL, token: String) -> String {

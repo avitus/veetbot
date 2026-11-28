@@ -1278,7 +1278,14 @@ any provider-backed memory evidence pinned to that version before activation.
 The owner chooses **Settings → Folder access** separately on each Mac. Verify
 delivery with a new file and a replacement in the selected folder. Removing
 access on one Mac revokes that Mac's grant immediately. The client keeps the
-folder path and security-scoped bookmark on that Mac.
+folder path and security-scoped bookmark on that Mac. Before a manual database
+downgrade, remove folder access on each registered Mac and let it sync. The
+downgrade refuses to proceed while a device still advertises a folder grant.
+The previous binary requires the previous schema revision even when folder
+access was never enabled. Use the manual rollback procedure below.
+A Mac that reaches a server with folder access disabled or unsupported keeps
+its local selection and registers for ordinary push notifications. Use **Retry
+device registration** in Settings after the server enables folder access.
 
 ## The SMS capture ceremony
 

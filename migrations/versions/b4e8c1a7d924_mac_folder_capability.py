@@ -1,5 +1,6 @@
 """Admit one scoped folder grant on a registered Mac."""
 
+import sqlalchemy as sa
 from alembic import op
 
 revision = "b4e8c1a7d924"
@@ -25,10 +26,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        "UPDATE devices SET capabilities = '[]'::jsonb "
-        "WHERE capabilities->>0 LIKE 'device.folder.%'"
-    )
+    op.execute("SET LOCAL row_security = off")
+    op.execute("LOCK TABLE devices IN ACCESS EXCLUSIVE MODE")
+    if op.get_bind().scalar(
+        sa.text(
+            "SELECT EXISTS (SELECT 1 FROM devices WHERE capabilities->>0 LIKE 'device.folder.%')"
+        )
+    ):
+        raise RuntimeError("Remove registered Mac folder grants before downgrade.")
+
     op.drop_constraint(op.f(_NAME), "devices", type_="check")
     op.create_check_constraint(
         op.f(_NAME),

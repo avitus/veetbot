@@ -5,6 +5,55 @@ import Testing
 @testable import VeetbotCore
 
 @Suite(.serialized) struct NotificationCoordinatorTests {
+    #if os(macOS)
+    @Test @MainActor
+    func testDeferredMacRegistrationsKeepTheirSelectionRevisions() async throws {
+        // The queued descriptors can reach the coordinator after both changes occurred.
+        let suite = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let empty = AppleDeviceDescriptor.current(defaults: defaults)
+        let grant = try WritableFolder.select(FileManager.default.temporaryDirectory, account: "owner", defaults: defaults)
+        let selected = AppleDeviceDescriptor.current(capabilities: [grant.capability], defaults: defaults)
+        WritableFolder.remove(defaults: defaults)
+        let removed = AppleDeviceDescriptor.current(defaults: defaults)
+
+        let coordinator = DeviceRegistrationCoordinator(
+            identityStore: InMemoryInstallationIdentityStore(installationID: UUID().uuidString)
+        )
+        let api = FakeDeviceRegistrationAPI(deviceID: UUID())
+        for descriptor in [empty, selected, removed, removed] {
+            _ = try await coordinator.register(deviceToken: Data([1]), descriptor: descriptor, using: api)
+        }
+        let registrations = await api.registrations()
+        #expect(registrations[0].idempotencyKey != registrations[2].idempotencyKey)
+        #expect(registrations[2].idempotencyKey == registrations[3].idempotencyKey)
+    }
+
+    @Test(arguments: ["device.folder_disabled", "device.capability_unknown"])
+    @MainActor func testMacRegistersForPushWhenFolderAccessIsUnavailable(reason: String) async throws {
+        let deviceID = UUID()
+        let api = FakeDeviceRegistrationAPI(deviceID: deviceID, rejectedCapabilityReason: reason)
+        let coordinator = DeviceRegistrationCoordinator(
+            identityStore: InMemoryInstallationIdentityStore(installationID: UUID().uuidString)
+        )
+        let grant = "device.folder.write_" + String(repeating: "b", count: 32)
+        let outcome = try await coordinator.register(
+            deviceToken: Data([1]), descriptor: .current(capabilities: [grant]), using: api
+        )
+        #expect(outcome == .registered(deviceID))
+        await api.setRejectedCapabilityReason(nil)
+        let restored = try await coordinator.register(
+            deviceToken: Data([1]), descriptor: .current(capabilities: [grant]), using: api
+        )
+        #expect(restored == .registered(deviceID, folderCapability: grant))
+        let attempts = await api.registrations()
+        #expect(attempts[0].idempotencyKey != attempts[2].idempotencyKey)
+        #expect(attempts.map(\.body.capabilities) == [[grant], [], [grant]])
+        #expect(attempts.map(\.body.pushToken) == ["01", "01", "01"])
+    }
+    #endif
+
     @Test
     func testRegistrationMintsOneInstallationIdentityUploadsEveryTokenAndRevokes() async throws {
         let installationID = "00000000-0000-0000-0000-000000000123"
@@ -286,10 +335,12 @@ private actor FakeDeviceRegistrationAPI: DeviceRegistrationAPI {
 
     private let deviceID: UUID
     private let registrationError: Error?
+    private var rejectedCapabilityReason: String?
     private var recordedRegistrations: [Registration] = []
     private var recordedRevocations: [UUID] = []
 
-    init(deviceID: UUID, registrationError: Error? = nil) {
+    init(deviceID: UUID, registrationError: Error? = nil, rejectedCapabilityReason: String? = nil) {
+        self.rejectedCapabilityReason = rejectedCapabilityReason
         self.deviceID = deviceID
         self.registrationError = registrationError
     }
@@ -302,10 +353,18 @@ private actor FakeDeviceRegistrationAPI: DeviceRegistrationAPI {
         recordedRegistrations.append(
             Registration(body: body, idempotencyKey: idempotencyKey)
         )
+        if !body.capabilities.isEmpty, let reason = rejectedCapabilityReason {
+            throw HTTPTransportError.api(APIError(
+                code: .unknown("device_validation_error"), message: "Capability rejected",
+                details: APIErrorDetails(values: ["reason": .string(reason)]),
+                requestID: "fixture", statusCode: 422
+            ))
+        }
         return DeviceView.fixture(
             id: deviceID,
             clientDeviceID: body.clientDeviceID,
-            pushEnvironment: body.pushEnvironment
+            pushEnvironment: body.pushEnvironment,
+            capabilities: body.capabilities
         )
     }
 
@@ -317,6 +376,8 @@ private actor FakeDeviceRegistrationAPI: DeviceRegistrationAPI {
         recordedRevocations.append(deviceID)
         return DeviceView.fixture(id: deviceID)
     }
+
+    func setRejectedCapabilityReason(_ reason: String?) { rejectedCapabilityReason = reason }
 
     func registrations() -> [Registration] { recordedRegistrations }
     func revokedDeviceIDs() -> [UUID] { recordedRevocations }

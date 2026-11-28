@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Any
 
 import pytest
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from sqlalchemy import select, text
+from sqlalchemy.engine import Connection
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.device_channel import PushWakeDeviceChannel
@@ -202,7 +206,15 @@ async def test_postgres_device_row_round_trips_declared_capabilities() -> None:
                 raise _RollbackContractError
 
 
-async def test_postgres_round_trips_a_mac_folder_grant() -> None:
+async def test_postgres_preserves_a_mac_folder_grant_across_refused_downgrade(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = import_module("migrations.versions.b4e8c1a7d924_mac_folder_capability")
+
+    def downgrade(connection: Connection) -> None:
+        monkeypatch.setattr(migration, "op", Operations(MigrationContext.configure(connection)))
+        migration.downgrade()
+
     grant = "device.folder.write_0123456789abcdef0123456789abcdef"
     mac = Device.model_validate(
         device().model_dump() | {"kind": "desktop", "platform": "macos", "capabilities": [grant]}
@@ -211,6 +223,10 @@ async def test_postgres_round_trips_a_mac_folder_grant() -> None:
         with pytest.raises(_RollbackContractError):
             async with composition.uow_factory() as uow:
                 registered = await uow.devices.upsert(mac, principal())
+                assert isinstance(uow, PostgresUnitOfWork)
+                connection = await uow.session.connection()
+                with pytest.raises(RuntimeError, match="folder grants"):
+                    await connection.run_sync(downgrade)
                 assert (await uow.devices.get(registered.id, principal())).capabilities == {grant}
                 raise _RollbackContractError
 
