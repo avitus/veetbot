@@ -53,9 +53,9 @@ Three consequences follow.
 
 ## The project file
 
-`pyproject.toml` is the one place a version is pinned. Section 2.2 names
-the stack; this fixes the parts of it that a lockfile alone does not
-settle.
+`pyproject.toml` pins the stack from Section 2.2 and defines the wheel.
+It packages the agent core, the Gmail, Bland, Scale VP and Calendar MCP
+adapters, and the Final Cut adapter and Mac worker (ADR-0359).
 
 ```text
 requires-python      >=3.12

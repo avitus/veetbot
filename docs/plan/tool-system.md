@@ -3009,3 +3009,13 @@ session pins:
 Production has the setting on since 2026-11-23 (ADR-0342, Implementation
 status). `AGENT_SCHEDULE_SCRIPTS_ENABLED` is separate and off by default; it
 needs the code mode setting and a schedule role that holds `sandbox.execute`.
+
+
+## Final Cut editing
+
+The owner-authorized editing worker provides a foreground MCP editing skill
+under a separate read grant on the selected Mac. The API and interactive
+worker compose the operator row when configured with its private socket.
+The Mac returns local playback links and stores versioned plans. Refer to
+[the decision](../adr/0359-mac-final-cut-editing.md) and
+[Mac setup and use](../final-cut-editing.md).

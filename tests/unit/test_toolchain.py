@@ -1881,6 +1881,7 @@ def test_project_metadata_and_test_layout_match_the_toolchain_spec() -> None:
         "src/bland_mcp",
         "src/svp_mcp",
         "src/calendar_mcp",
+        "src/final_cut",
     ]
     assert project["tool"]["pytest"]["ini_options"]["addopts"] == (
         "--strict-markers --strict-config"

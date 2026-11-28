@@ -1,3 +1,4 @@
+# ADR-0359: Owner-authorized Final Cut editing on the selected Mac. No gate moves.
 # ADR-0356: The owner authorized Mac folder selection and standing create/replace
 # access on 2026-11-27 as an extension of the device channel. No gate moves.
 # ADR-0355: Owner-authorized W3/W6 continuation adds reviewed expected-row

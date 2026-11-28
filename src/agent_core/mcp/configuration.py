@@ -256,3 +256,20 @@ def calendar_server_configs(tenant_id: str, *, enabled: bool = True) -> tuple[MC
             required_scopes=frozenset({"mcp.calendar_read.use"}),
         ),
     )
+
+
+def final_cut_config(tenant_id: str, socket_path: str) -> MCPServerConfig:
+    """Only the operator supplies the socket connected to the owner's Mac."""
+    return MCPServerConfig(
+        tenant_id=tenant_id,
+        server_id="final_cut",
+        transport=MCPTransport.STDIO,
+        endpoint=shlex.join([sys.executable, "-m", "final_cut.server", socket_path]),
+        operator_configured=True,
+        required_scopes=frozenset({"mcp.final_cut.use"}),
+        side_effect=SideEffectClass.EXTERNAL_WRITE,
+        risk=RiskLevel.HIGH,
+        idempotency=IdempotencyClass.CONDITIONALLY_IDEMPOTENT,
+        timeout_seconds=310,
+        maximum_output_bytes=32768,
+    )

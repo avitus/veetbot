@@ -201,6 +201,7 @@ class Settings:
     call_result_follow_up_enabled: bool = True
     call_configuration: CallConfiguration | None = None
     call_webhook_secret: SecretStr | None = None
+    final_cut_socket: str | None = None
     calendar_enabled: bool = False
     svp_enabled: bool = False
     # ADR-0255: owner-added MCP servers, the key sealing their tokens, and the
@@ -2081,6 +2082,9 @@ def _load_settings(
         or values.get("BLAND_WEBHOOK_SECRET_FILE")
     ):
         raise ConfigurationError("Bland configuration requires AGENT_CALL_ENABLED=1")
+    final_cut_socket = values.get("AGENT_FINAL_CUT_SOCKET", "").strip() or None
+    if final_cut_socket and not Path(final_cut_socket).is_absolute():
+        raise ConfigurationError("AGENT_FINAL_CUT_SOCKET requires an absolute socket path")
     calendar_enabled = _parse_flag(values, "AGENT_CALENDAR_ENABLED")
     calendar_file = values.get("CALENDAR_READ_CREDENTIAL_FILE", "").strip()
     if calendar_file and not calendar_enabled:
@@ -2441,6 +2445,7 @@ def _load_settings(
         ),
         call_configuration=call_configuration,
         call_webhook_secret=call_webhook_secret,
+        final_cut_socket=final_cut_socket,
         calendar_enabled=calendar_enabled,
         svp_enabled=svp_enabled,
         mcp_servers_enabled=mcp_servers_enabled,

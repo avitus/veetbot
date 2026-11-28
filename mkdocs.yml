@@ -124,6 +124,7 @@ nav:
       - Events: events.md
       - Downloadable Client: client.md
       - Apple Client: apple-client.md
+      - Final Cut editing: final-cut-editing.md
   - Security: security.md
   - Agent-Written Jobs: jobs.md
   - Integration Keys: integration-keys.md
@@ -497,4 +498,5 @@ nav:
       - "ADR-0356 — Write to a folder selected on a Mac": adr/0356-mac-folder-access.md
       - "ADR-0357 — Open generated HTML pages beside a Mac chat": adr/0357-generated-page-window.md
       - "ADR-0358 — One approval for a MagicPath design request": adr/0358-magicpath-design-request-approval.md
+      - "ADR-0359 — Edit selected footage on the Final Cut Mac": adr/0359-mac-final-cut-editing.md
   - Changelog: changelog.md

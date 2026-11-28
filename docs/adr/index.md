@@ -31,6 +31,7 @@ title: Architecture Decisions
 - [ADR-0356: Write to a folder selected on a Mac (Proposed)](0356-mac-folder-access.md)
 - [ADR-0357: Open generated HTML pages beside a Mac chat (Proposed)](0357-generated-page-window.md)
 - [ADR-0358: One approval for a MagicPath design request (Proposed)](0358-magicpath-design-request-approval.md)
+- [ADR-0359: Edit selected footage on the Final Cut Mac (Proposed)](0359-mac-final-cut-editing.md)
 
 ADRs record deliberate architectural decisions. They are canonical Markdown. A
 material architectural change requires a new ADR; requirements in the
