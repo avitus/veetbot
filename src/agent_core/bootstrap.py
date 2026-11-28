@@ -667,6 +667,7 @@ from agent_core.mcp.configuration import (
     calendar_server_configs,
     calling_server_configs,
     email_server_configs,
+    final_cut_config,
     svp_server_configs,
     validate_mcp_config,
 )
@@ -3459,7 +3460,10 @@ async def _compose(
             config
             for config in await uow.mcp_servers.list_enabled(principal.tenant_id)
             # ADR-0255: owner-added rows exist only while their feature is on.
-            if settings.mcp_servers_enabled or not config.owner_managed
+            if (settings.mcp_servers_enabled or not config.owner_managed)
+            and (
+                config.owner_managed or config.server_id != "final_cut" or settings.final_cut_socket
+            )
         ]
     for config in effective_mcp_configs:
         validate_mcp_config(config, destination_allowed=destination_allowed)
@@ -5004,6 +5008,7 @@ async def _compose(
             email_draft_interceptor=lambda *args: email_draft_files.invoke(*args),
             access_tokens=owner_mcp_servers,
             owner_servers_enabled=settings.mcp_servers_enabled,
+            final_cut_enabled=bool(settings.final_cut_socket),
         )
         skill_catalogs = SkillCatalogService(
             uow_factory,
@@ -7281,7 +7286,18 @@ async def build(
             update={"scopes": {*effective_principal.scopes, "mcp.calendar_read.use"}},
             deep=True,
         )
+    if any(row.server_id == "final_cut" for row in mcp_servers):
+        raise ConfigurationError("The Final Cut row requires AGENT_FINAL_CUT_SOCKET")
+    final_cut_rows: tuple[MCPServerConfig, ...] = ()
+    if effective_settings.final_cut_socket:
+        final_cut_rows = (
+            final_cut_config(effective_principal.tenant_id, effective_settings.final_cut_socket),
+        )
+        effective_principal = effective_principal.model_copy(
+            update={"scopes": {*effective_principal.scopes, "mcp.final_cut.use"}}, deep=True
+        )
     effective_mcp_servers = (
+        *final_cut_rows,
         *composed_calendar_rows,
         *mcp_servers,
         *composed_email_rows,

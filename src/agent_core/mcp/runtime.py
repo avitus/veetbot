@@ -211,6 +211,7 @@ class MCPRuntime:
         email_draft_interceptor: CallInterceptor | None = None,
         access_tokens: MCPAccessTokens | None = None,
         owner_servers_enabled: bool = False,
+        final_cut_enabled: bool = False,
     ) -> None:
         """Share bounded preparation capacity across this runtime's sessions."""
         if not isfinite(idle_timeout_seconds) or idle_timeout_seconds <= 0:
@@ -254,6 +255,7 @@ class MCPRuntime:
         # ADR-0255: owner-added rows, and the sealed sign-ins their tokens come from.
         self._access_tokens = access_tokens
         self._owner_servers_enabled = owner_servers_enabled
+        self._final_cut_enabled = final_cut_enabled
         self._sessions: dict[UUID, dict[str, _Connection]] = {}
         # Sessions whose every enabled server was attempted, and the servers
         # attempted for each session, including scoped typed-task preparation.
@@ -323,7 +325,8 @@ class MCPRuntime:
         return [
             config
             for config in await uow.mcp_servers.list_enabled(tenant_id)
-            if self._owner_servers_enabled or not config.owner_managed
+            if (self._owner_servers_enabled or not config.owner_managed)
+            and (config.owner_managed or config.server_id != "final_cut" or self._final_cut_enabled)
         ]
 
     async def _owner_withdrawal(self, pinned: MCPServerConfig) -> str | None:

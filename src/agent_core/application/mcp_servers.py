@@ -153,7 +153,7 @@ class MCPServerSettingsService:
             validate_owner_server_url(url)
         except ValueError as exc:
             raise MCPServerSettingsError(str(exc)) from exc
-        if server_id.startswith(RESERVED_MCP_SERVER_PREFIXES):
+        if server_id == "final_cut" or server_id.startswith(RESERVED_MCP_SERVER_PREFIXES):
             raise ConflictError("MCP server name is reserved", reason="mcp_server_reserved")
         async with self._uow_factory() as uow:
             existing = await uow.mcp_servers.get(principal.tenant_id, server_id)
